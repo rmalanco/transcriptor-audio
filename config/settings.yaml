@@ -1,0 +1,35 @@
+# Configuración por defecto
+modelo:
+  nombre: "large-v3-turbo"  # mejor calidad; en CPU ~1x tiempo real. "small" ~3x más rápido, menos preciso
+  dispositivo: "cpu"        # cpu, cuda, auto
+  compute_type: "int8"      # int8, int16, float16, float32
+
+audio:
+  sample_rate: 16000
+  chunk_duration: 30        # segundos por chunk para archivos largos
+
+transcripcion:
+  idioma: "es"              # auto, es, en, fr, etc.
+  task: "transcribe"        # transcribe, translate
+  beam_size: 5
+  best_of: 5
+  temperature: 0.0
+  condition_on_previous_text: false   # true puede entrar en bucles de repetición ("la la la…") en audios largos
+  compression_ratio_threshold: 2.4
+  logprob_threshold: -1.0
+  no_speech_threshold: 0.6
+
+salida:
+  formato: "txt"            # txt, srt, vtt, json
+  incluir_timestamps: true
+  palabra_por_palabra: false
+ia:
+  modelo: "auto"                 # "auto" (Copilot elige, 10 % menos de peticiones premium) u otro de `python -m src.main --copilot-modelos`
+  copilot_enterprise_url: ""     # solo si la cuenta es de GitHub Enterprise con dominio propio (p. ej. empresa.ghe.com)
+  temperatura: 0.2               # se omite automáticamente si el modelo no la admite
+  max_caracteres_bloque: 60000   # transcripciones más largas se procesan por partes (de tamaño parejo)
+  peticiones_paralelas: 3        # partes analizadas a la vez; bájalo si Copilot responde 429 (límite)
+  revision_fidelidad: false      # 2.ª pasada contra la transcripción (una petición más por documento)
+
+historial:
+  ruta: "data/historial.db"      # relativa a la carpeta del proyecto

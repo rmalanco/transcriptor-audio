@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Modelo cache
+~/.cache/faster-whisper/
+models/
+
+# Archivos temporales
+/tmp/chunk_*.wav
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Output
+*.txt
+*.srt
+*.vtt
+*.json
+!config/settings.yaml
+!README.md
+!requirements.txt
+# Secretos
+.env
+
+# Historial local (SQLite)
+data/
