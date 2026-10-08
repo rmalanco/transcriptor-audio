@@ -4,11 +4,10 @@
 import argparse
 import logging
 import sys
-from pathlib import Path
 
 from src.registro import configurar_logging
 from src.transcriber import TranscriptorAudio, cargar_configuracion
-from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion, InfoArchivo
+from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
 
 MODELOS_DISPONIBLES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3"]

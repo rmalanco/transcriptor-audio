@@ -42,3 +42,19 @@ Thumbs.db
 
 # Historial local (SQLite)
 data/
+
+# Tests / herramientas locales
+.pytest_cache/
+.claude/
+*.db
+*.sqlite*
+
+# Audio/video (nunca subir grabaciones)
+*.m4a
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.mp4
+*.mkv
+*.webm

@@ -1,6 +1,5 @@
 """Utilidades para el transcriptor."""
 
-import os
 import ffmpeg
 from pathlib import Path
 from typing import Optional

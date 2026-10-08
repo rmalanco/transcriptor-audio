@@ -1,21 +1,39 @@
-# Transcriptor de Audio/Video a Texto
+# Transcriptor de audio y video
 
-Sistema base para transcribir archivos de audio y video usando faster-whisper.
+App de escritorio en Python que **transcribe audio y video en local** con
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) y genera un **resumen** y una **minuta** de la
+reunión con los modelos de **GitHub Copilot**.
+
+- El audio nunca sale de tu equipo: la transcripción se hace en local. Solo el texto transcrito se envía a
+  Copilot, y únicamente cuando pides un resumen o una minuta.
+- Interfaz gráfica (CustomTkinter) con arrastrar y soltar, historial con búsqueda y línea de comandos.
+- Salida en `txt`, `srt`, `vtt` o `json`.
+
+## Requisitos
+
+- Python 3.10 o superior (probado con 3.12)
+- [ffmpeg](https://ffmpeg.org/) en el `PATH`
+- Tkinter (en Ubuntu/Debian: `sudo apt install python3-tk`)
+- Para resumen y minuta: una cuenta de GitHub con [Copilot](https://github.com/features/copilot) (sirve el plan Free)
 
 ## Instalación
 
 ```bash
-# Crear entorno virtual
-python3 -m venv venv
-source venv/bin/activate
+git clone https://github.com/<tu-usuario>/transcriptor-audio.git
+cd transcriptor-audio
 
-# Instalar dependencias
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Instalar ffmpeg (requerido)
+# ffmpeg
 # Ubuntu/Debian: sudo apt install ffmpeg
-# macOS: brew install ffmpeg
+# macOS:         brew install ffmpeg
+# Windows:       winget install ffmpeg
 ```
+
+La primera transcripción descarga el modelo de Whisper elegido (de 39 MB a 1.6 GB) en
+`~/.cache/faster-whisper`; las siguientes ya no necesitan red.
 
 ## Uso
 
@@ -116,9 +134,41 @@ python -m src.main audio.m4a --log DEBUG  # en la CLI: --log o -v
 | large  | 1550 MB| ~0.3x     | Mejor     |
 
 Medido sobre una reunión real de 27 min en español (CPU de 4 núcleos, int8): `base` transcribe
-a ~6x tiempo real pero confunde nombres y términos ("Procebo", "capéis"); `large-v3-turbo`
-va a ~1x y los acierta ("ProSegur", "KPIs"). Para ir más rápido con calidad aceptable, usa `small` (~3.4x).
+a ~6x tiempo real pero confunde nombres y términos; `large-v3-turbo`
+va a ~1x y los acierta. Para ir más rápido con calidad aceptable, usa `small` (~3.4x).
 
 ## Configuración
 
-Edita `config/settings.yaml` para ajustar parámetros por defecto.
+Edita `config/settings.yaml` para ajustar los parámetros por defecto (modelo de Whisper, idioma, formato de
+salida, modelo de Copilot, etc.). Cada opción está comentada en el propio archivo.
+
+## Privacidad y datos locales
+
+Nada de lo siguiente se sube al repositorio (está en `.gitignore`):
+
+| Dato | Dónde se guarda |
+|---|---|
+| Historial (transcripciones, resúmenes, minutas) | `data/historial.db` |
+| Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (permisos 600) |
+| Modelos de Whisper | `~/.cache/faster-whisper` |
+| Transcripciones exportadas | junto al archivo de audio |
+
+## Tests
+
+```bash
+pip install pytest
+python -m pytest -q
+```
+
+Los tests no hacen llamadas reales a la red: las peticiones a GitHub se simulan.
+
+## Aviso
+
+Proyecto independiente, sin relación con GitHub ni con Microsoft. Usa la API de Copilot igual que lo hace
+[opencode](https://opencode.ai) (incluido su `client_id` público de OAuth), que no es una API documentada
+oficialmente y puede cambiar. Su uso está sujeto a los
+[términos de GitHub Copilot](https://docs.github.com/es/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot).
+
+## Licencia
+
+[MIT](LICENSE) © 2026 Rafael Malanco

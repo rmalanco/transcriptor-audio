@@ -1,7 +1,7 @@
 """Tests básicos para el transcriptor."""
 
 import pytest
-from src.utils import validar_archivo, obtener_info_archivo, formatear_tiempo, formatear_tiempo_srt, formatear_tiempo_vtt
+from src.utils import formatear_tiempo, formatear_tiempo_srt, formatear_tiempo_vtt
 from src.transcriber import TranscriptorAudio, cargar_configuracion
 
 

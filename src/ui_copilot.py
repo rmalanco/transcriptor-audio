@@ -74,7 +74,8 @@ class DialogoLoginCopilot(ctk.CTkToplevel):
             pass
         except copilot.ErrorCopilot as e:
             log.error("Inicio de sesión en GitHub Copilot fallido: %s", e)
-            self._en_ui(lambda: self.label_estado.configure(text=str(e), text_color=("#C0392B", "#E74C3C")))
+            mensaje = str(e)  # `e` deja de existir al salir del except
+            self._en_ui(lambda: self.label_estado.configure(text=mensaje, text_color=("#C0392B", "#E74C3C")))
 
     def _mostrar_codigo(self):
         self.label_codigo.configure(text=self._codigo.user_code)

@@ -5,9 +5,8 @@ Notas técnicas del análisis e implementación (septiembre de 2026). Código en
 
 ## Contexto
 
-En una junta se indicó que no se pueden usar IAs externas (Kimi, Mistral); el área de Informática aprobó el uso
-de GitHub Copilot. La app usaba Kimi/Mistral para el resumen y la minuta, así que se reemplazó por Copilot
-replicando cómo lo integra opencode, y después se eliminaron los otros proveedores.
+La app usa GitHub Copilot como único proveedor de IA para el resumen y la minuta. La integración replica cómo
+lo hace opencode.
 
 ## Análisis de opencode
 
@@ -81,26 +80,11 @@ opencode no lo implementa; se tomó de la extensión de VS Code y del PR #3902 d
 que admita `/chat/completions`. El orden del servidor cambia entre sesiones: en una prueba tocó `gpt-5.4`, en
 otra `claude-haiku-4.5`.
 
-## Cuenta usada en las pruebas
+## Observaciones sobre `auto`
 
-Consultada con `GET https://api.github.com/copilot_internal/user`:
-
-- Inicialmente **Copilot Free** personal (`free_limited_copilot`): 200 chats/mes, 0 premium; solo funcionaba `gpt-4.1`.
-- Después **Copilot Pro** personal (`monthly_subscriber_quota`, ~10 USD/mes): chat ilimitado, 1500 peticiones
-  premium/mes. Responden los 12 modelos de chat: `gpt-4.1`, `gpt-5-mini`, `gpt-5.4`, `claude-haiku-4.5`,
-  `claude-sonnet-5`, `claude-sonnet-5.5`, `gemini-3.5`…`3.8-flash`, `kimi-k2.7-code`, `kimi-k3`.
-- Es una cuenta **personal, sin organización**; conviene confirmar con Informática si la aprobación era para
-  la licencia de la empresa (Business/Enterprise).
-
-## Prueba con una reunión real (historial id=2, 84 min, 68 000 caracteres)
-
-Configuración: `modelo: auto`, `max_caracteres_bloque: 60000` (2 partes en paralelo), sin revisión de fidelidad.
-
-- Auto eligió `claude-haiku-4.5`. Resumen en 125 s, minuta en 110 s (reutiliza las notas), 4 peticiones.
-- Calidad claramente inferior a la minuta previa de Kimi K3: 59 temas (casi reescribe la transcripción),
-  copia errores de reconocimiento ("Proseguir", "vitácolas"), "Sin acuerdos explícitos" cuando sí los hubo,
-  responsables inventados ("Equipo técnico") y datos añadidos ("ISO 19125-2005").
-- Conclusión: para minutas conviene un modelo fijo y potente (`claude-sonnet-5.5` o `gpt-5.4`) en lugar de `auto`.
+- En pruebas, `auto` llegó a elegir modelos ligeros (p. ej. `claude-haiku-4.5`) que producen minutas menos
+  fieles en reuniones largas. Para minutas conviene fijar un modelo potente (`claude-sonnet-5.5` o `gpt-5.4`).
+- Los modelos disponibles dependen del plan de Copilot de cada cuenta (`--copilot-modelos`).
 
 ## Fuentes
 

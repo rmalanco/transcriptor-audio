@@ -15,8 +15,6 @@ en español; mantén ese idioma y el estilo de nombres (`generar_minuta`, `Error
 ./venv/bin/python -m src.main --copilot-logout
 ```
 
-La carpeta **no es un repositorio git**.
-
 ## Arquitectura (`src/`)
 
 | Archivo | Responsabilidad |
@@ -35,9 +33,7 @@ Configuración en `config/settings.yaml` (sección `ia:`: `modelo`, `copilot_ent
 
 ## Reglas del proyecto
 
-- **Solo GitHub Copilot como IA.** Por política de la empresa no se pueden usar IAs externas (Kimi/Moonshot,
-  Mistral, etc.); Informática aprobó Copilot. Se eliminó todo rastro de Kimi y Mistral el 2026-09-30.
-  No reintroducir otros proveedores.
+- **Solo GitHub Copilot como IA.** No introducir otros proveedores.
 - El audio nunca sale del equipo; solo el texto transcrito va a Copilot.
 - Los tests no deben hacer llamadas reales: se simula `httpx` con `monkeypatch` y las rutas de token se aíslan
   (fixture `rutas_aisladas` en `tests/test_copilot.py`).
@@ -60,11 +56,7 @@ Detalle completo, fuentes y hallazgos en [docs/integracion-copilot.md](docs/inte
 
 ## Pendientes / decisiones abiertas
 
-- **Modelo por defecto:** `settings.yaml` tiene `modelo: "auto"`, pero en la prueba con una reunión real Auto
-  eligió `claude-haiku-4.5` y la minuta salió pobre (59 temas, nombres mal transcritos, responsables inventados).
-  Recomendado probar y fijar `claude-sonnet-5.5` o `gpt-5.4`.
-- **Historial:** las 2 entradas de `data/historial.db` aún tienen resumen/minuta generados con Kimi
-  (`kimi-k3`); falta decidir si se borran para regenerarlos con Copilot.
-- **`kimi-k3` dentro de Copilot:** aparece en el catálogo; falta que Informática confirme si está permitido.
+- **Modelo por defecto:** `settings.yaml` tiene `modelo: "auto"`; para minutas de calidad se recomienda fijar
+  `claude-sonnet-5.5` o `gpt-5.4`.
 - Posible mejora: soporte de `/responses` para usar los modelos que hoy se saltan en `auto`.
-- Posible mejora: abrir la sesión `auto` en segundo plano al arrancar (tardó ~21 s en una prueba).
+- Posible mejora: abrir la sesión `auto` en segundo plano al arrancar.
