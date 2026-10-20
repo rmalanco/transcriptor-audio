@@ -176,6 +176,25 @@ def _catalogo(*modelos):
     return _Respuesta({"data": [{"id": i, "supported_endpoints": e} for i, e in modelos]})
 
 
+def test_modelos_economicos_excluye_caros_sin_precio_prohibidos_y_duplicados(monkeypatch):
+    def modelo(id_modelo, precio, nombre=None):
+        datos = {"id": id_modelo, "name": nombre or id_modelo, "policy": {"state": "enabled"}}
+        if precio is not None:
+            datos["billing"] = {"token_prices": {"default": {"input_price": precio, "output_price": precio * 5}}}
+        return datos
+    datos = {"data": [
+        modelo("claude-sonnet-5.5", 200),
+        modelo("claude-haiku-5.5", 10),
+        modelo("gpt-4.1", 0, "GPT-4.1"),
+        modelo("gpt-4.1-2025-04-14", 0, "GPT-4.1"),
+        modelo("gemini-3.8-flash", 75),
+        modelo("kimi-k3-mini", 5),
+        modelo("modelo-sin-precio", None),
+    ]}
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
+    assert copilot.modelos_economicos(copilot.Sesion("gho_x")) == ["gpt-4.1", "claude-haiku-5.5"]
+
+
 def test_auto_salta_modelos_que_solo_admiten_responses(monkeypatch):
     enviado = {}
     sesion = {"available_models": ["gpt-5.3-codex", "gpt-5.4-mini", "claude-haiku-4.5", "gpt-5.4"],

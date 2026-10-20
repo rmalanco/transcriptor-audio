@@ -232,6 +232,38 @@ def listar_modelos(sesion: Sesion) -> list[dict]:
     return sorted(modelos, key=lambda m: m["id"])
 
 
+# Precio de entrada (tarifa normal, unidades de Copilot por 1M tokens) a partir del cual un modelo ya no se ofrece
+# en la UI. Referencia: gpt-4.1 = 0, claude-haiku-5.5 = 10, gemini-3.8-flash = 75, claude-sonnet-5.5 = 200.
+PRECIO_MAX_ECONOMICO = 50
+FAMILIAS_EXCLUIDAS = ("kimi", "mistral")  # no autorizadas por la empresa aunque Copilot las ofrezca
+
+
+def precio_entrada(modelo: dict) -> Optional[float]:
+    """Precio de entrada de la tarifa normal según `billing.token_prices`; None si la API no lo informa."""
+    precios = ((modelo.get("billing") or {}).get("token_prices") or {}).get("default") or {}
+    return precios.get("input_price")
+
+
+def modelos_economicos(sesion: Sesion) -> list[str]:
+    """Ids de los modelos baratos que la cuenta puede usar por /chat/completions, del más barato al más caro.
+
+    Los modelos sin precio conocido no se ofrecen, y de varias versiones con el mismo nombre (p. ej. `gpt-4.1` y
+    `gpt-4.1-2025-04-14`) solo se deja la primera.
+    """
+    elegidos, nombres = [], set()
+    for modelo in listar_modelos(sesion):
+        precio = precio_entrada(modelo)
+        if precio is None or precio > PRECIO_MAX_ECONOMICO:
+            continue
+        if any(familia in modelo["id"].lower() for familia in FAMILIAS_EXCLUIDAS):
+            continue
+        nombre = modelo.get("name") or modelo["id"]
+        if nombre not in nombres:
+            nombres.add(nombre)
+            elegidos.append((precio, modelo["id"]))
+    return [id_modelo for _, id_modelo in sorted(elegidos)]
+
+
 # ------------------------------------------------------------------ Modo "auto"
 
 MODELO_AUTO = "auto"

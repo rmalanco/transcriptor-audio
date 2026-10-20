@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 import threading
 import time
@@ -204,3 +205,21 @@ def _mmss(segundos: float) -> str:
 def cargar_configuracion(ruta: str = "config/settings.yaml") -> dict:
     with open(ruta, 'r') as f:
         return yaml.safe_load(f)
+
+
+def guardar_modelo_ia(modelo: str, ruta: str = "config/settings.yaml") -> bool:
+    """Cambia `ia.modelo` en el archivo editando solo esa línea, para no perder los comentarios del YAML.
+    Devuelve False si no encuentra la clave."""
+    lineas = Path(ruta).read_text(encoding="utf-8").splitlines(keepends=True)
+    en_ia = False
+    for i, linea in enumerate(lineas):
+        if linea.strip() and not linea[0].isspace():
+            en_ia = linea.startswith("ia:")
+            continue
+        if en_ia:
+            nueva, cambios = re.subn(r'^(\s+modelo:\s*)("[^"]*"|[^\s#]+)', lambda m: f'{m[1]}"{modelo}"', linea)
+            if cambios:
+                lineas[i] = nueva
+                Path(ruta).write_text("".join(lineas), encoding="utf-8")
+                return True
+    return False

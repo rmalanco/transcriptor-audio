@@ -56,7 +56,9 @@ Detalle completo, fuentes y hallazgos en [docs/integracion-copilot.md](docs/inte
 
 ## Pendientes / decisiones abiertas
 
-- **Modelo por defecto:** `settings.yaml` tiene `modelo: "auto"`; para minutas de calidad se recomienda fijar
-  `claude-sonnet-5.5` o `gpt-5.4`.
+- **Modelo por defecto:** `settings.yaml` tiene `modelo: "claude-haiku-5.5"` (el modo `auto` llegó a ofrecer solo
+  modelos `/responses`). La UI tiene un selector que, al arrancar, carga `auto` (si funciona) y los modelos de
+  `copilot.modelos_economicos` (precio de entrada ≤ `PRECIO_MAX_ECONOMICO`); al cambiarlo se reescribe solo la
+  línea `ia.modelo` del YAML (`guardar_modelo_ia`). Para minutas de calidad, fijar `claude-sonnet-5.5` a mano.
+- Al arrancar se abre una sesión `auto` solo para comprobar si funciona; aún no se reutiliza en el `AsistenteIA`.
 - Posible mejora: soporte de `/responses` para usar los modelos que hoy se saltan en `auto`.
-- Posible mejora: abrir la sesión `auto` en segundo plano al arrancar.

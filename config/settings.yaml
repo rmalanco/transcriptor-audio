@@ -24,7 +24,7 @@ salida:
   incluir_timestamps: true
   palabra_por_palabra: false
 ia:
-  modelo: "auto"                 # "auto" (Copilot elige, 10 % menos de peticiones premium) u otro de `python -m src.main --copilot-modelos`
+  modelo: "claude-haiku-5.5"     # "auto" (Copilot elige, 10 % menos de peticiones premium) u otro de `python -m src.main --copilot-modelos`
   copilot_enterprise_url: ""     # solo si la cuenta es de GitHub Enterprise con dominio propio (p. ej. empresa.ghe.com)
   temperatura: 0.2               # se omite automáticamente si el modelo no la admite
   max_caracteres_bloque: 60000   # transcripciones más largas se procesan por partes (de tamaño parejo)
