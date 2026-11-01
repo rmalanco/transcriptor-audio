@@ -34,7 +34,8 @@ def test_url_api_segun_dominio():
 
 def test_guardar_y_leer_token_con_permisos_600():
     copilot.guardar_token("gho_abc")
-    assert stat.S_IMODE(os.stat(copilot.RUTA_TOKEN).st_mode) == 0o600
+    if os.name != "nt":  # Windows no aplica permisos POSIX (chmod solo cambia "solo lectura")
+        assert stat.S_IMODE(os.stat(copilot.RUTA_TOKEN).st_mode) == 0o600
     sesion = copilot.leer_token()
     assert sesion.token == "gho_abc" and sesion.enterprise_url is None
     assert copilot.cerrar_sesion() and copilot.leer_token() is None
