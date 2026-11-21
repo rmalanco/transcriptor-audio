@@ -9,6 +9,9 @@ env/
 docs/
 ENV/
 
+# VS Code
+.vscode/
+
 # Modelo cache
 ~/.cache/faster-whisper/
 models/
