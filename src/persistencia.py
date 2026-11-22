@@ -15,7 +15,12 @@ if TYPE_CHECKING:
 
 
 def _motivo(error: Exception) -> str:
-    """Texto del fallo; si la excepción no trae mensaje, su tipo (para que el aviso no quede vacío)."""
+    """Texto del fallo; si la excepción no trae mensaje, su tipo (para que el aviso no quede vacío).
+
+    Un OSError se reduce a su causa (p. ej. «Permission denied»): sin número de error ni ruta, que ya va en el aviso.
+    """
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
     return str(error) or type(error).__name__
 
 

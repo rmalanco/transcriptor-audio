@@ -121,21 +121,32 @@ con 6 hallazgos; 5 arreglados y verificados por el orquestador; el restante qued
 
 | # | Marca | Criterio | Evidencia con test y `ruta:línea` | Estado |
 |---|---|---|---|---|
-| 1 | [MODIFICA: sin spec] | Transcripción en el historial con texto y segmentos; pestaña Texto con «Copiar», «Guardar como…» y botones de IA habilitados; aviso con `<nombre>_transcripcion.<formato>` y el motivo si falla la exportación | Tests: `tests/test_persistencia.py:39` (`test_transcripcion_exportacion_fallida_deja_entrada_en_historial`), `:193` (`test_transcripcion_error_inesperado_al_exportar_no_lanza`). Código: `src/persistencia.py:30` (`persistir_transcripcion`), `src/ui.py:661` (`_finalizar_ok`), `src/ui.py:703` (diálogo) | cumple (persistencia); ventana: verificación manual pendiente |
-| 2 | [MODIFICA: sin spec] | Minuta (y resumen) en el historial con modelo y título; pestaña con «Copiar» y «Guardar como…» habilitados; aviso en la línea de estado con el archivo y el motivo, sin otra generación | Tests: `tests/test_persistencia.py:101` (`test_documento_exportacion_fallida_conserva_contenido_y_modelo`), `:113` (`test_documento_minuta_sin_titulo_editado_toma_titulo_de_la_minuta`), `:128` (`test_documento_historial_fallido_exporta_y_avisa`). Código: `src/persistencia.py:55` (`persistir_documento`), `src/ui.py:837`, `src/ui.py:848` (`_finalizar_documento_ia`) | cumple (persistencia); ventana: verificación manual pendiente |
-| 3 | [MODIFICA: sin spec] | Historial no disponible y carpeta no escribible: la transcripción sigue en pantalla con «Copiar» y «Guardar como…», y el aviso dice que no quedó guardada en ningún sitio | Tests: `tests/test_persistencia.py:70` (`test_transcripcion_sin_historial_ni_exportacion_no_guarda_en_ningun_sitio`), `:142` (`test_documento_ambos_fallan_devuelve_los_dos_motivos`), `:157` (`test_aviso_sin_guardado_remite_a_guardar_como`). Código: `src/persistencia.py:84` (`texto_sin_guardado`) | cumple (persistencia); ventana: verificación manual pendiente |
-
-**Verificación manual pendiente** (la parte visual de los tres criterios; con un audio en una carpeta de solo lectura):
-
-- [ ] Transcribir en carpeta de solo lectura: aparece el diálogo con el archivo y el motivo; la transcripción queda en la pestaña Texto con los botones habilitados; «Abrir carpeta» deshabilitado.
-- [ ] Historial no disponible y carpeta de solo lectura: la transcripción sigue en pantalla y el aviso dice que no quedó guardada en ningún sitio y remite a «Guardar como…».
-- [ ] Minuta en carpeta de solo lectura: la pestaña Minuta muestra el documento con «Copiar» y «Guardar como…»; la línea de estado avisa del archivo y del motivo; no aparece diálogo.
-- [ ] Resumen en carpeta de solo lectura: lo mismo que la minuta, con `_resumen.md`.
-- [ ] Historial que falla con exportación correcta: el archivo existe junto al audio y el aviso dice que no se guardó en el historial.
-- [ ] Flujo normal (carpeta escribible, historial disponible): sin diálogos de aviso; el archivo y la entrada del historial aparecen.
+| 1 | [MODIFICA: sin spec] | Transcripción en el historial con texto y segmentos; pestaña Texto con «Copiar», «Guardar como…» y botones de IA habilitados; aviso con `<nombre>_transcripcion.<formato>` y el motivo si falla la exportación | Tests: `tests/test_persistencia.py:39` (`test_transcripcion_exportacion_fallida_deja_entrada_en_historial`), `:193` (`test_transcripcion_error_inesperado_al_exportar_no_lanza`). Código: `src/persistencia.py:30` (`persistir_transcripcion`), `src/ui.py:661` (`_finalizar_ok`), `src/ui.py:703` (diálogo) | cumple (tests y verificación visual del 2026-11-22) |
+| 2 | [MODIFICA: sin spec] | Minuta (y resumen) en el historial con modelo y título; pestaña con «Copiar» y «Guardar como…» habilitados; aviso en la línea de estado con el archivo y el motivo, sin otra generación | Tests: `tests/test_persistencia.py:101` (`test_documento_exportacion_fallida_conserva_contenido_y_modelo`), `:113` (`test_documento_minuta_sin_titulo_editado_toma_titulo_de_la_minuta`), `:128` (`test_documento_historial_fallido_exporta_y_avisa`). Código: `src/persistencia.py:55` (`persistir_documento`), `src/ui.py:837`, `src/ui.py:848` (`_finalizar_documento_ia`) | cumple (tests y verificación visual del 2026-11-22) |
+| 3 | [MODIFICA: sin spec] | Historial no disponible y carpeta no escribible: la transcripción sigue en pantalla con «Copiar» y «Guardar como…», y el aviso dice que no quedó guardada en ningún sitio | Tests: `tests/test_persistencia.py:70` (`test_transcripcion_sin_historial_ni_exportacion_no_guarda_en_ningun_sitio`), `:142` (`test_documento_ambos_fallan_devuelve_los_dos_motivos`), `:157` (`test_aviso_sin_guardado_remite_a_guardar_como`). Código: `src/persistencia.py:84` (`texto_sin_guardado`) | cumple (tests y verificación visual del 2026-11-22) |
 
 **Pendientes aceptados:**
 
-- Verificación manual de la parte visual de los tres criterios (lista de arriba).
 - Del code review: si se elimina la entrada del historial mientras Copilot genera un documento, la ventana dice «guardado en el historial» aunque no exista la fila. Pasa al punto 3 de «Salud del código» de `BACKLOG.md`.
 - `src/persistencia.py` arrastra `faster_whisper` al importarse por `src/__init__.py`. Pasa al punto 5 de «Salud del código» de `BACKLOG.md`.
+
+### Verificación visual (2026-11-22)
+
+Hecha sobre la ventana real, conducida por un guion con historial temporal, modelo de Whisper simulado y asistente
+de IA simulado (sin red), con un audio en una carpeta de solo lectura y otro en una carpeta normal.
+
+| Escenario | Resultado |
+|---|---|
+| Transcribir en carpeta de solo lectura | Texto en pantalla; «Copiar», «Guardar como…» y los botones de IA habilitados; «Abrir carpeta» deshabilitado; diálogo «Atención» con `reunion_transcripcion.txt` y el motivo; entrada en el historial con sus segmentos |
+| Historial no disponible y carpeta de solo lectura | Diálogo con el fallo del historial, el de la exportación y «El resultado no quedó guardado en ningún sitio. Usa «Guardar como…» para conservarlo.» |
+| Minuta y resumen en carpeta de solo lectura | Documento en la pestaña y en el historial, título tomado de la minuta, sin diálogo; la línea de estado dice que no se pudo exportar y que quedó en el historial |
+| Historial que falla al guardar, carpeta normal | Archivo exportado, diálogo «No se pudo guardar en el historial», «Abrir carpeta» habilitado |
+| Flujo normal | Sin diálogos; archivos creados; «guardado como reunion_minuta.md; guardado en el historial» |
+
+Defecto encontrado y corregido en esta verificación: la línea de estado de las pestañas Resumen y Minuta se veía
+cortada y el aviso no se podía leer. Ahora ocupa varias líneas y el motivo ya no repite la ruta completa del
+archivo (solo el nombre y la causa).
+
+Observación sin tratar: con la ventana más estrecha que su ancho mínimo (un gestor de ventanas en mosaico la dejó en
+unos 620 px), los nombres de las pestañas y el botón «Guardar como…» se recortan y «Abrir carpeta» queda fuera de la
+vista. No se comprobó a tamaño normal.

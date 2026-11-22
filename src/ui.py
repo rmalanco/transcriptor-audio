@@ -365,9 +365,15 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         self._configurar_estilos_markdown(texto)
 
-        estado = ctk.CTkLabel(acciones, text=self._texto_modelo_ia(),
-                              text_color=COLOR_TEXTO_SECUNDARIO, anchor="w")
+        estado = ctk.CTkLabel(acciones, text=self._texto_modelo_ia(), justify="left",
+                              text_color=COLOR_TEXTO_SECUNDARIO, anchor="w", wraplength=260)
         estado.grid(row=1, column=0, columnspan=3, pady=(4, 0), sticky="w")
+
+        def ajustar_ancho_estado(evento):
+            ancho = max(evento.width - 16, 80)
+            if int(estado.cget("wraplength")) != ancho:
+                estado.configure(wraplength=ancho)
+        acciones.bind("<Configure>", ajustar_ancho_estado)
 
         btn_generar = ctk.CTkButton(acciones, text=f"✨ Generar {doc['pestana'].lower()}", width=60,
                                     state="disabled", command=lambda: self._generar_documento_ia(clave))

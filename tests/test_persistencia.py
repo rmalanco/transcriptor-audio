@@ -57,6 +57,16 @@ class _HistorialLleno:
         raise sqlite3.OperationalError("database or disk is full")
 
 
+def test_motivo_de_exportacion_no_repite_la_ruta(historial, tmp_path):
+    (tmp_path / "bloqueo").write_text("no es una carpeta")          # el destino no se puede crear
+    archivo = str(tmp_path / "reunion.mp3")
+    ruta = str(tmp_path / "bloqueo" / "reunion_transcripcion.txt")
+    p = persistir_transcripcion(historial, archivo, _resultado(), "base", ruta, "txt", True)
+    assert p.motivo_exportacion.startswith("reunion_transcripcion.txt: ")
+    assert str(tmp_path) not in p.motivo_exportacion
+    assert "Errno" not in p.motivo_exportacion
+
+
 def test_transcripcion_historial_fallido_exporta_igual(tmp_path):
     archivo = str(tmp_path / "reunion.mp3")
     ruta = str(tmp_path / "reunion_transcripcion.txt")
@@ -108,6 +118,16 @@ def test_documento_exportacion_fallida_conserva_contenido_y_modelo(historial, tm
     assert p.ruta_exportada is None
     assert "reunion_minuta.md" in p.motivo_exportacion
     assert p.motivo_historial is None
+
+
+def test_motivo_de_exportacion_de_documento_no_repite_la_ruta(historial, tmp_path):
+    (tmp_path / "bloqueo").write_text("no es una carpeta")
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    ruta = str(tmp_path / "bloqueo" / "reunion_minuta.md")
+    p = persistir_documento(historial, id_, "minuta", "# Minuta: Revisión", "gpt-5.4", ruta)
+    assert p.motivo_exportacion.startswith("reunion_minuta.md: ")
+    assert str(tmp_path) not in p.motivo_exportacion
+    assert "Errno" not in p.motivo_exportacion
 
 
 def test_documento_minuta_sin_titulo_editado_toma_titulo_de_la_minuta(historial, tmp_path):

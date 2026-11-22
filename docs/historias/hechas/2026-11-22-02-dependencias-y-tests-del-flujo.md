@@ -160,15 +160,12 @@ hicieron fallar los tests nuevos y se deshicieron.
 
 | # | Marca | Criterio | Evidencia con test y `ruta:línea` | Estado |
 |---|---|---|---|---|
-| 1 | [NUEVO] | Clon limpio y venv vacío con Python 3.14: instalar con el comando de desarrollo deja cada dependencia en la versión fijada, y `python -m pytest -q` sin red pasa sin descargar modelos | Manifiestos: `requirements.txt:1-9` (`==`), `requirements-dev.txt:1-2` (`-r requirements.txt` y `pytest==9.2.0`); excepción en `.gitignore:43` (`!requirements-dev.txt`; `git check-ignore` no lo ignora). Instalación en venv vacío y tests sin red: verificación del orquestador sobre el árbol de trabajo | cumple en el árbol de trabajo; clon limpio tras el commit: verificación manual pendiente |
+| 1 | [NUEVO] | Clon limpio y venv vacío con Python 3.14: instalar con el comando de desarrollo deja cada dependencia en la versión fijada, y `python -m pytest -q` sin red pasa sin descargar modelos | Manifiestos: `requirements.txt:1-9` (`==`), `requirements-dev.txt:1-2` (`-r requirements.txt` y `pytest==9.2.0`); excepción en `.gitignore:43` (`!requirements-dev.txt`; `git check-ignore` no lo ignora). Instalación en venv vacío y tests sin red: verificación del orquestador sobre el árbol de trabajo | cumple (verificado el 2026-11-22: instalación en un entorno virtual vacío y tests sobre un clon de la rama, sin red, 87 en verde) |
 | 2 | [NUEVO] | Transcribir con un doble de Whisper (tres segmentos, uno de ellos alucinación), guardar en el historial temporal y exportar: la entrada `reunion` tiene solo «Hola equipo. Cerramos el punto.» con sus tiempos, idioma, duración y modelo, y `reunion_transcripcion.txt` tiene las dos líneas | Test: `tests/test_flujo.py:10` (`test_flujo_transcribir_guardar_historial_descarta_alucinacion_y_exporta`). Piezas usadas: `src/persistencia.py:30` (`persistir_transcripcion`), `src/transcriber.py:80` (`TranscriptorAudio.transcribir`) | cumple |
 | 3 | [NUEVO] | CLI con `reunion.m4a -o salida.srt -f srt --config <propia>`: código 0, «Transcripción guardada en: <ruta>» en `stdout` y `salida.srt` con los dos segmentos en SRT | Test: `tests/test_cli.py:24` (`test_cli_transcribe_a_srt_con_configuracion_propia`). Comportamiento fijado en `docs/specs/cli.md` | cumple |
 
 **Pendientes aceptados:**
 
-- Verificación en un clon limpio tras el commit (criterio 1): clonar en una carpeta temporal, crear un venv vacío,
-  instalar con `pip install -r requirements-dev.txt`, comparar `pip freeze` con las versiones fijadas y ejecutar
-  `python -m pytest -q` sin red (`unshare -rn`) y con una caché de modelos vacía.
 - Versiones verificadas solo con Python 3.14 en Linux; no probadas en Windows ni en otras versiones de Python.
 - Sin lockfile de dependencias transitivas (`numpy`, `ctranslate2`, `onnxruntime`, `huggingface_hub`…): decisión del
   usuario sobre la herramienta (`pip-tools`, `uv`…).
