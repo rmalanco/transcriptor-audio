@@ -82,3 +82,9 @@ Origen: carril S, 2026-11-22: los metadatos de ffprobe son opcionales (A-20)
 - Given `transcripcion.idioma` con un código que no está en el selector de idioma de la ventana (por ejemplo `nl`), when se abre la ventana, then el selector muestra ese código como opción seleccionada y la transcripción lo usa, igual que la CLI.
 
 Origen: carril S, 2026-11-22: la ventana no cambia a «Auto-detectar» un idioma configurado que Whisper admite (hallazgo nuevo de la historia 05)
+
+### Salir del programa
+- Given la ventana abierta sin nada en curso, when se pulsa «Salir» o `Ctrl+Q`, then la ventana se cierra sin preguntar.
+- Given una transcripción en curso, when se pulsa «Salir» o `Ctrl+Q`, then se pregunta «Hay una transcripción en curso. ¿Cancelarla y salir?»; con «No» la transcripción sigue y con «Sí» se cancela y la ventana se cierra.
+
+Origen: carril S, 2026-11-22: botón «Salir» y atajo Ctrl+Q (Backlog #4)

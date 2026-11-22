@@ -97,13 +97,14 @@ Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
 Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
 
 ### Cerrar la ventana durante una generación
-- Given una generación de la minuta o del resumen en curso, when cierro la ventana y respondo «no» a «Hay una generación
+- Given una generación de la minuta o del resumen en curso, when cierro la ventana (o pulso «Salir» o `Ctrl+Q`) y respondo «no» a «Hay una generación
   de la minuta en curso. ¿Cancelarla y salir?» (o «del resumen»), then la ventana sigue abierta y la generación continúa.
-- Given una generación de la minuta o del resumen en curso, when cierro la ventana y respondo «sí», then la generación
+- Given una generación de la minuta o del resumen en curso, when cierro la ventana (o pulso «Salir» o `Ctrl+Q`) y respondo «sí», then la generación
   se cancela, la ventana se cierra y el documento no se guarda en el historial ni junto al audio, aunque Copilot lo
   termine después.
 
 Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
+Origen: carril S, 2026-11-22: botón «Salir» y atajo Ctrl+Q (Backlog #4)
 
 ### Nota de la aplicación en documentos redactados a partir de notas
 - Given una transcripción que supera `ia.max_caracteres_bloque` y se procesa en N partes (N de 2 o más), when se genera

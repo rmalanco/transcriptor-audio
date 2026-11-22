@@ -46,7 +46,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 1. ✅ Como usuario, quiero cancelar la generación de un resumen o una minuta, para no tener que cerrar la app cuando el modelo tarda. — hallazgo A-04 — carril M
 2. ✅ Como usuario con una cuenta de empresa, quiero que mi transcripción nunca se envíe a un modelo de una familia no autorizada, tampoco en modo `auto` ni con un modelo escrito a mano, para cumplir la política de mi empresa. — hallazgo A-12 — carril M
 3. ✅ Como usuario, quiero que la app me avise cuando un documento quedó incompleto y que conserve las partes ya procesadas si una falla, para no pagar de nuevo toda la generación. — hallazgo A-11 (en parte posible) — carril M
-4. Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S
+4. ✅ Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S
 5. Como usuario, quiero un panel de configuración con todo lo que se puede configurar, para ajustar la app sin editar `config/settings.yaml` a mano. — carril L
 6. Como usuario, quiero iniciar y cerrar la sesión de GitHub Copilot desde el panel de configuración, para activar la IA sin esperar a generar un documento ni usar la terminal. Requires: #5 — carril M
 7. ✅ Como quien mantiene el código, quiero que `faster_whisper` se cargue solo al construir un modelo de Whisper, para que abrir la ventana o la CLI sin transcribir no pague la carga de la librería de transcripción. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia A — carril M

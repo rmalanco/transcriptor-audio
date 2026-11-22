@@ -219,6 +219,11 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.selector_tema.set("Sistema")
         self.selector_tema.grid(row=0, column=2, sticky="e")
 
+        self.btn_salir = ctk.CTkButton(encabezado, text="Salir", width=90, fg_color="transparent",
+                                       border_width=1, text_color=("gray10", "gray90"),
+                                       command=self._al_cerrar)
+        self.btn_salir.grid(row=0, column=3, padx=(8, 0), sticky="e")
+
     def _construir_panel_lateral(self):
         lateral = ctk.CTkFrame(self.vista_transcribir, width=320, fg_color="transparent")
         lateral.grid(row=0, column=0, padx=(20, 10), pady=8, sticky="nsew")
@@ -470,6 +475,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.bind("<Control-Key-1>", lambda e: self.mostrar_vista(VISTA_TRANSCRIBIR))
         self.bind("<Control-Key-2>", lambda e: self.mostrar_vista(VISTA_HISTORIAL))
         self.bind("<Control-h>", lambda e: self.mostrar_vista(VISTA_HISTORIAL))
+        self.bind("<Control-q>", lambda e: self._al_cerrar())
 
     def _configurar_drag_drop(self):
         """Configura soporte de arrastrar y soltar."""
