@@ -20,7 +20,7 @@ Dependencias entre módulos (quién importa a quién):
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
 | `transcriber.py` | `registro`, `utils` |
 | `flujo_transcripcion.py` | `transcriber`, `utils`, `historial`, `persistencia`; sin Tk ni `faster_whisper` al importarse |
-| `flujo_documentos.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
+| `flujo_documentos.py` | `transcriber`, `utils` y `asistente_ia` (importarlo carga `httpx`); sin Tk ni `faster_whisper` al importarse |
 | `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
 ## Interface
@@ -123,7 +123,7 @@ Dependencias entre módulos (quién importa a quién):
 - `ui.py:AppTranscriptor` — ventana principal. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
   `historial_eliminado(id_historial)`, el atributo `id_historial` y los métodos privados `_configurar_estilos_markdown`,
   `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las vistas de la barra de navegación.
-- `ui.py:_GeneracionIA` — una generación de resumen o minuta en curso, con su propia señal de cancelación.
+- `ui.py:_VistaPreviaIA` — lo que tenían los controles de IA antes de una generación; `_restaurar_controles_ia` lo devuelve al recibir el resultado o al cancelar.
 - `ui_copilot.py:DialogoLoginCopilot(master, enterprise_url, al_terminar)` — diálogo modal de login.
 - `ui_historial.py:PanelHistorial(master, app, historial)` con `refrescar()`; `LIMITE_LISTA = 200`.
 - `ui.py:DOCUMENTOS_IA` — define los sufijos `_resumen.md` y `_minuta.md`.
@@ -147,14 +147,18 @@ Dependencias entre módulos (quién importa a quién):
   `transcriber.py:TranscriptorAudio.transcribir` revisa tras cada segmento aceptado (no tras los descartados como
   alucinación, ni durante la carga del modelo ni la preparación con VAD); al activarse, devuelve lo transcrito hasta
   ahí, pero la ventana lo descarta: no escribe el archivo ni guarda en el historial.
-- Cada generación de IA es un `ui.py:_GeneracionIA` con su propio `threading.Event` (`cancelar`), así que cancelar una
-  no afecta a la siguiente. El hilo de fondo (`ui.py:AppTranscriptor._procesar_documento_ia`) solo llama a
-  `AsistenteIA`: no toca widgets, historial ni archivos. El único punto de decisión es
-  `ui.py:AppTranscriptor._recibir_documento_ia`, en el hilo principal: si la generación ya no es la vigente
-  (`self._generacion`), descarta el resultado, un error o un 401 sin guardar nada ni abrir el login.
-  `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al instante; la petición ya abierta no se aborta:
-  el hilo abandonado termina al recibir la siguiente línea de la respuesta, o tras `AsistenteIA.timeout` sin datos.
-- `_GeneracionIA.id_historial` es el `id_historial` vigente al pulsar el botón, así que el documento se guarda en esa
+- Cada generación de IA es un `flujo_documentos.py:Generacion` (comparada por identidad) con su propio
+  `threading.Event` (`cancelar`), así que cancelar una no afecta a la siguiente. El hilo de fondo ejecuta
+  `flujo_documentos.py:procesar_generacion`, que llama a `AsistenteIA` (vía `generar_documento`) y entrega el resultado
+  exactamente una vez: no toca widgets, historial ni archivos. El único punto de decisión es
+  `ui.py:AppTranscriptor._recibir_documento_ia`, en el hilo principal, al que llega con `_en_ui`: si la generación ya no
+  es la vigente (`self._generacion`, por identidad), descarta el resultado, un error o un 401 sin guardar nada ni abrir
+  el login, antes de tocar cualquier otro estado. `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al
+  instante; la petición ya abierta no se aborta: el hilo abandonado termina al recibir la siguiente línea de la
+  respuesta, o tras `AsistenteIA.timeout` sin datos.
+- La ventana guarda aparte, en `self._vista_previa_ia`, lo que tenían los controles antes de la generación, y los
+  restaura con `ui.py:AppTranscriptor._restaurar_controles_ia`, el único método que lo hace (al recibir y al cancelar).
+- `Generacion.id_historial` es el `id_historial` vigente al pulsar el botón, así que el documento se guarda en esa
   entrada aunque después se abra otra; el guardado lo hace `persistencia.py:persistir_documento_si_vigente` desde
   `_recibir_documento_ia`.
 - La ventana reutiliza una instancia de `AsistenteIA` (y con ella la caché de notas) y la descarta al cambiar el

@@ -60,16 +60,16 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
    elegido (la preferencia guardada en `preferencias.json` o, si no hay, `ia.modelo`), y reutiliza esa instancia hasta
    que cambia el modelo, se cancela una generación o hace falta iniciar sesión de nuevo. Si no hay token, se abre
    `DialogoLoginCopilot` y, tras el login, se repite la petición.
-2. En un hilo de fondo, `AsistenteIA.generar_resumen` o `generar_minuta` envían el texto a
-   `POST <url_api>/chat/completions` en streaming.
+2. En un hilo de fondo, `flujo_documentos.py:procesar_generacion` llama a `AsistenteIA.generar_resumen` o
+   `generar_minuta` (vía `generar_documento`), que envían el texto a `POST <url_api>/chat/completions` en streaming.
 3. Si el texto supera `max_caracteres_bloque`, primero se piden notas por bloque en paralelo y el documento se
    redacta a partir de esas notas. Antes de entregarlo, `AsistenteIA` pide de nuevo las secciones que falten, revisa la
    fidelidad si `ia.revision_fidelidad` está activa y añade al final las notas de la aplicación que apliquen
    (documento redactado a partir de notas, secciones que faltan, pasadas que no se pudieron completar).
 4. Mientras dura la generación, el botón de la pestaña es «■ Cancelar»: `AppTranscriptor._cancelar_documento_ia`
    devuelve la ventana al instante y deja abandonado el hilo de fondo, cuyo resultado se descartará.
-5. Al terminar, el hilo de fondo entrega el resultado al hilo principal (`AppTranscriptor._recibir_documento_ia`),
-   único punto que decide si sigue vigente. Si lo está, `persistencia.persistir_documento_si_vigente` guarda primero
+5. Al terminar, `procesar_generacion` entrega el resultado una sola vez al hilo principal (`AppTranscriptor._recibir_documento_ia`,
+   vía `_en_ui`), único punto que decide si sigue vigente. Si lo está, `persistencia.persistir_documento_si_vigente` guarda primero
    en el historial: `Historial.guardar_documento` guarda el documento y el modelo usado y, con la minuta, también
    actualiza el título si no se editó a mano. Solo se guarda si el historial se abrió y la entrada de la transcripción
    sigue existiendo; si no, el documento no se descarta y el aviso dice por qué.
@@ -121,9 +121,10 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   modelo, transcribe (`transcribir`) y, todavía en ese hilo, llama a `persistir_transcripcion`; después entrega el
   resultado con `_en_ui`. Se cancela con un `threading.Event`
   (`cancelar_flag`) que `TranscriptorAudio.transcribir` revisa tras cada segmento aceptado.
-- **Hilo de fondo por generación de IA.** Cada resumen o minuta crea un `_GeneracionIA` con su propia señal de
-  cancelación (`cancelar`) y un hilo que solo llama a `AsistenteIA`: no toca widgets, historial ni archivos y entrega
-  lo que obtiene (o el error) con `_en_ui(_recibir_documento_ia, …)`. El punto de decisión es único y está en el hilo
+- **Hilo de fondo por generación de IA.** Cada resumen o minuta crea un `flujo_documentos.py:Generacion` con su propia
+  señal de cancelación (`cancelar`) y un hilo que ejecuta `flujo_documentos.py:procesar_generacion`: solo llama a
+  `AsistenteIA`, no toca widgets, historial ni archivos, y entrega lo que obtiene (o el error) una sola vez con
+  `_en_ui(_recibir_documento_ia, …)`. El punto de decisión es único y está en el hilo
   principal: `_recibir_documento_ia` compara la generación recibida con `self._generacion`; si no coincide (se
   canceló), descarta el resultado y no guarda nada. Solo hay una generación a la vez, y no se genera mientras se
   transcribe ni al revés. Al cancelar, la señal de esa generación se activa y la siguiente usa otra, así que el hilo
