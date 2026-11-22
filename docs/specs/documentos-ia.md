@@ -2,7 +2,9 @@
 
 ## Propósito
 Qué pasa con el resumen y la minuta que genera Copilot a partir de una transcripción: dónde quedan guardados y qué ve
-la persona en la pestaña correspondiente cuando el archivo o el historial fallan.
+la persona en la pestaña correspondiente cuando el archivo o el historial fallan. La transcripción solo se envía a
+modelos de Copilot autorizados por la empresa: nunca a los de las familias excluidas, ni con el modelo escrito a mano
+ni en modo `auto`.
 
 ## Comportamiento
 
@@ -46,3 +48,28 @@ Origen: carril S, 2026-11-22: los errores de «Guardar como…» se muestran en 
   Resumen y Minuta vuelve a mostrar el modelo de IA configurado, sin el mensaje del documento anterior.
 
 Origen: carril S, 2026-11-22: al cargar otro archivo, las pestañas de IA quedan sin restos del documento anterior (A-02)
+
+### Modelos de familias no autorizadas
+- Given `ia.modelo` escrito a mano con un modelo de una familia excluida (`kimi` o `mistral`, reconocida porque el nombre
+  del modelo contiene el de la familia, sin distinguir mayúsculas; por ejemplo `Mistral-Large-3` o `kimi-k3-mini`), when
+  se pide un resumen o una minuta de una transcripción larga, then no se envía ninguna petición a Copilot, aparece el
+  error «El modelo «<modelo>» es de la familia «<familia>», que no está autorizada por la empresa. Elige otro modelo en
+  el selector o en `ia.modelo` de config/settings.yaml.» y la pestaña no muestra ningún documento nuevo. El resultado es
+  el mismo si el catálogo de modelos de Copilot no se puede consultar.
+- Given `ia.modelo` en `auto` y una sesión en la que Copilot propone primero `kimi-k3` y ofrece también
+  `mistral-medium-3` y `gpt-5.4`, los tres compatibles con `/chat/completions`, when se genera una minuta, then todas las
+  peticiones con texto de la transcripción van a `gpt-5.4` y la línea de estado y el historial muestran «auto →
+  gpt-5.4». Lo mismo vale cuando la sesión `auto` se renueva a mitad de la generación, por caducidad o tras un 401: el
+  modelo de la sesión nueva tampoco puede ser de una familia excluida.
+- Given `ia.modelo` en `auto` y una sesión que solo ofrece `mistral-medium-3` (compatible con `/chat/completions`) y
+  `gpt-5.3-codex` (solo `/responses`), when se pide una minuta, then no se envía ninguna petición y aparece el error
+  «El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions (<modelos ofrecidos>). Elige un
+  modelo concreto en `ia.modelo`.»
+
+Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
+
+### Modelo sin configurar
+- Given `ia.modelo` vacío, when se pide un resumen o una minuta, then no se envía nada a Copilot y aparece el error «No
+  hay ningún modelo de IA configurado. Elige uno en el selector o en `ia.modelo` de config/settings.yaml.»
+
+Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md

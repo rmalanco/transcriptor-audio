@@ -177,6 +177,19 @@ def _catalogo(*modelos):
     return _Respuesta({"data": [{"id": i, "supported_endpoints": e} for i, e in modelos]})
 
 
+def test_familia_excluida_reconoce_kimi_y_mistral_sin_distinguir_mayusculas():
+    assert copilot.familia_excluida("Mistral-Large-3") == "mistral"
+    assert copilot.familia_excluida("kimi-k3-mini") == "kimi"
+    assert copilot.familia_excluida("gpt-5.4") is None
+    assert copilot.familia_excluida("claude-haiku-5.5") is None
+
+
+def test_familia_excluida_tolera_valores_que_no_son_cadena():
+    assert copilot.familia_excluida(None) is None
+    assert copilot.familia_excluida("") is None
+    assert copilot.familia_excluida(5) is None
+
+
 def test_modelos_economicos_excluye_caros_sin_precio_prohibidos_y_duplicados(monkeypatch):
     def modelo(id_modelo, precio, nombre=None):
         datos = {"id": id_modelo, "name": nombre or id_modelo, "policy": {"state": "enabled"}}
@@ -210,6 +223,28 @@ def test_auto_salta_modelos_que_solo_admiten_responses(monkeypatch):
     assert enviado["url"] == "https://api.githubcopilot.com/models/session"
     assert enviado["cuerpo"] == {"auto_mode": {"model_hints": ["auto"]}}
     assert auto.modelo == "claude-haiku-4.5" and auto.session_token == "st" and auto.vigente()
+
+
+def test_auto_salta_modelos_de_familias_excluidas(monkeypatch):
+    sesion = {"available_models": ["kimi-k3", "mistral-medium-3", "gpt-5.4"], "selected_model": "kimi-k3",
+              "session_token": "st", "expires_at": 9999999999}
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(sesion))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: _catalogo(
+        ("kimi-k3", ["/chat/completions"]), ("mistral-medium-3", ["/chat/completions"]),
+        ("gpt-5.4", ["/chat/completions"])))
+    assert copilot.abrir_sesion_auto(copilot.Sesion("gho_x")).modelo == "gpt-5.4"
+
+
+def test_auto_sin_modelo_autorizado_y_compatible_lanza_error(monkeypatch):
+    sesion = {"available_models": ["mistral-medium-3", "gpt-5.3-codex"], "selected_model": "mistral-medium-3",
+              "session_token": "st", "expires_at": 9999999999}
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(sesion))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: _catalogo(
+        ("mistral-medium-3", ["/chat/completions"]), ("gpt-5.3-codex", ["/responses"])))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.abrir_sesion_auto(copilot.Sesion("gho_x"))
+    assert "mistral-medium-3" in str(error.value) and "gpt-5.3-codex" in str(error.value)
+    assert "autorizado" in str(error.value)
 
 
 def test_auto_sin_modelos_compatibles(monkeypatch):

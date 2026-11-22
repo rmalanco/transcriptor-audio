@@ -238,6 +238,12 @@ PRECIO_MAX_ECONOMICO = 50
 FAMILIAS_EXCLUIDAS = ("kimi", "mistral")  # no autorizadas por la empresa aunque Copilot las ofrezca
 
 
+def familia_excluida(id_modelo: str) -> Optional[str]:
+    """Nombre de la familia de FAMILIAS_EXCLUIDAS que contiene el id del modelo (sin distinguir mayúsculas), o None."""
+    id_minusculas = str(id_modelo or "").lower()
+    return next((familia for familia in FAMILIAS_EXCLUIDAS if familia in id_minusculas), None)
+
+
 def precio_entrada(modelo: dict) -> Optional[float]:
     """Precio de entrada de la tarifa normal según `billing.token_prices`; None si la API no lo informa."""
     precios = ((modelo.get("billing") or {}).get("token_prices") or {}).get("default") or {}
@@ -255,7 +261,7 @@ def modelos_economicos(sesion: Sesion) -> list[str]:
         precio = precio_entrada(modelo)
         if precio is None or precio > PRECIO_MAX_ECONOMICO:
             continue
-        if any(familia in modelo["id"].lower() for familia in FAMILIAS_EXCLUIDAS):
+        if familia_excluida(modelo["id"]):
             continue
         nombre = modelo.get("name") or modelo["id"]
         if nombre not in nombres:
@@ -313,9 +319,10 @@ def abrir_sesion_auto(sesion: Sesion) -> SesionAuto:
         log.warning("No se pudo leer el catálogo de modelos; se usa el que propone Copilot: %r", e)
         endpoints = {}
     # Sin metadatos de endpoints = modelo anterior a /responses, que funciona por /chat/completions
-    compatibles = [m for m in disponibles if not endpoints.get(m) or "/chat/completions" in endpoints[m]]
+    compatibles = [m for m in disponibles if not familia_excluida(m)
+                   and (not endpoints.get(m) or "/chat/completions" in endpoints[m])]
     if not compatibles:
-        raise ErrorCopilot("El modo auto solo ofrece modelos que no admiten /chat/completions "
+        raise ErrorCopilot("El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions "
                            f"({', '.join(disponibles)}). Elige un modelo concreto en `ia.modelo`.")
     log.info("Modo auto de GitHub Copilot: usando %s (disponibles: %s)", compatibles[0], ", ".join(disponibles))
     return SesionAuto(compatibles[0], datos["session_token"], float(datos.get("expires_at") or time.time() + 3600),

@@ -1,8 +1,51 @@
 """Tests del asistente de IA (sin llamadas reales a la API)."""
 
 import pytest
-from src import asistente_ia
-from src.asistente_ia import AsistenteIA, dividir_texto
+from src import asistente_ia, copilot
+from src.asistente_ia import AsistenteIA, ErrorAsistenteIA, dividir_texto
+
+
+class _Respuesta:
+    def __init__(self, datos):
+        self.datos, self.status_code, self.text = datos, 200, ""
+
+    def json(self):
+        return self.datos
+
+
+class _Stream:
+    """Respuesta de chat simulada; con `status_code` distinto de 200 simula un error (el contenido no importa)."""
+    def __init__(self, status_code=200):
+        self.status_code, self.text = status_code, ""
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def read(self):
+        pass
+    def iter_lines(self):
+        import json
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "OK"}, "finish_reason": "stop"}]})
+        yield "data: [DONE]"
+
+
+TEXTO_LARGO = "\n".join(f"Segmento {i} con algo de contenido." for i in range(40))
+
+
+@pytest.fixture(autouse=True)
+def rutas_aisladas(monkeypatch, tmp_path):
+    """Como el fixture homónimo de test_copilot.py: el token real del equipo nunca se lee ni se toca."""
+    monkeypatch.setattr(copilot, "RUTA_TOKEN", tmp_path / "app" / "copilot.json")
+    monkeypatch.setattr(copilot, "RUTA_AUTH_OPENCODE", tmp_path / "opencode" / "auth.json")
+    monkeypatch.delenv(copilot.VARIABLE_ENTORNO, raising=False)
+
+
+def _prohibir_red(monkeypatch):
+    """Si el código consulta el catálogo o abre una sesión por GET/POST, el test falla en vez de hacer red."""
+    def prohibido(*a, **kw):
+        raise AssertionError("no debe haber ninguna petición de catálogo ni de sesión")
+    monkeypatch.setattr(asistente_ia.httpx, "get", prohibido)
+    monkeypatch.setattr(asistente_ia.httpx, "post", prohibido)
 
 
 def test_dividir_texto_corto_no_divide():
@@ -201,3 +244,140 @@ def test_cancelar_durante_el_stream(monkeypatch):
     monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: RespuestaQueCancela())
     with pytest.raises(InterruptedError):
         AsistenteIA(api_key="x")._completar("hola", cancelar)
+
+
+FAMILIAS_EXCLUIDAS_A_MANO = [("Mistral-Large-3", "mistral"), ("kimi-k3-mini", "kimi")]
+
+
+@pytest.mark.parametrize("modelo, familia", FAMILIAS_EXCLUIDAS_A_MANO)
+def test_modelo_excluido_escrito_a_mano_no_envia_nada(monkeypatch, modelo, familia):
+    enviados = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append((url, json["model"])) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo=modelo, max_caracteres_bloque=300, revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1  # la transcripción se procesaría en varias partes
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_LARGO)
+    assert enviados == []
+    assert modelo in str(error.value) and familia in str(error.value) and "autorizad" in str(error.value)
+
+
+@pytest.mark.parametrize("modelo, familia", FAMILIAS_EXCLUIDAS_A_MANO)
+def test_modelo_excluido_no_depende_del_catalogo(monkeypatch, modelo, familia):
+    enviados, consultas = [], []
+    _prohibir_red(monkeypatch)  # las sesiones por POST tampoco deben abrirse
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append((url, json["model"])) or _Stream())
+    def catalogo_caido(*a, **kw):
+        consultas.append(1)
+        raise asistente_ia.httpx.ConnectError("sin conexión")
+    monkeypatch.setattr(asistente_ia.httpx, "get", catalogo_caido)
+    asistente = AsistenteIA(api_key="gho_x", modelo=modelo, max_caracteres_bloque=300, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_LARGO)
+    assert enviados == []
+    assert consultas == []  # con un modelo fijo ni siquiera se consulta el catálogo
+    assert modelo in str(error.value) and familia in str(error.value) and "autorizad" in str(error.value)
+
+
+def _simular_auto(monkeypatch, sesiones, catalogo):
+    """Copilot en modo auto: cada apertura de sesión recibe la siguiente de `sesiones`; `catalogo` da los
+    endpoints de cada modelo ({id: [endpoints]})."""
+    respuestas = iter(sesiones)
+    monkeypatch.setattr(asistente_ia.copilot.httpx, "post", lambda *a, **kw: _Respuesta(next(respuestas)))
+    monkeypatch.setattr(asistente_ia.copilot.httpx, "get", lambda *a, **kw: _Respuesta(
+        {"data": [{"id": i, "supported_endpoints": e} for i, e in catalogo.items()]}))
+
+
+def test_auto_envia_todas_las_peticiones_al_modelo_autorizado(monkeypatch):
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["kimi-k3", "mistral-medium-3", "gpt-5.4"], "selected_model": "kimi-k3",
+                    "session_token": "st", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "mistral-medium-3": ["/chat/completions"],
+                   "gpt-5.4": ["/chat/completions"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", max_caracteres_bloque=300, revision_fidelidad=False)
+    asistente.generar_minuta(TEXTO_LARGO)
+    assert len(enviados) > 1  # varias partes: todas las peticiones pasan por la elección de auto
+    assert set(enviados) == {"gpt-5.4"}
+    assert asistente.modelo_usado == "auto → gpt-5.4"
+
+
+def test_auto_tras_401_tampoco_usa_un_modelo_excluido(monkeypatch):
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st1", "expires_at": 9999999999},
+                   {"available_models": ["kimi-k3", "gpt-5.4"], "selected_model": "kimi-k3",
+                    "session_token": "st2", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-5.4": ["/chat/completions"]})
+    respuestas = iter([_Stream(401), _Stream()])
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append((json["model"], headers["Copilot-Session-Token"])) or next(respuestas))
+    assert AsistenteIA(api_key="gho_x", modelo="auto")._completar("hola") == "OK"
+    assert enviados == [("gpt-5.4", "st1"), ("gpt-5.4", "st2")]  # el reintento usa la sesión nueva, con gpt-5.4
+
+
+def test_auto_sin_modelo_autorizado_no_envia_nada(monkeypatch):
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["mistral-medium-3", "gpt-5.3-codex"], "selected_model": "mistral-medium-3",
+                    "session_token": "st", "expires_at": 9999999999}],
+                  {"mistral-medium-3": ["/chat/completions"], "gpt-5.3-codex": ["/responses"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    with pytest.raises(ErrorAsistenteIA) as error:
+        AsistenteIA(api_key="gho_x", modelo="auto")._completar("hola")
+    assert enviados == []
+    assert "mistral-medium-3" in str(error.value) and "gpt-5.3-codex" in str(error.value)
+    assert "autorizado" in str(error.value)
+
+
+@pytest.mark.parametrize("modelo", [None, ""])
+def test_modelo_vacio_no_envia_nada_y_explica_el_motivo(monkeypatch, modelo):
+    enviados = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo=modelo, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_resumen("hola")
+    assert enviados == []
+    assert str(error.value) == ("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
+                                "`ia.modelo` de config/settings.yaml.")
+
+
+def test_auto_tras_caducar_la_sesion_tampoco_usa_un_modelo_excluido(monkeypatch):
+    import time
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st1", "expires_at": time.time() + 60},  # vence en 1 min: no vigente (margen 5)
+                   {"available_models": ["kimi-k3", "gpt-5.4"], "selected_model": "kimi-k3",
+                    "session_token": "st2", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-5.4": ["/chat/completions"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append((json["model"], headers["Copilot-Session-Token"])) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", revision_fidelidad=False)
+    asistente._completar("uno")
+    asistente._completar("dos")  # la sesión caducada se renueva aquí
+    assert enviados == [("gpt-5.4", "st1"), ("gpt-5.4", "st2")]
+
+
+def test_auto_con_catalogo_caido_tambien_salta_las_familias_excluidas(monkeypatch):
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["kimi-k3", "gpt-5.4"], "selected_model": "kimi-k3",
+                    "session_token": "st", "expires_at": 9999999999}],
+                  {})
+    def catalogo_caido(*a, **kw):
+        raise asistente_ia.httpx.ConnectError("sin conexión")
+    monkeypatch.setattr(asistente_ia.httpx, "get", catalogo_caido)
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", revision_fidelidad=False)
+    assert asistente._completar("hola") == "OK"
+    assert enviados == ["gpt-5.4"]

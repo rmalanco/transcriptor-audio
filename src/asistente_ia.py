@@ -262,10 +262,19 @@ class AsistenteIA:
 
     def _modelo_y_cabeceras(self) -> tuple[str, dict]:
         cabeceras = self._cabeceras()
-        if not self.es_auto:
-            return self.modelo, cabeceras
-        sesion_auto = self._resolver_auto()
-        return sesion_auto.modelo, cabeceras | {"Copilot-Session-Token": sesion_auto.session_token}
+        if self.es_auto:
+            sesion_auto = self._resolver_auto()
+            modelo, cabeceras = sesion_auto.modelo, cabeceras | {"Copilot-Session-Token": sesion_auto.session_token}
+        else:
+            modelo = self.modelo
+        if not isinstance(modelo, str) or not modelo.strip():
+            raise ErrorAsistenteIA("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
+                                   "`ia.modelo` de config/settings.yaml.")
+        familia = copilot.familia_excluida(modelo)
+        if familia:  # antes de enviar nada: ni la transcripción ni ninguna parte sale hacia ese modelo
+            raise ErrorAsistenteIA(f"El modelo «{modelo}» es de la familia «{familia}», que no está autorizada por la "
+                                   "empresa. Elige otro modelo en el selector o en `ia.modelo` de config/settings.yaml.")
+        return modelo, cabeceras
 
     def _completar(self, prompt, cancelar: Optional[threading.Event] = None) -> str:
         """`prompt` es el texto del usuario o una lista de mensajes adicionales (para reintentos)."""

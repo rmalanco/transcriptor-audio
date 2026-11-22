@@ -31,11 +31,13 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 17. ✅ [🟢] Mostrar en pantalla o en la pestaña Registro los errores de «Guardar como…» — hallazgo A-27 — carril S
 18. [🟡] No sobrescribir sin aviso la transcripción, el resumen o la minuta de otra grabación con el mismo nombre en la misma carpeta (`reunion.m4a` y `reunion.mp4`); decidir antes entre incluir la extensión de origen en el nombre o preguntar antes de sobrescribir — hallazgo A-25, separado del punto 1 — carril S o M según la decisión
 19. [🟡] Cubrir con tests los rechazos de la CLI (archivo inexistente o extensión no admitida, fallo al transcribir) y sus órdenes de sesión (`--copilot-logout`, `--copilot-modelos` sin sesión), con las rutas de token aisladas y sin red, sin fijar lo que cambiará el punto 9 — hallazgo A-16, separado del punto 2 — carril S
+20. [🟡] Que `--copilot-modelos` y el selector de modelo de la ventana no ofrezcan modelos de familias no autorizadas ni sugieran ponerlos en `ia.modelo` — hallazgo A-12, complemento de la historia 03 — carril S
+21. [🟡] Decidir si la exclusión de Mistral AI cubre también los modelos cuyo nombre no contiene «mistral» (Codestral, Devstral, Ministral, Pixtral, Magistral) y, si es así, ampliar la lista de familias — decisión del usuario pendiente, historia 03 — carril S
 
 ## Backlog
 
 1. Como usuario, quiero cancelar la generación de un resumen o una minuta, para no tener que cerrar la app cuando el modelo tarda. — hallazgo A-04 — carril M
-2. Como usuario con una cuenta de empresa, quiero que mi transcripción nunca se envíe a un modelo de una familia no autorizada, tampoco en modo `auto` ni con un modelo escrito a mano, para cumplir la política de mi empresa. — hallazgo A-12 — carril M
+2. ✅ Como usuario con una cuenta de empresa, quiero que mi transcripción nunca se envíe a un modelo de una familia no autorizada, tampoco en modo `auto` ni con un modelo escrito a mano, para cumplir la política de mi empresa. — hallazgo A-12 — carril M
 3. Como usuario, quiero que la app me avise cuando un documento quedó incompleto y que conserve las partes ya procesadas si una falla, para no pagar de nuevo toda la generación. — hallazgo A-11 (en parte posible) — carril M
 4. Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S
 5. Como usuario, quiero un panel de configuración con todo lo que se puede configurar, para ajustar la app sin editar `config/settings.yaml` a mano. — carril L

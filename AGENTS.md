@@ -37,7 +37,7 @@ Hechos verificados y propuestas ya descartadas: [.context/transcriptor-facts.md]
 9. Los widgets solo se tocan desde el hilo principal; los hilos de fondo pasan por `_en_ui`.
 10. Solo se usa `/chat/completions`; no dar por compatible un modelo que solo admite `/responses`.
 
-La regla 7 nace de un hallazgo aceptado y el código aún no la cumple: ver `BACKLOG.md`. La regla 6 se cumple desde el 2026-11-22 (`src/persistencia.py`).
+Las reglas 6 y 7 se cumplen desde el 2026-11-22: la 6 en `src/persistencia.py` y la 7 en `src/copilot.py` (`familia_excluida`), que se comprueba al elegir el modelo de `auto` y justo antes de cada envío.
 
 ## Mantener el estado al día
 
@@ -104,8 +104,8 @@ Detalle completo, fuentes y hallazgos en [docs/integracion-copilot.md](docs/inte
 - Un modelo está disponible si `policy.state == "enabled"` (no `model_picker_enabled`, que viene en `false`).
 - Solo se usa `/chat/completions`; los modelos que solo admiten `/responses` (`*-codex`, `gpt-5.4-mini`…) no sirven.
 - `x-initiator`: `user` en la primera petición de cada documento, `agent` en las demás.
-- Modo `auto`: `POST /models/session` → `Copilot-Session-Token`; se elige el primer modelo compatible con
-  `/chat/completions`; sesión de 1 h renovada 5 min antes.
+- Modo `auto`: `POST /models/session` → `Copilot-Session-Token`; se elige el primer modelo autorizado (fuera de
+  `FAMILIAS_EXCLUIDAS`) y compatible con `/chat/completions`; sesión de 1 h renovada 5 min antes.
 
 ## Pendientes / decisiones abiertas
 
