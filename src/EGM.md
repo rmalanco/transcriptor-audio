@@ -140,19 +140,23 @@ Dependencias entre módulos (quién importa a quién):
 - Los widgets solo se tocan desde el hilo principal. Los hilos de fondo pasan por `ui.py:AppTranscriptor._en_ui`,
   que usa `self.after(0, …)` y no hace nada si la ventana se está cerrando.
 - Solo hay una transcripción a la vez (`ui.py:AppTranscriptor._transcribiendo`) y una generación de IA a la vez
-  (`ui.py:AppTranscriptor._generacion`); no se genera un documento mientras se transcribe
+  (`flujo_documentos.py:GestorDocumentos.vigente`); no se genera un documento mientras se transcribe
   (`ui.py:AppTranscriptor._generar_documento_ia`) ni se transcribe mientras se genera
   (`ui.py:AppTranscriptor._alternar_transcripcion`).
 - La cancelación de la transcripción es cooperativa: un `threading.Event` (`cancelar_flag`) que
   `transcriber.py:TranscriptorAudio.transcribir` revisa tras cada segmento aceptado (no tras los descartados como
   alucinación, ni durante la carga del modelo ni la preparación con VAD); al activarse, devuelve lo transcrito hasta
   ahí, pero la ventana lo descarta: no escribe el archivo ni guarda en el historial.
+- `flujo_documentos.py:GestorDocumentos` lleva la generación vigente (`vigente`) y el asistente que se reutiliza entre
+  generaciones. Solo se usa desde el hilo principal y lo comprueba (`RuntimeError` desde otro hilo). El asistente lo crea
+  `ui.py:AppTranscriptor._crear_asistente` con la configuración y el modelo elegidos en ese momento, y se olvida al
+  cancelar, al cambiar de modelo y tras «sin sesión» de Copilot.
 - Cada generación de IA es un `flujo_documentos.py:Generacion` (comparada por identidad) con su propio
   `threading.Event` (`cancelar`), así que cancelar una no afecta a la siguiente. El hilo de fondo ejecuta
   `flujo_documentos.py:procesar_generacion`, que llama a `AsistenteIA` (vía `generar_documento`) y entrega el resultado
   exactamente una vez: no toca widgets, historial ni archivos. El único punto de decisión es
   `ui.py:AppTranscriptor._recibir_documento_ia`, en el hilo principal, al que llega con `_en_ui`: si la generación ya no
-  es la vigente (`self._generacion`, por identidad), descarta el resultado, un error o un 401 sin guardar nada ni abrir
+  es la vigente (`GestorDocumentos.terminar`, por identidad), descarta el resultado, un error o un 401 sin guardar nada ni abrir
   el login, antes de tocar cualquier otro estado. `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al
   instante; la petición ya abierta no se aborta: el hilo abandonado termina al recibir la siguiente línea de la
   respuesta, o tras `AsistenteIA.timeout` sin datos.

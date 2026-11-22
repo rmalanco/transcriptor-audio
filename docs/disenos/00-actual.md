@@ -125,8 +125,8 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   señal de cancelación (`cancelar`) y un hilo que ejecuta `flujo_documentos.py:procesar_generacion`: solo llama a
   `AsistenteIA`, no toca widgets, historial ni archivos, y entrega lo que obtiene (o el error) una sola vez con
   `_en_ui(_recibir_documento_ia, …)`. El punto de decisión es único y está en el hilo
-  principal: `_recibir_documento_ia` compara la generación recibida con `self._generacion`; si no coincide (se
-  canceló), descarta el resultado y no guarda nada. Solo hay una generación a la vez, y no se genera mientras se
+  principal: `_recibir_documento_ia` pregunta a `GestorDocumentos.terminar` si la generación recibida sigue siendo la vigente
+  (por identidad); si no (se canceló), descarta el resultado y no guarda nada. Solo hay una generación a la vez, y no se genera mientras se
   transcribe ni al revés. Al cancelar, la señal de esa generación se activa y la siguiente usa otra, así que el hilo
   abandonado no afecta a la nueva.
 - **Notas de las partes en paralelo.** `AsistenteIA._notas_por_bloque` lanza un `ThreadPoolExecutor`

@@ -31,8 +31,8 @@ from src.transcriber import TranscriptorAudio
 from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, OpcionesTranscripcion,
                                      TranscripcionPersistida, ruta_transcripcion, transcribir_y_persistir,
                                      transcriptor_para)
-from src.flujo_documentos import (SUFIJOS_DOCUMENTO, DocumentoGenerado, Generacion, fecha_de_la_reunion,
-                                  procesar_generacion, ruta_documento, texto_para_ia)
+from src.flujo_documentos import (SUFIJOS_DOCUMENTO, DocumentoGenerado, GestorDocumentos, Generacion,
+                                  procesar_generacion)
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente,
                               texto_destino_documento, texto_sin_guardado)
@@ -141,8 +141,6 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._inicio_transcripcion: Optional[float] = None
         self._progreso = 0.0
         self._cerrando = False
-        self._asistente: Optional[AsistenteIA] = None
-        self._generacion: Optional[Generacion] = None  # generación de resumen/minuta activa, si la hay
         self._vista_previa_ia: Optional[_VistaPreviaIA] = None  # controles de IA antes de esa generación
         self.tabs_ia: dict = {}
         self.id_historial: Optional[int] = None        # entrada del historial mostrada ahora
@@ -155,6 +153,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         except Exception as e:  # el historial no debe impedir usar la app
             self.historial = None
             log.exception("No se pudo abrir el historial: %s", e)
+        self._documentos = GestorDocumentos(self.historial, self._crear_asistente)
 
         # Variables de control
         idioma_cfg = self.configuracion["transcripcion"]["idioma"]
@@ -505,7 +504,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 return
             self.cancelar_flag.set()
         if self._generando_ia():
-            genitivo = DOCUMENTOS_IA[self._generacion.clave]["genitivo"]
+            genitivo = DOCUMENTOS_IA[self._documentos.vigente.clave]["genitivo"]
             if not messagebox.askyesno("Salir", f"Hay una generación {genitivo} en curso. ¿Cancelarla y salir?"):
                 return
             self._cancelar_documento_ia()
@@ -760,7 +759,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     # ------------------------------------------------------------ Resumen / minuta (IA)
 
     def _generando_ia(self) -> bool:
-        return self._generacion is not None
+        return self._documentos.vigente is not None
 
     def _configurar_estilos_markdown(self, texto: ctk.CTkTextbox):
         # CTkTextbox no permite fuentes en tag_config; se usa el widget tk interno
@@ -809,25 +808,30 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         tab["estado"].configure(text=self._texto_modelo_ia())  # sin restos del documento anterior
 
     def _alternar_documento_ia(self, clave: str):
-        if self._generacion is not None and self._generacion.clave == clave:
+        vigente = self._documentos.vigente
+        if vigente is not None and vigente.clave == clave:
             self._cancelar_documento_ia()
         else:
             self._generar_documento_ia(clave)
 
+    def _crear_asistente(self) -> AsistenteIA:
+        """Lo llama el gestor de documentos, con la configuración y el modelo elegidos en ese momento."""
+        cfg = self.configuracion["ia"]
+        return AsistenteIA(
+            modelo=self._modelo_ia_configurado(),
+            temperatura=cfg["temperatura"],
+            max_caracteres_bloque=cfg["max_caracteres_bloque"],
+            revision_fidelidad=cfg["revision_fidelidad"],
+            peticiones_paralelas=cfg["peticiones_paralelas"],
+            enterprise_url=cfg["copilot_enterprise_url"] or None,
+        )
+
     def _generar_documento_ia(self, clave: str):
         if not self.resultado_actual or self._generando_ia() or self._transcribiendo():
             return
-        cfg = self.configuracion["ia"]
         try:
-            if self._asistente is None:
-                self._asistente = AsistenteIA(
-                    modelo=self._modelo_ia_configurado(),
-                    temperatura=cfg["temperatura"],
-                    max_caracteres_bloque=cfg["max_caracteres_bloque"],
-                    revision_fidelidad=cfg["revision_fidelidad"],
-                    peticiones_paralelas=cfg["peticiones_paralelas"],
-                    enterprise_url=cfg["copilot_enterprise_url"] or None,
-                )
+            generacion = self._documentos.iniciar(clave, self.resultado_actual, self.archivo_actual,
+                                                  self.id_historial, self._fecha_historial)
         except ErrorSinSesionCopilot:
             self._iniciar_sesion_copilot(lambda: self._generar_documento_ia(clave))
             return
@@ -835,21 +839,11 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             messagebox.showerror("Asistente IA", str(e))
             return
 
-        # Una línea por segmento: facilita dividir transcripciones largas en bloques
-        texto = texto_para_ia(self.resultado_actual)
-        # Si el audio se abrió desde el historial y ya no existe, el documento solo se guarda en el historial
-        ruta_salida = ruta_documento(self.archivo_actual, clave)
-        # La fecha se calcula aquí, en el hilo principal, y solo la usa la minuta
-        fecha = fecha_de_la_reunion(self.archivo_actual, self._fecha_historial) if clave == "minuta" else None
-
         tab = self.tabs_ia[clave]
-        asistente = self._asistente
-        generacion = Generacion(clave=clave, asistente=asistente, texto=texto, fecha=fecha,
-                                ruta_salida=ruta_salida, id_historial=self.id_historial)
+        asistente = generacion.asistente
         self._vista_previa_ia = _VistaPreviaIA(
             contenido_previo=tab["contenido"], texto_boton_previo=tab["generar"].cget("text"),
             estado_transcribir_previo=self.btn_transcribir.cget("state"))
-        self._generacion = generacion
         for k, t in self.tabs_ia.items():
             t["generar"].configure(state="normal" if k == clave else "disabled")
         tab["generar"].configure(text="■ Cancelar")
@@ -870,17 +864,16 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         ).start()
 
     def _progreso_documento_ia(self, generacion: Generacion, mensaje: str):
-        if generacion is self._generacion:  # una generación cancelada ya no escribe en su pestaña
+        if generacion is self._documentos.vigente:  # una generación cancelada ya no escribe en su pestaña
             self.tabs_ia[generacion.clave]["estado"].configure(text=mensaje)
 
     def _recibir_documento_ia(self, generacion: Generacion, documento: Optional[DocumentoGenerado],
                               error: Optional[Exception]):
         """Único punto de decisión: si la generación se canceló, descarta el resultado sin tocar nada más."""
         clave = generacion.clave
-        if generacion is not self._generacion:
+        if not self._documentos.terminar(generacion):
             self._log(f"Resultado de {clave} descartado: la generación se canceló")
             return
-        self._generacion = None
         self._restaurar_controles_ia(clave)
         if error is None:
             persistencia = persistir_documento_si_vigente(False, self.historial, generacion.id_historial, clave,
@@ -891,7 +884,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._log(f"Error generando {clave}: {error}")
         mensaje = str(error) or type(error).__name__
         if isinstance(error, ErrorSinSesionCopilot):
-            self._asistente = None  # se recrea con el token nuevo tras iniciar sesión
+            self._documentos.olvidar_asistente()  # se recrea con el token nuevo tras iniciar sesión
             self._finalizar_documento_ia(clave, None, None, mensaje)
             self._iniciar_sesion_copilot(lambda: self._generar_documento_ia(clave))
         else:
@@ -899,15 +892,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _cancelar_documento_ia(self):
         """Devuelve la ventana al instante; el hilo abandonado termina solo y su resultado se descarta."""
-        generacion = self._generacion
+        generacion = self._documentos.cancelar()  # olvida el asistente: el hilo abandonado conserva el suyo
         if generacion is None:
             return
         clave = generacion.clave
         tab = self.tabs_ia[clave]
         contenido_previo = self._vista_previa_ia.contenido_previo  # antes de restaurar, que lo borra
-        generacion.cancelar.set()
-        self._generacion = None
-        self._asistente = None  # el hilo abandonado conserva el suyo; la siguiente generación crea otro
         if contenido_previo is not None:
             self._escribir_tab_ia(clave, contenido_previo)
             tab["estado"].configure(text=f"Generación cancelada · se conserva {DOCUMENTOS_IA[clave]['anterior']}")
@@ -1018,7 +1008,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             return
         texto_anterior = self._texto_modelo_ia()
         self._modelo_preferido = modelo
-        self._asistente = None  # se recrea con el modelo nuevo en la próxima generación
+        self._documentos.olvidar_asistente()  # se recrea con el modelo nuevo en la próxima generación
         for tab in self.tabs_ia.values():
             if tab["estado"].cget("text") == texto_anterior:
                 tab["estado"].configure(text=self._texto_modelo_ia())

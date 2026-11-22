@@ -67,7 +67,7 @@ aunque se ejecute desde otra carpeta.
 |---|---|
 | `transcriber.py` | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones |
 | `flujo_transcripcion.py` | Flujo de la transcripción sin interfaz: opciones, elección del transcriptor, ruta, llamada a Whisper y `transcribir_y_persistir` (recorrido completo, con fases y cancelación) |
-| `flujo_documentos.py` | Documentos sin interfaz: texto que se envía a la IA, ruta junto al audio, fecha de la reunión y la generación de fondo (`Generacion`, `generar_documento`, `procesar_generacion`) |
+| `flujo_documentos.py` | Documentos sin interfaz: texto que se envía a la IA, ruta junto al audio, fecha de la reunión y la generación de fondo (`Generacion`, `generar_documento`, `procesar_generacion`) y `GestorDocumentos` (generación vigente y asistente) |
 | `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`; preferencias del usuario en `preferencias.json` (modelo de IA elegido, `modelo_ia_efectivo`) |
 | `copilot.py` | Integración con GitHub Copilot: login (device flow), token, catálogo de modelos, modo `auto` |
 | `asistente_ia.py` | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, post-proceso de la minuta |

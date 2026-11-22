@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from src.asistente_ia import AsistenteIA
 from src.transcriber import ResultadoTranscripcion
@@ -93,3 +93,62 @@ def procesar_generacion(generacion: Generacion, on_progreso, entregar) -> None:
     except Exception as e:  # incluye InterruptedError (cancelada) y ErrorSinSesionCopilot
         documento, error = None, e
     entregar(generacion, documento, error)
+
+
+class GestorDocumentos:
+    """Lleva la generación vigente y el asistente que se reutiliza entre generaciones. Sin interfaz ni red. Solo se
+    usa desde el hilo en que se creó (el principal): cada método que cambia estado lo comprueba."""
+
+    def __init__(self, historial, crear_asistente: Callable[[], AsistenteIA]):
+        self._historial = historial
+        self._crear_asistente = crear_asistente
+        self._hilo = threading.get_ident()
+        self._vigente: Optional[Generacion] = None
+        self._asistente: Optional[AsistenteIA] = None
+
+    @property
+    def vigente(self) -> Optional[Generacion]:
+        return self._vigente
+
+    def _comprobar_hilo(self):
+        if threading.get_ident() != self._hilo:
+            raise RuntimeError("GestorDocumentos solo se usa desde el hilo principal")
+
+    def asistente(self) -> AsistenteIA:
+        self._comprobar_hilo()
+        if self._asistente is None:
+            self._asistente = self._crear_asistente()
+        return self._asistente
+
+    def iniciar(self, clave: str, resultado: ResultadoTranscripcion, archivo: str, id_historial: Optional[int],
+                fecha_historial: Optional[str]) -> Generacion:
+        self._comprobar_hilo()
+        if self._vigente is not None:
+            raise ValueError("ya hay una generación en curso")
+        asistente = self.asistente()
+        fecha = fecha_de_la_reunion(archivo, fecha_historial) if clave == "minuta" else None
+        generacion = Generacion(clave=clave, asistente=asistente, texto=texto_para_ia(resultado), fecha=fecha,
+                                ruta_salida=ruta_documento(archivo, clave), id_historial=id_historial)
+        self._vigente = generacion
+        return generacion
+
+    def terminar(self, generacion: Generacion) -> bool:
+        self._comprobar_hilo()
+        if generacion is None or generacion is not self._vigente:
+            return False
+        self._vigente = None
+        return True
+
+    def cancelar(self) -> Optional[Generacion]:
+        self._comprobar_hilo()
+        cancelada = self._vigente
+        if cancelada is None:
+            return None
+        cancelada.cancelar.set()
+        self._vigente = None
+        self._asistente = None
+        return cancelada
+
+    def olvidar_asistente(self):
+        self._comprobar_hilo()
+        self._asistente = None

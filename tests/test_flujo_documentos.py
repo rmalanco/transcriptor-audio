@@ -2,12 +2,13 @@
 Sin ventana, sin red y sin modelo real."""
 
 import os
+import threading
 import time
 
 import pytest
 
 from src import flujo_documentos as fd
-from src.asistente_ia import ErrorAsistenteIA
+from src.asistente_ia import ErrorAsistenteIA, ErrorModeloIA, ErrorSinSesionCopilot
 from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
 
 
@@ -174,3 +175,163 @@ def test_cada_generacion_tiene_su_propia_senal():
 
     assert segunda.cancelar.is_set() is False
     assert primera is not segunda
+
+
+# ---- GestorDocumentos (historia 13)
+
+class FabricaAsistentes:
+    """Hace de `crear_asistente`: cuenta sus llamadas, devuelve un AsistenteFalso nuevo o lanza lo que se le diga."""
+
+    def __init__(self, lanza=None):
+        self.lanza = lanza
+        self.llamadas = 0
+
+    def __call__(self):
+        self.llamadas += 1
+        if self.lanza is not None:
+            raise self.lanza
+        return AsistenteFalso()
+
+
+def _resultado_reunion():
+    return ResultadoTranscripcion(
+        texto_completo="Hola equipo. Cerramos el punto.",
+        segmentos=[SegmentoTranscripcion(0.0, 1.0, "Hola equipo."), SegmentoTranscripcion(1.0, 2.0, "Cerramos el punto.")],
+        idioma_detectado="es",
+        probabilidad_idioma=1.0,
+        duracion_total=2.0,
+    )
+
+
+def _audio(tmp_path):
+    audio = tmp_path / "reunion.m4a"
+    audio.touch()
+    os.utime(audio, (MARZO_5, MARZO_5))
+    return str(audio)
+
+
+def test_gestor_reutiliza_el_asistente_entre_generaciones(tmp_path):
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+
+    minuta = gestor.iniciar("minuta", _resultado_reunion(), audio, 7, None)
+    assert gestor.terminar(minuta) is True
+    assert gestor.vigente is None
+    resumen = gestor.iniciar("resumen", _resultado_reunion(), audio, 7, None)
+
+    assert minuta.asistente is resumen.asistente
+    assert fabrica.llamadas == 1
+    assert minuta.clave == "minuta" and resumen.clave == "resumen"
+    assert minuta.texto == resumen.texto == "Hola equipo.\nCerramos el punto."
+    assert minuta.ruta_salida == str(tmp_path / "reunion.m4a_minuta.md")
+    assert resumen.ruta_salida == str(tmp_path / "reunion.m4a_resumen.md")
+    assert minuta.id_historial == resumen.id_historial == 7
+    assert minuta.fecha == "5 de marzo de 2026 (fecha del archivo)"
+    assert resumen.fecha is None
+
+
+@pytest.mark.parametrize("via", ["cancelar", "olvidar"])
+def test_gestor_recrea_el_asistente_tras_cancelar_u_olvidar(tmp_path, via):
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+    primera = gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    asistente_anterior = primera.asistente
+
+    if via == "cancelar":
+        gestor.cancelar()
+    else:
+        gestor.terminar(primera)
+        gestor.olvidar_asistente()
+    segunda = gestor.iniciar("resumen", _resultado_reunion(), audio, None, None)
+
+    assert segunda.asistente is not asistente_anterior
+    assert fabrica.llamadas == 2
+
+
+@pytest.mark.parametrize("error", [ErrorSinSesionCopilot("sin sesión de Copilot"), ErrorModeloIA("modelo no válido")])
+def test_iniciar_sin_asistente_no_deja_vigente(tmp_path, error):
+    fabrica = FabricaAsistentes(lanza=error)
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+
+    with pytest.raises(type(error)) as info:
+        gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    assert info.value is error
+    assert gestor.vigente is None
+
+    fabrica.lanza = None
+    gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    assert fabrica.llamadas == 2
+
+
+def test_iniciar_con_otra_vigente_lanza_value_error(tmp_path):
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+    primera = gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+
+    with pytest.raises(ValueError):
+        gestor.iniciar("resumen", _resultado_reunion(), audio, None, None)
+
+    assert gestor.vigente is primera
+    assert fabrica.llamadas == 1
+
+
+def test_cancelar_devuelve_la_cancelada_y_libera(tmp_path):
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+
+    assert gestor.cancelar() is None
+    assert fabrica.llamadas == 0
+
+    primera = gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    assert gestor.cancelar() is primera
+    assert primera.cancelar.is_set()
+    assert gestor.vigente is None
+
+    segunda = gestor.iniciar("resumen", _resultado_reunion(), audio, None, None)
+    assert gestor.terminar(primera) is False
+    assert gestor.vigente is segunda
+    assert gestor.asistente() is segunda.asistente
+    assert fabrica.llamadas == 2
+
+
+def test_gestor_desde_otro_hilo_lanza_runtime_error(tmp_path):
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(None, fabrica)
+    audio = _audio(tmp_path)
+    vigente = gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    llamadas_iniciales = fabrica.llamadas
+    metodos = {
+        "cancelar": gestor.cancelar,
+        "iniciar": lambda: gestor.iniciar("resumen", _resultado_reunion(), audio, None, None),
+        "terminar": lambda: gestor.terminar(vigente),
+        "asistente": gestor.asistente,
+        "olvidar_asistente": gestor.olvidar_asistente,
+    }
+    errores = {}
+
+    def llamar_todos():
+        for nombre, metodo in metodos.items():
+            try:
+                metodo()
+            except Exception as e:
+                errores[nombre] = e
+
+    hilo = threading.Thread(target=llamar_todos)
+    hilo.start()
+    hilo.join()
+
+    assert set(errores) == set(metodos)
+    assert all(isinstance(e, RuntimeError) for e in errores.values())
+    assert gestor.vigente is vigente
+    assert vigente.cancelar.is_set() is False
+    assert fabrica.llamadas == llamadas_iniciales
+
+
+def test_terminar_sin_generacion_no_da_por_terminada_ninguna():
+    gestor = fd.GestorDocumentos(None, lambda: object())
+    assert gestor.terminar(None) is False
