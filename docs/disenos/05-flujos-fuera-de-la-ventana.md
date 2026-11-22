@@ -910,3 +910,5 @@ Una desviación respecto a lo pedido: la firma es `desde_configuracion(configura
 --------------------------------------------------------------------------------
 
 *Redactado con EGM (Tándem `/diseno`); revisado el 2026-11-22.*
+
+Estado: implementado el 2026-11-22 en las historias 08 a 14 (`docs/historias/hechas/`).

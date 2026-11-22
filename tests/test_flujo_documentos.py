@@ -1,14 +1,20 @@
 """Documentos fuera de la ventana (historia 10): texto que se envía, ruta junto al audio y fecha de la reunión.
 Sin ventana, sin red y sin modelo real."""
 
+import json
 import os
+import re
 import threading
 import time
 
 import pytest
 
+from src import asistente_ia, copilot
 from src import flujo_documentos as fd
-from src.asistente_ia import ErrorAsistenteIA, ErrorModeloIA, ErrorSinSesionCopilot
+from src.asistente_ia import (SECCIONES_MINUTA, SECCIONES_RESUMEN, AsistenteIA, ErrorAsistenteIA, ErrorModeloIA,
+                             ErrorSinSesionCopilot, dividir_texto)
+from src.historial import Historial
+from src.persistencia import persistir_documento
 from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
 
 
@@ -179,6 +185,10 @@ def test_cada_generacion_tiene_su_propia_senal():
 
 # ---- GestorDocumentos (historia 13)
 
+def _prohibido(*a, **kw):
+    raise AssertionError("no debe haber ninguna petición de catálogo ni de sesión")
+
+
 class FabricaAsistentes:
     """Hace de `crear_asistente`: cuenta sus llamadas, devuelve un AsistenteFalso nuevo o lanza lo que se le diga."""
 
@@ -311,6 +321,7 @@ def test_gestor_desde_otro_hilo_lanza_runtime_error(tmp_path):
         "terminar": lambda: gestor.terminar(vigente),
         "asistente": gestor.asistente,
         "olvidar_asistente": gestor.olvidar_asistente,
+        "recibir": lambda: gestor.recibir(vigente, None, None),
     }
     errores = {}
 
@@ -335,3 +346,229 @@ def test_gestor_desde_otro_hilo_lanza_runtime_error(tmp_path):
 def test_terminar_sin_generacion_no_da_por_terminada_ninguna():
     gestor = fd.GestorDocumentos(None, lambda: object())
     assert gestor.terminar(None) is False
+
+
+# ---- Recepcion y GestorDocumentos.recibir (historia 14)
+
+@pytest.fixture
+def historial(tmp_path):
+    return Historial(str(tmp_path / "historial.db"))
+
+
+def test_recibir_vigente_guarda_y_devuelve_lista(historial, tmp_path):
+    audio = _audio(tmp_path)
+    id_ = historial.crear(audio, _resultado_reunion())
+    gestor = fd.GestorDocumentos(historial, FabricaAsistentes())
+    generacion = gestor.iniciar("minuta", _resultado_reunion(), audio, id_, None)
+    documento = fd.DocumentoGenerado("# Minuta: Revisión de lanzamiento\n\n## Objetivo\nRevisar.", "gpt-5.4", 1.5)
+
+    recepcion = gestor.recibir(generacion, documento, None)
+
+    assert recepcion.estado == "lista"
+    assert recepcion.documento is documento
+    assert recepcion.persistencia.motivo_historial is None
+    assert recepcion.persistencia.motivo_exportacion is None
+    entrada = historial.obtener(id_)
+    assert entrada.minuta == documento.contenido
+    assert entrada.minuta_modelo == "gpt-5.4"
+    assert entrada.titulo == "Revisión de lanzamiento"
+    archivo = tmp_path / "reunion.m4a_minuta.md"
+    assert archivo.read_text(encoding="utf-8") == documento.contenido + "\n"
+    assert recepcion.persistencia.ruta_exportada == str(archivo)
+    assert recepcion.persistencia.id_historial == id_
+    assert gestor.vigente is None
+
+
+def test_recibir_entrada_eliminada_exporta_y_avisa(historial, tmp_path):
+    audio = _audio(tmp_path)
+    id_ = historial.crear(audio, _resultado_reunion())
+    gestor = fd.GestorDocumentos(historial, FabricaAsistentes())
+    generacion = gestor.iniciar("minuta", _resultado_reunion(), audio, id_, None)
+    historial.eliminar(id_)
+    documento = fd.DocumentoGenerado("# Minuta: Revisión de lanzamiento", "gpt-5.4", 1.5)
+
+    recepcion = gestor.recibir(generacion, documento, None)
+
+    assert recepcion.estado == "lista"
+    assert recepcion.persistencia.motivo_historial == "La entrada ya no está en el historial"
+    assert recepcion.persistencia.id_historial is None
+    archivo = tmp_path / "reunion.m4a_minuta.md"
+    assert archivo.read_text(encoding="utf-8") == documento.contenido + "\n"
+    assert recepcion.persistencia.ruta_exportada == str(archivo)
+    assert gestor.vigente is None
+
+
+def test_recibir_sin_audio_solo_historial(historial, tmp_path):
+    audio = str(tmp_path / "reunion.m4a")  # no existe: la generación no tiene ruta junto al audio
+    id_ = historial.crear(audio, _resultado_reunion())
+    gestor = fd.GestorDocumentos(historial, FabricaAsistentes())
+    generacion = gestor.iniciar("minuta", _resultado_reunion(), audio, id_, "2026-04-07T10:00:00")
+    documento = fd.DocumentoGenerado("# Minuta: Revisión de lanzamiento", "gpt-5.4", 1.5)
+
+    recepcion = gestor.recibir(generacion, documento, None)
+
+    assert recepcion.estado == "lista"
+    assert historial.obtener(id_).minuta == documento.contenido
+    assert recepcion.persistencia.ruta_exportada is None
+    assert recepcion.persistencia.motivo_exportacion is None
+    assert not list(tmp_path.glob("*.md"))
+
+
+@pytest.mark.parametrize("documento, error", [
+    (fd.DocumentoGenerado("# Minuta nueva", "gpt-5.4", 1.0), None),
+    (None, ErrorAsistenteIA("sin cuota")),
+    (None, ErrorSinSesionCopilot("sin sesión de Copilot")),
+], ids=["documento", "error", "sin_sesion"])
+def test_recibir_cancelada_descarta_sin_guardar_ni_olvidar(historial, tmp_path, documento, error):
+    audio = _audio(tmp_path)
+    id_ = historial.crear(audio, _resultado_reunion())
+    ruta = tmp_path / "reunion.m4a_minuta.md"
+    persistir_documento(historial, id_, "minuta", "# Minuta anterior", "gpt-4.1", str(ruta))
+    os.utime(ruta, (MARZO_5, MARZO_5))  # una fecha pasada: si se reescribe, el mtime cambia
+    antes = ruta.stat().st_mtime
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(historial, fabrica)
+    cancelada = gestor.iniciar("minuta", _resultado_reunion(), audio, id_, None)
+    gestor.cancelar()
+    vigente = gestor.iniciar("minuta", _resultado_reunion(), audio, id_, None)
+
+    recepcion = gestor.recibir(cancelada, documento, error)
+
+    assert recepcion.estado == "descartada"
+    assert recepcion.persistencia is None
+    assert recepcion.documento is None
+    entrada = historial.obtener(id_)
+    assert entrada.minuta == "# Minuta anterior"
+    assert entrada.minuta_modelo == "gpt-4.1"
+    assert ruta.read_text(encoding="utf-8") == "# Minuta anterior\n"
+    assert ruta.stat().st_mtime == antes
+    assert gestor.vigente is vigente
+    assert gestor.asistente() is vigente.asistente
+    assert fabrica.llamadas == 2
+
+
+def test_recibir_sin_sesion_vigente_olvida_el_asistente(historial, tmp_path):
+    audio = _audio(tmp_path)
+    fabrica = FabricaAsistentes()
+    gestor = fd.GestorDocumentos(historial, fabrica)
+    generacion = gestor.iniciar("minuta", _resultado_reunion(), audio, None, None)
+    asistente_anterior = generacion.asistente
+    error = ErrorSinSesionCopilot("sin sesión de Copilot")
+
+    recepcion = gestor.recibir(generacion, None, error)
+
+    assert recepcion.estado == "sin_sesion"
+    assert recepcion.mensaje == str(error)
+    assert gestor.vigente is None
+    siguiente = gestor.iniciar("resumen", _resultado_reunion(), audio, None, None)
+    assert siguiente.asistente is not asistente_anterior
+    assert fabrica.llamadas == 2
+
+
+# ---- Fallo de una parte con AsistenteIA real (httpx simulado, sin red)
+
+DOCUMENTO_COMPLETO = "\n\n".join(f"{seccion}\nContenido." for seccion in SECCIONES_RESUMEN + SECCIONES_MINUTA)
+
+
+@pytest.fixture(autouse=True)
+def rutas_aisladas(monkeypatch, tmp_path):
+    """Como el fixture homónimo de test_copilot.py: el token real del equipo nunca se lee ni se toca."""
+    monkeypatch.setattr(copilot, "RUTA_TOKEN", tmp_path / "app" / "copilot.json")
+    monkeypatch.setattr(copilot, "RUTA_AUTH_OPENCODE", tmp_path / "opencode" / "auth.json")
+    monkeypatch.delenv(copilot.VARIABLE_ENTORNO, raising=False)
+
+
+class _StreamFalso:
+    """Respuesta de chat simulada: con `status_code` distinto de 200 es un error; si no, devuelve `contenido`."""
+    def __init__(self, status_code=200, contenido=""):
+        self.status_code, self.text, self.headers = status_code, "sin permiso" if status_code >= 400 else "", {}
+        self._contenido = contenido
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        pass
+
+    def iter_lines(self):
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": self._contenido}, "finish_reason": "stop"}]})
+        yield "data: [DONE]"
+
+
+def _numero_de_parte(cuerpo):
+    """Número de parte de una petición de notas, o None si es otra petición (la redacción)."""
+    coincidencia = re.search(r"Esta es la parte (\d+) de", cuerpo["messages"][-1]["content"])
+    return int(coincidencia.group(1)) if coincidencia else None
+
+
+def _numeros_de_nota(cuerpos):
+    return [n for n in (_numero_de_parte(c) for c in cuerpos) if n is not None]
+
+
+def test_fallo_de_una_parte_reutiliza_notas_y_cancelar_las_pierde(historial, tmp_path, monkeypatch):
+    lineas = [f"Segmento {i:03d} con algo de contenido." for i in range(60)]
+    resultado = ResultadoTranscripcion(
+        texto_completo="\n".join(lineas),
+        segmentos=[SegmentoTranscripcion(float(i), i + 1.0, linea) for i, linea in enumerate(lineas)],
+        idioma_detectado="es", probabilidad_idioma=1.0, duracion_total=60.0)
+    partes = dividir_texto("\n".join(lineas), 300)
+    total = len(partes)
+    assert total >= 3
+    audio = _audio(tmp_path)
+    id_ = historial.crear(audio, resultado)
+
+    fallar = {"activo": True}  # la parte 2 recibe un 403 mientras esté activo
+    cuerpos = []
+
+    def stream(metodo, url, json, headers, timeout):
+        cuerpos.append(json)
+        contenido = json["messages"][-1]["content"]
+        if _numero_de_parte(json) is None:
+            return _StreamFalso(200, DOCUMENTO_COMPLETO)
+        if fallar["activo"] and partes[1] in contenido:
+            return _StreamFalso(403)
+        return _StreamFalso(200, f"- Nota de la parte {_numero_de_parte(json)}")
+
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    monkeypatch.setattr(asistente_ia.httpx, "get", _prohibido)
+    monkeypatch.setattr(asistente_ia.httpx, "post", _prohibido)
+
+    creados = []
+
+    def crear_asistente():
+        creados.append(AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=300,
+                                   revision_fidelidad=False, peticiones_paralelas=1))
+        return creados[-1]
+
+    gestor = fd.GestorDocumentos(historial, crear_asistente)
+
+    def ejecutar(generacion):
+        """Como el hilo de fondo: genera y entrega en este hilo; después pasa el resultado a `recibir`."""
+        entregas = []
+        fd.procesar_generacion(generacion, lambda mensaje: None, lambda g, d, e: entregas.append((g, d, e)))
+        (g, documento, error), = entregas
+        return gestor.recibir(g, documento, error)
+
+    # 1. La minuta falla en la parte 2: «error» con el mensaje del asistente
+    recepcion = ejecutar(gestor.iniciar("minuta", resultado, audio, id_, None))
+    assert recepcion.estado == "error"
+    assert recepcion.mensaje.startswith(f"falló la parte 2 de {total}: ")
+
+    # 2. El otro documento reutiliza las notas que terminaron: solo se piden las partes que faltan y la redacción
+    fallar["activo"] = False
+    cuerpos.clear()
+    recepcion = ejecutar(gestor.iniciar("resumen", resultado, audio, id_, None))
+    assert recepcion.estado == "lista"
+    assert sorted(_numeros_de_nota(cuerpos)) == list(range(2, total + 1))
+    assert len([c for c in cuerpos if _numero_de_parte(c) is None]) == 1
+
+    # 3. Tras cancelar, la siguiente generación vuelve a pedir todas las partes con un asistente nuevo
+    gestor.iniciar("resumen", resultado, audio, id_, None)
+    gestor.cancelar()
+    cuerpos.clear()
+    ejecutar(gestor.iniciar("minuta", resultado, audio, id_, None))
+    assert len(creados) == 2
+    assert sorted(_numeros_de_nota(cuerpos)) == list(range(1, total + 1))

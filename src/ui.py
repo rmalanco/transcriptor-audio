@@ -34,7 +34,7 @@ from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, 
 from src.flujo_documentos import (SUFIJOS_DOCUMENTO, DocumentoGenerado, GestorDocumentos, Generacion,
                                   procesar_generacion)
 from src.ui_copilot import DialogoLoginCopilot
-from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente,
+from src.persistencia import (Persistencia, motivo_de_error,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import (validar_archivo, obtener_info_archivo, guardar_transcripcion, filtros_seleccion_archivo,
                        formatear_duracion, ruta_junto_al_audio)
@@ -869,26 +869,20 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _recibir_documento_ia(self, generacion: Generacion, documento: Optional[DocumentoGenerado],
                               error: Optional[Exception]):
-        """Único punto de decisión: si la generación se canceló, descarta el resultado sin tocar nada más."""
+        """Pinta lo que decidió `GestorDocumentos.recibir` (descartada, lista, error o sin sesión); no decide nada."""
         clave = generacion.clave
-        if not self._documentos.terminar(generacion):
+        recepcion = self._documentos.recibir(generacion, documento, error)
+        if recepcion.estado == "descartada":
             self._log(f"Resultado de {clave} descartado: la generación se canceló")
             return
         self._restaurar_controles_ia(clave)
-        if error is None:
-            persistencia = persistir_documento_si_vigente(False, self.historial, generacion.id_historial, clave,
-                                                          documento.contenido, documento.modelo_usado,
-                                                          generacion.ruta_salida)
-            self._finalizar_documento_ia(clave, documento, persistencia)
+        if recepcion.estado == "lista":
+            self._finalizar_documento_ia(clave, recepcion.documento, recepcion.persistencia)
             return
         self._log(f"Error generando {clave}: {error}")
-        mensaje = str(error) or type(error).__name__
-        if isinstance(error, ErrorSinSesionCopilot):
-            self._documentos.olvidar_asistente()  # se recrea con el token nuevo tras iniciar sesión
-            self._finalizar_documento_ia(clave, None, None, mensaje)
+        self._finalizar_documento_ia(clave, None, None, recepcion.mensaje)
+        if recepcion.estado == "sin_sesion":
             self._iniciar_sesion_copilot(lambda: self._generar_documento_ia(clave))
-        else:
-            self._finalizar_documento_ia(clave, None, None, mensaje)
 
     def _cancelar_documento_ia(self):
         """Devuelve la ventana al instante; el hilo abandonado termina solo y su resultado se descarta."""

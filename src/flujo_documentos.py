@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from src.asistente_ia import AsistenteIA
+from src.asistente_ia import AsistenteIA, ErrorSinSesionCopilot
+from src.persistencia import Persistencia, persistir_documento
 from src.transcriber import ResultadoTranscripcion
 from src.utils import ruta_junto_al_audio
 
@@ -95,6 +96,16 @@ def procesar_generacion(generacion: Generacion, on_progreso, entregar) -> None:
     entregar(generacion, documento, error)
 
 
+@dataclass
+class Recepcion:
+    """Lo que el gestor decidió con el resultado de una generación; la ventana solo pinta según `estado`."""
+    estado: str                         # "descartada" | "lista" | "error" | "sin_sesion"
+    generacion: Generacion
+    documento: Optional[DocumentoGenerado] = None
+    persistencia: Optional[Persistencia] = None
+    mensaje: Optional[str] = None
+
+
 class GestorDocumentos:
     """Lleva la generación vigente y el asistente que se reutiliza entre generaciones. Sin interfaz ni red. Solo se
     usa desde el hilo en que se creó (el principal): cada método que cambia estado lo comprueba."""
@@ -152,3 +163,17 @@ class GestorDocumentos:
     def olvidar_asistente(self):
         self._comprobar_hilo()
         self._asistente = None
+
+    def recibir(self, generacion: Generacion, documento: Optional[DocumentoGenerado],
+                error: Optional[Exception]) -> Recepcion:
+        self._comprobar_hilo()
+        if not self.terminar(generacion):
+            return Recepcion("descartada", generacion)
+        if isinstance(error, ErrorSinSesionCopilot):
+            self.olvidar_asistente()  # se recrea con el token nuevo tras iniciar sesión
+            return Recepcion("sin_sesion", generacion, mensaje=str(error) or type(error).__name__)
+        if error is not None:
+            return Recepcion("error", generacion, mensaje=str(error) or type(error).__name__)
+        persistencia = persistir_documento(self._historial, generacion.id_historial, generacion.clave,
+                                           documento.contenido, documento.modelo_usado, generacion.ruta_salida)
+        return Recepcion("lista", generacion, documento=documento, persistencia=persistencia)

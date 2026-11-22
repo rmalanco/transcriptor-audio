@@ -63,8 +63,8 @@ Dependencias entre módulos (quién importa a quién):
 - `persistencia.py:persistir_transcripcion(historial, archivo, resultado, modelo_whisper, ruta_salida, formato,
   incluir_timestamps) -> Persistencia`: guarda primero en el historial y después escribe el archivo. No lanza por un
   fallo de guardado: lo devuelve en `Persistencia.motivo_historial` o `motivo_exportacion`.
-- `persistencia.py:persistir_documento(historial, id_historial, clave, contenido, modelo, ruta_salida)` y
-  `persistir_documento_si_vigente(cancelada, …)`, que con `cancelada=True` no guarda nada y devuelve `None`.
+- `persistencia.py:persistir_documento(historial, id_historial, clave, contenido, modelo, ruta_salida)`. Quién guarda
+  una generación lo decide `flujo_documentos.py:GestorDocumentos.recibir` (solo si es la vigente).
 - `persistencia.py:Persistencia(id_historial, ruta_exportada, motivo_historial, motivo_exportacion)`,
   `motivo_de_error`, `texto_sin_guardado` y `texto_destino_documento` (los textos de aviso).
 
@@ -148,23 +148,27 @@ Dependencias entre módulos (quién importa a quién):
   alucinación, ni durante la carga del modelo ni la preparación con VAD); al activarse, devuelve lo transcrito hasta
   ahí, pero la ventana lo descarta: no escribe el archivo ni guarda en el historial.
 - `flujo_documentos.py:GestorDocumentos` lleva la generación vigente (`vigente`) y el asistente que se reutiliza entre
-  generaciones. Solo se usa desde el hilo principal y lo comprueba (`RuntimeError` desde otro hilo). El asistente lo crea
+  generaciones. Solo se usa desde el hilo principal y lo comprueba (`RuntimeError` desde otro hilo). Su `recibir(generacion,
+  documento, error)` es el punto de decisión y devuelve una `flujo_documentos.py:Recepcion` con `estado`: `descartada`,
+  `lista` (con `documento` y `persistencia`), `error` o `sin_sesion` (con `mensaje`). El asistente lo crea
   `ui.py:AppTranscriptor._crear_asistente` con la configuración y el modelo elegidos en ese momento, y se olvida al
   cancelar, al cambiar de modelo y tras «sin sesión» de Copilot.
 - Cada generación de IA es un `flujo_documentos.py:Generacion` (comparada por identidad) con su propio
   `threading.Event` (`cancelar`), así que cancelar una no afecta a la siguiente. El hilo de fondo ejecuta
   `flujo_documentos.py:procesar_generacion`, que llama a `AsistenteIA` (vía `generar_documento`) y entrega el resultado
   exactamente una vez: no toca widgets, historial ni archivos. El único punto de decisión es
-  `ui.py:AppTranscriptor._recibir_documento_ia`, en el hilo principal, al que llega con `_en_ui`: si la generación ya no
-  es la vigente (`GestorDocumentos.terminar`, por identidad), descarta el resultado, un error o un 401 sin guardar nada ni abrir
-  el login, antes de tocar cualquier otro estado. `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al
+  `flujo_documentos.py:GestorDocumentos.recibir`, al que `ui.py:AppTranscriptor._recibir_documento_ia` llega en el hilo
+  principal con `_en_ui`. Si la generación ya no es la vigente (`terminar`, por identidad), devuelve «descartada»: no guarda,
+  no toca el asistente y no abre el login, sea cual sea el resultado (documento, error o 401). Si es la vigente, guarda
+  en el historial y después junto al audio («lista») o devuelve el error o la falta de sesión («error» y «sin_sesion»,
+  que además olvida el asistente). La ventana solo pinta según el estado. `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al
   instante; la petición ya abierta no se aborta: el hilo abandonado termina al recibir la siguiente línea de la
   respuesta, o tras `AsistenteIA.timeout` sin datos.
 - La ventana guarda aparte, en `self._vista_previa_ia`, lo que tenían los controles antes de la generación, y los
   restaura con `ui.py:AppTranscriptor._restaurar_controles_ia`, el único método que lo hace (al recibir y al cancelar).
 - `Generacion.id_historial` es el `id_historial` vigente al pulsar el botón, así que el documento se guarda en esa
-  entrada aunque después se abra otra; el guardado lo hace `persistencia.py:persistir_documento_si_vigente` desde
-  `_recibir_documento_ia`.
+  entrada aunque después se abra otra; el guardado lo hace `GestorDocumentos.recibir` con
+  `persistencia.py:persistir_documento`, solo si la generación es la vigente.
 - La ventana reutiliza una instancia de `AsistenteIA` (y con ella la caché de notas) y la descarta al cambiar el
   modelo, al cancelar una generación y tras un `ErrorSinSesionCopilot`. La configuración se lee una sola vez al
   arrancar: cambiar `settings.yaml` exige reiniciar la ventana.
@@ -189,7 +193,7 @@ Dependencias entre módulos (quién importa a quién):
   (`persistencia.py:texto_sin_guardado`).
 - Un documento solo se guarda en el historial si `Historial` existe, hay `id_historial` y la entrada sigue existiendo
   (`Historial.obtener`); si el audio ya no existe, el documento solo va al historial.
-- Una generación cancelada no guarda nada (`persistencia.py:persistir_documento_si_vigente`).
+- Una generación cancelada no guarda nada (`flujo_documentos.py:GestorDocumentos.recibir`, estado `descartada`).
 
 ### Configuración
 

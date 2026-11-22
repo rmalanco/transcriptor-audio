@@ -69,8 +69,8 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
 4. Mientras dura la generación, el botón de la pestaña es «■ Cancelar»: `AppTranscriptor._cancelar_documento_ia`
    devuelve la ventana al instante y deja abandonado el hilo de fondo, cuyo resultado se descartará.
 5. Al terminar, `procesar_generacion` entrega el resultado una sola vez al hilo principal (`AppTranscriptor._recibir_documento_ia`,
-   vía `_en_ui`), único punto que decide si sigue vigente. Si lo está, `persistencia.persistir_documento_si_vigente` guarda primero
-   en el historial: `Historial.guardar_documento` guarda el documento y el modelo usado y, con la minuta, también
+   vía `_en_ui`), que pasa el resultado a `GestorDocumentos.recibir`: único punto que decide si sigue vigente y guarda. Si lo está, `flujo_documentos.py:GestorDocumentos.recibir` (con
+   `persistencia.persistir_documento`) guarda primero en el historial: `Historial.guardar_documento` guarda el documento y el modelo usado y, con la minuta, también
    actualiza el título si no se editó a mano. Solo se guarda si el historial se abrió y la entrada de la transcripción
    sigue existiendo; si no, el documento no se descarta y el aviso dice por qué.
 6. Después el resultado se escribe en `<archivo>.<ext>_resumen.md` o `<archivo>.<ext>_minuta.md` junto al audio, si el audio
@@ -125,8 +125,9 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   señal de cancelación (`cancelar`) y un hilo que ejecuta `flujo_documentos.py:procesar_generacion`: solo llama a
   `AsistenteIA`, no toca widgets, historial ni archivos, y entrega lo que obtiene (o el error) una sola vez con
   `_en_ui(_recibir_documento_ia, …)`. El punto de decisión es único y está en el hilo
-  principal: `_recibir_documento_ia` pregunta a `GestorDocumentos.terminar` si la generación recibida sigue siendo la vigente
-  (por identidad); si no (se canceló), descarta el resultado y no guarda nada. Solo hay una generación a la vez, y no se genera mientras se
+  principal: `GestorDocumentos.recibir` comprueba si la generación recibida sigue siendo la vigente (por identidad); si no
+  (se canceló), la descarta, no guarda nada y no toca el asistente; si lo es, guarda o devuelve el error. `_recibir_documento_ia`
+  solo pinta según el estado. Solo hay una generación a la vez, y no se genera mientras se
   transcribe ni al revés. Al cancelar, la señal de esa generación se activa y la siguiente usa otra, así que el hilo
   abandonado no afecta a la nueva.
 - **Notas de las partes en paralelo.** `AsistenteIA._notas_por_bloque` lanza un `ThreadPoolExecutor`
@@ -229,11 +230,12 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
 - **La exclusión de familias es por nombre.** `FAMILIAS_EXCLUIDAS` (`kimi`, `mistral`, `codestral`, `devstral`, `ministral`,
   `pixtral`, `magistral`) se reconoce porque el id del modelo contiene el nombre; un modelo nuevo de Mistral AI cuyo
   nombre no contenga ninguno de esos textos no se excluye, y la lista se amplía a mano en `copilot.py`.
-- **La lógica de la ventana no tiene tests automáticos.** Ningún test instancia `AppTranscriptor`: el punto de decisión
-  `_recibir_documento_ia`, la cancelación y el cierre de la ventana no están cubiertos. Sí lo están `AsistenteIA` (con
-  su señal de cancelación) y `persistencia.py` (incluido no guardar una generación cancelada).
-- **La orquestación vive en la clase Tk.** Solo el guardado se ha sacado a `persistencia.py`; transcribir y generar
-  siguen dentro de `AppTranscriptor`, y `historial.py` importa `transcriber.py` (solo las dataclasses; `faster_whisper`
+- **Solo el pintado de la ventana no tiene tests automáticos.** Ningún test instancia `AppTranscriptor`: `_recibir_documento_ia`,
+  la cancelación y el cierre de la ventana solo se verifican a mano. Los flujos de transcripción y de documentos
+  (`flujo_transcripcion.py`, `flujo_documentos.py`, con `GestorDocumentos.recibir`) y `AsistenteIA` se prueban sin ventana, y
+  también `persistencia.py`.
+- **La orquestación ya no vive en la clase Tk.** Transcribir y generar están en `flujo_transcripcion.py` y
+  `flujo_documentos.py`, con su estado en `GestorDocumentos`; `AppTranscriptor` solo lanza, pinta y entrega. `historial.py` importa `transcriber.py` (solo las dataclasses; `faster_whisper`
   se carga al construir el modelo, historia 08). Backlog, Salud del código #5.
 - **El historial no tiene migraciones.** `PRAGMA user_version` se fija en cada apertura sin comparar el valor anterior:
   el primer cambio de esquema tendrá que resolverlo (hallazgo A-23, descartado por ahora). La búsqueda del historial corre
