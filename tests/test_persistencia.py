@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from src.historial import Historial
-from src.persistencia import (Persistencia, motivo_de_error, persistir_documento, persistir_transcripcion,
-                             texto_destino_documento, texto_sin_guardado)
+from src.persistencia import (Persistencia, motivo_de_error, persistir_documento, persistir_documento_si_vigente,
+                             persistir_transcripcion, texto_destino_documento, texto_sin_guardado)
 from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
 
 
@@ -106,6 +106,26 @@ def test_documento_se_guarda_en_historial_y_exporta(historial, tmp_path):
     assert Path(ruta).read_text(encoding="utf-8").startswith("# Minuta")
     assert p.ruta_exportada == ruta
     assert p.motivo_exportacion is None and p.motivo_historial is None
+
+
+def test_documento_de_generacion_cancelada_no_se_guarda_ni_se_exporta(historial, tmp_path):
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    ruta = str(tmp_path / "reunion_minuta.md")
+    persistir_documento(historial, id_, "minuta", "# Minuta anterior", "gpt-4.1", ruta)
+    p = persistir_documento_si_vigente(True, historial, id_, "minuta", "# Minuta nueva", "gpt-5.4", ruta)
+    assert p is None
+    assert historial.obtener(id_).minuta == "# Minuta anterior"
+    assert Path(ruta).read_text(encoding="utf-8") == "# Minuta anterior\n"
+
+
+def test_documento_de_generacion_vigente_se_guarda_y_se_exporta(historial, tmp_path):
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    ruta = str(tmp_path / "reunion_minuta.md")
+    persistir_documento(historial, id_, "minuta", "# Minuta anterior", "gpt-4.1", ruta)
+    p = persistir_documento_si_vigente(False, historial, id_, "minuta", "# Minuta nueva", "gpt-5.4", ruta)
+    assert historial.obtener(id_).minuta == "# Minuta nueva"
+    assert Path(ruta).read_text(encoding="utf-8") == "# Minuta nueva\n"
+    assert p.ruta_exportada == ruta and p.id_historial == id_
 
 
 def test_documento_exportacion_fallida_conserva_contenido_y_modelo(historial, tmp_path):

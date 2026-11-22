@@ -246,6 +246,89 @@ def test_cancelar_durante_el_stream(monkeypatch):
         AsistenteIA(api_key="x")._completar("hola", cancelar)
 
 
+class _StreamQueCancelaAlTerminar(_Stream):
+    """Respuesta completa: el usuario cancela justo cuando termina de llegar (al cerrarse la conexión)."""
+    def __init__(self, cancelar, contenido="OK"):
+        super().__init__()
+        self._cancelar, self._contenido = cancelar, contenido
+    def __exit__(self, *a):
+        self._cancelar.set()
+        return False
+    def iter_lines(self):
+        import json
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": self._contenido}, "finish_reason": "stop"}]})
+        yield "data: [DONE]"
+
+
+def test_cancelar_no_inicia_las_partes_en_cola(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream",
+                        lambda metodo, url, json, headers, timeout: peticiones.append(url)
+                        or _StreamQueCancelaAlTerminar(cancelar))
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=300, peticiones_paralelas=1,
+                            revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1  # la transcripción se procesaría en varias partes
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen(TEXTO_LARGO, cancelar=cancelar)
+    assert len(peticiones) == 1  # la primera parte terminó; las demás no se enviaron
+
+
+def test_cancelar_durante_la_espera_de_reintento_no_reintenta(monkeypatch):
+    import threading
+    import time
+    cancelar = threading.Event()
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    def stream(metodo, url, json, headers, timeout):
+        peticiones.append(url)
+        threading.Timer(0.1, cancelar.set).start()  # se cancela mientras espera el reintento (2 s)
+        return _Stream(status_code=429)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    inicio = time.monotonic()
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)
+    assert time.monotonic() - inicio < 1  # no espera los 2 s del reintento
+    assert len(peticiones) == 1
+
+
+def test_cancelar_tras_fallo_de_conexion_no_reintenta(monkeypatch):
+    import threading
+    import time
+    cancelar = threading.Event()
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    def stream(metodo, url, json, headers, timeout):
+        peticiones.append(url)
+        threading.Timer(0.1, cancelar.set).start()  # se cancela mientras espera el reintento (1 s)
+        raise asistente_ia.httpx.ConnectError("conexión rechazada")
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    inicio = time.monotonic()
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)
+    assert time.monotonic() - inicio < 0.5  # no espera el segundo de la espera del reintento
+    assert len(peticiones) == 1
+
+
+def test_cancelar_antes_de_la_revision_de_fidelidad_no_la_envia(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    completo = "## Resumen\nt\n### Puntos clave\n- a\n### Conclusiones\n- b"
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream",
+                        lambda metodo, url, json, headers, timeout: peticiones.append(url)
+                        or _StreamQueCancelaAlTerminar(cancelar, completo))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)  # el documento ya estaba completo
+    assert len(peticiones) == 1  # solo la redacción; la revisión no se inicia
+
+
 FAMILIAS_EXCLUIDAS_A_MANO = [("Mistral-Large-3", "mistral"), ("kimi-k3-mini", "kimi")]
 
 

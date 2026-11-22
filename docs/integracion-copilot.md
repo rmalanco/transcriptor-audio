@@ -77,7 +77,7 @@ opencode no lo implementa; se tomó de la extensión de VS Code y del PR #3902 d
 3. La sesión se renueva 5 min antes de caducar; ante un 401 se abre una nueva sin borrar el token de GitHub.
 
 `selected_model` suele ser un modelo solo-`/responses` (`gpt-5.3-codex`), así que se usa el primero de la lista
-que admita `/chat/completions`. El orden del servidor cambia entre sesiones: en una prueba tocó `gpt-5.4`, en
+que admita `/chat/completions` y no sea de una familia de `FAMILIAS_EXCLUIDAS`. El orden del servidor cambia entre sesiones: en una prueba tocó `gpt-5.4`, en
 otra `claude-haiku-4.5`.
 
 ## Observaciones sobre `auto`

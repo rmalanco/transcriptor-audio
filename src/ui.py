@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Optional
@@ -26,7 +27,7 @@ from src.historial import Historial
 from src.registro import configurar_logging
 from src.transcriber import TranscriptorAudio, cargar_configuracion, guardar_modelo_ia
 from src.ui_copilot import DialogoLoginCopilot
-from src.persistencia import (Persistencia, motivo_de_error, persistir_documento, persistir_transcripcion,
+from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
@@ -53,12 +54,29 @@ VISTA_TRANSCRIBIR = "🎙  Transcribir"
 VISTA_HISTORIAL = "📚  Historial"
 TAB_TEXTO = "Texto"  # nombre corto: las pestañas se recortan en ventanas estrechas
 DOCUMENTOS_IA = {
-    "resumen": {"pestana": "Resumen", "sufijo": "_resumen.md",
+    "resumen": {"pestana": "Resumen", "sufijo": "_resumen.md", "genitivo": "del resumen",
+                "anterior": "el resumen anterior",
                 "vacio": "Transcribe un archivo y pulsa «Generar resumen» para crear un resumen con IA."},
-    "minuta": {"pestana": "Minuta", "sufijo": "_minuta.md",
+    "minuta": {"pestana": "Minuta", "sufijo": "_minuta.md", "genitivo": "de la minuta",
+               "anterior": "la minuta anterior",
                "vacio": "Transcribe una reunión y pulsa «Generar minuta» para obtener objetivo, temas, "
                         "acuerdos y tareas."},
 }
+
+
+@dataclass
+class _GeneracionIA:
+    """Una generación de resumen o minuta en curso. Cada una tiene su propia señal de cancelación: si se cancela,
+    el hilo abandonado no afecta a la siguiente generación."""
+    clave: str
+    asistente: AsistenteIA
+    ruta_salida: Optional[str]
+    id_historial: Optional[int]
+    contenido_previo: Optional[str]     # documento que había en la pestaña antes de generar
+    texto_boton_previo: str             # texto del botón de generar antes de empezar
+    estado_transcribir_previo: str      # estado de «Transcribir» antes de empezar
+    cancelar: threading.Event = field(default_factory=threading.Event)
+
 
 COLOR_BORDE = ("gray75", "gray30")
 COLOR_BORDE_ACTIVO = ("#3B8ED0", "#1F6AA5")
@@ -116,11 +134,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._progreso = 0.0
         self._cerrando = False
         self._asistente: Optional[AsistenteIA] = None
-        self._hilo_ia: Optional[threading.Thread] = None
+        self._generacion: Optional[_GeneracionIA] = None  # generación de resumen/minuta activa, si la hay
         self.tabs_ia: dict = {}
         self.id_historial: Optional[int] = None        # entrada del historial mostrada ahora
         self._fecha_historial: Optional[str] = None     # fecha de creación si el audio ya no existe
-        self._estado_transcribir_previo = "normal"      # estado de «Transcribir» antes de generar un documento
         self.panel_historial = None                     # se construye la primera vez que se muestra
         self.vista_actual = VISTA_TRANSCRIBIR
         self._titulo_mostrado = ""
@@ -377,7 +394,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         acciones.bind("<Configure>", ajustar_ancho_estado)
 
         btn_generar = ctk.CTkButton(acciones, text=f"✨ Generar {doc['pestana'].lower()}", width=60,
-                                    state="disabled", command=lambda: self._generar_documento_ia(clave))
+                                    state="disabled", command=lambda: self._alternar_documento_ia(clave))
         btn_generar.grid(row=0, column=0, padx=(0, 3), sticky="ew")
         btn_copiar = ctk.CTkButton(acciones, text="Copiar", width=60, state="disabled",
                                    command=lambda: self._copiar_documento_ia(clave))
@@ -480,6 +497,11 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             if not messagebox.askyesno("Salir", "Hay una transcripción en curso. ¿Cancelarla y salir?"):
                 return
             self.cancelar_flag.set()
+        if self._generando_ia():
+            genitivo = DOCUMENTOS_IA[self._generacion.clave]["genitivo"]
+            if not messagebox.askyesno("Salir", f"Hay una generación {genitivo} en curso. ¿Cancelarla y salir?"):
+                return
+            self._cancelar_documento_ia()
         self._cerrando = True
         self.destroy()
 
@@ -766,7 +788,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     # ------------------------------------------------------------ Resumen / minuta (IA)
 
     def _generando_ia(self) -> bool:
-        return self._hilo_ia is not None and self._hilo_ia.is_alive()
+        return self._generacion is not None
 
     def _configurar_estilos_markdown(self, texto: ctk.CTkTextbox):
         # CTkTextbox no permite fuentes en tag_config; se usa el widget tk interno
@@ -814,6 +836,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         tab["generar"].configure(text=f"✨ Generar {DOCUMENTOS_IA[clave]['pestana'].lower()}")
         tab["estado"].configure(text=self._texto_modelo_ia())  # sin restos del documento anterior
 
+    def _alternar_documento_ia(self, clave: str):
+        if self._generacion is not None and self._generacion.clave == clave:
+            self._cancelar_documento_ia()
+        else:
+            self._generar_documento_ia(clave)
+
     def _generar_documento_ia(self, clave: str):
         if not self.resultado_actual or self._generando_ia() or self._transcribiendo():
             return
@@ -841,49 +869,103 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         base = Path(self.archivo_actual)
         ruta_salida = str(base.with_name(base.stem + DOCUMENTOS_IA[clave]["sufijo"])) if base.exists() else None
 
-        for tab in self.tabs_ia.values():
-            tab["generar"].configure(state="disabled")
-        self._estado_transcribir_previo = self.btn_transcribir.cget("state")
+        tab = self.tabs_ia[clave]
+        asistente = self._asistente
+        generacion = _GeneracionIA(
+            clave=clave, asistente=asistente, ruta_salida=ruta_salida, id_historial=self.id_historial,
+            contenido_previo=tab["contenido"], texto_boton_previo=tab["generar"].cget("text"),
+            estado_transcribir_previo=self.btn_transcribir.cget("state"),
+        )
+        self._generacion = generacion
+        for k, t in self.tabs_ia.items():
+            t["generar"].configure(state="normal" if k == clave else "disabled")
+        tab["generar"].configure(text="■ Cancelar")
         self.btn_transcribir.configure(state="disabled")
         self.combo_modelo_ia.configure(state="disabled")
-        self._escribir_tab_ia(clave, f"Generando con {self._asistente.nombre_proveedor} ({self._asistente.modelo})…", secundario=True)
-        self.tabs_ia[clave]["estado"].configure(text=f"Enviando transcripción a {self._asistente.nombre_proveedor}…")
+        self._escribir_tab_ia(clave, f"Generando con {asistente.nombre_proveedor} ({asistente.modelo})…",
+                              secundario=True)
+        tab["estado"].configure(text=f"Enviando transcripción a {asistente.nombre_proveedor}…")
         self.label_estado.configure(text=f"Generando {DOCUMENTOS_IA[clave]['pestana'].lower()}…")
-        self._log(f"Generando {clave} con {self._asistente.modelo}")
+        self._log(f"Generando {clave} con {asistente.modelo}")
 
-        self._hilo_ia = threading.Thread(
-            target=self._procesar_documento_ia, args=(clave, texto, ruta_salida, self.id_historial), daemon=True
-        )
-        self._hilo_ia.start()
+        threading.Thread(target=self._procesar_documento_ia, args=(generacion, texto), daemon=True).start()
 
-    def _procesar_documento_ia(self, clave: str, texto: str, ruta_salida: Optional[str], id_historial: Optional[int]):
-        if clave == "resumen":
-            generar = self._asistente.generar_resumen
-        else:
-            fecha = self._fecha_archivo()
-            generar = lambda t, **kw: self._asistente.generar_minuta(t, fecha=fecha, **kw)
-        estado = self.tabs_ia[clave]["estado"]
-        try:
+    def _procesar_documento_ia(self, generacion: _GeneracionIA, texto: str):
+        """Hilo de fondo: no toca widgets, el historial ni el archivo; entrega el resultado al hilo principal."""
+        asistente, clave = generacion.asistente, generacion.clave
+        try:  # cualquier fallo debe llegar al hilo principal: si no, la generación nunca se daría por terminada
+            if clave == "resumen":
+                generar = asistente.generar_resumen
+            else:
+                fecha = self._fecha_archivo()
+                generar = lambda t, **kw: asistente.generar_minuta(t, fecha=fecha, **kw)
             inicio = time.monotonic()
-            contenido = generar(texto, on_progreso=lambda m: self._en_ui(lambda: estado.configure(text=m)))
-            modelo = self._asistente.modelo_usado
-            persistencia = persistir_documento(self.historial, id_historial, clave, contenido, modelo, ruta_salida)
-            self._en_ui(self._finalizar_documento_ia, clave, contenido, persistencia, time.monotonic() - inicio)
-        except ErrorSinSesionCopilot as e:
-            self._log(f"Error generando {clave}: {e}")
+            contenido = generar(texto, on_progreso=lambda m: self._en_ui(self._progreso_documento_ia, generacion, m),
+                                cancelar=generacion.cancelar)
+            self._en_ui(self._recibir_documento_ia, generacion, contenido, asistente.modelo_usado,
+                        time.monotonic() - inicio, None)
+        except Exception as e:  # incluye InterruptedError (cancelada) y ErrorSinSesionCopilot
+            self._en_ui(self._recibir_documento_ia, generacion, None, None, 0, e)
+
+    def _progreso_documento_ia(self, generacion: _GeneracionIA, mensaje: str):
+        if generacion is self._generacion:  # una generación cancelada ya no escribe en su pestaña
+            self.tabs_ia[generacion.clave]["estado"].configure(text=mensaje)
+
+    def _recibir_documento_ia(self, generacion: _GeneracionIA, contenido: Optional[str], modelo: Optional[str],
+                              segundos: float, error: Optional[Exception]):
+        """Único punto de decisión: si la generación se canceló, descarta el resultado sin tocar nada más."""
+        clave = generacion.clave
+        if generacion is not self._generacion:
+            self._log(f"Resultado de {clave} descartado: la generación se canceló")
+            return
+        self._generacion = None
+        tab = self.tabs_ia[clave]
+        tab["generar"].configure(text=generacion.texto_boton_previo)
+        self.btn_transcribir.configure(state=generacion.estado_transcribir_previo)
+        if error is None:
+            persistencia = persistir_documento_si_vigente(False, self.historial, generacion.id_historial, clave,
+                                                          contenido, modelo, generacion.ruta_salida)
+            self._finalizar_documento_ia(clave, contenido, persistencia, segundos)
+            return
+        self._log(f"Error generando {clave}: {error}")
+        mensaje = str(error) or type(error).__name__
+        if isinstance(error, ErrorSinSesionCopilot):
             self._asistente = None  # se recrea con el token nuevo tras iniciar sesión
-            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e) or type(e).__name__)
-            self._en_ui(self._iniciar_sesion_copilot, lambda: self._generar_documento_ia(clave))
-        except Exception as e:
-            self._log(f"Error generando {clave}: {e}")
-            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e) or type(e).__name__)
+            self._finalizar_documento_ia(clave, None, None, 0, mensaje)
+            self._iniciar_sesion_copilot(lambda: self._generar_documento_ia(clave))
+        else:
+            self._finalizar_documento_ia(clave, None, None, 0, mensaje)
+
+    def _cancelar_documento_ia(self):
+        """Devuelve la ventana al instante; el hilo abandonado termina solo y su resultado se descarta."""
+        generacion = self._generacion
+        if generacion is None:
+            return
+        clave = generacion.clave
+        tab = self.tabs_ia[clave]
+        generacion.cancelar.set()
+        self._generacion = None
+        self._asistente = None  # el hilo abandonado conserva el suyo; la siguiente generación crea otro
+        if generacion.contenido_previo is not None:
+            self._escribir_tab_ia(clave, generacion.contenido_previo)
+            tab["estado"].configure(text=f"Generación cancelada · se conserva {DOCUMENTOS_IA[clave]['anterior']}")
+        else:
+            self._reiniciar_tab_ia(clave)
+            tab["estado"].configure(text="Generación cancelada")
+        tab["generar"].configure(text=generacion.texto_boton_previo)
+        for t in self.tabs_ia.values():
+            t["generar"].configure(state="normal")
+        self.combo_modelo_ia.configure(state="normal")
+        self.btn_transcribir.configure(state=generacion.estado_transcribir_previo)
+        genitivo = DOCUMENTOS_IA[clave]["genitivo"]
+        self.label_estado.configure(text=f"Generación {genitivo} cancelada")
+        self._log(f"Generación {genitivo} cancelada")
 
     def _finalizar_documento_ia(self, clave, contenido, persistencia: Optional[Persistencia], segundos, error=None):
         tab = self.tabs_ia[clave]
         nombre = DOCUMENTOS_IA[clave]["pestana"]
         for t in self.tabs_ia.values():
             t["generar"].configure(state="normal")
-        self.btn_transcribir.configure(state=self._estado_transcribir_previo)
         self.combo_modelo_ia.configure(state="normal")
 
         if error:

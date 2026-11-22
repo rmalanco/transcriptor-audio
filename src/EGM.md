@@ -148,8 +148,8 @@ Dependencias entre módulos (quién importa a quién):
   `chat` y, cuando declara `supported_endpoints`, si incluyen `/chat/completions`.
 - `copilot.py:modelos_economicos` descarta los modelos sin precio, con precio de entrada mayor que
   `PRECIO_MAX_ECONOMICO` o de `FAMILIAS_EXCLUIDAS`.
-- `copilot.py:abrir_sesion_auto` elige el primer modelo ofrecido que admite `/chat/completions` y lanza `ErrorCopilot`
-  si ninguno lo admite. `copilot.py:SesionAuto.vigente` da la sesión por caducada 300 s antes de `expires_at`.
+- `copilot.py:abrir_sesion_auto` elige el primer modelo ofrecido que admite `/chat/completions` y no es de una familia
+  de `FAMILIAS_EXCLUIDAS`, y lanza `ErrorCopilot` si no queda ninguno. `copilot.py:SesionAuto.vigente` da la sesión por caducada 300 s antes de `expires_at`.
 - `asistente_ia.py:AsistenteIA._completar` hace hasta 4 intentos con espera exponencial ante errores de red, 429 y
   5xx. Un 401 fuera del modo auto invalida el token guardado y lanza `ErrorSinSesionCopilot`.
 - `copilot.py:invalidar_token` borra `RUTA_TOKEN` solo si el token guardado es el rechazado; nunca toca el archivo de

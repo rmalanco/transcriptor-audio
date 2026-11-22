@@ -89,6 +89,21 @@ def persistir_documento(
     return Persistencia(id_historial=guardado_id, motivo_historial=motivo_historial, ruta_exportada=ruta_salida)
 
 
+def persistir_documento_si_vigente(
+    cancelada: bool,
+    historial: Optional["Historial"],
+    id_historial: Optional[int],
+    clave: str,
+    contenido: str,
+    modelo: Optional[str],
+    ruta_salida: Optional[str],
+) -> Optional[Persistencia]:
+    """Si la generación se canceló, no guarda nada (ni en el historial ni junto al audio) y devuelve None."""
+    if cancelada:
+        return None
+    return persistir_documento(historial, id_historial, clave, contenido, modelo, ruta_salida)
+
+
 def texto_sin_guardado(persistencia: Persistencia) -> Optional[str]:
     """Aviso para cuando no quedó nada guardado (ni en el historial ni como archivo)."""
     if persistencia.id_historial is None and persistencia.ruta_exportada is None:

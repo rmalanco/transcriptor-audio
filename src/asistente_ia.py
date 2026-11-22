@@ -200,6 +200,14 @@ def normalizar_tabla_tareas(minuta: str) -> str:
     return "\n".join(lineas)
 
 
+def _esperar(segundos: float, cancelar: Optional[threading.Event]) -> None:
+    """Espera entre reintentos. Con `cancelar`, la espera se corta en cuanto se activa la señal."""
+    if cancelar:
+        cancelar.wait(segundos)
+    else:
+        time.sleep(segundos)
+
+
 class AsistenteIA:
     def __init__(
         self,
@@ -279,6 +287,8 @@ class AsistenteIA:
     def _completar(self, prompt, cancelar: Optional[threading.Event] = None) -> str:
         """`prompt` es el texto del usuario o una lista de mensajes adicionales (para reintentos)."""
         mensajes = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
+        if cancelar and cancelar.is_set():
+            raise InterruptedError  # antes de resolver el modelo: en modo auto eso puede abrir una sesión nueva
         modelo, cabeceras = self._modelo_y_cabeceras()
         cuerpo = {
             "model": modelo,
@@ -314,7 +324,7 @@ class AsistenteIA:
                             time.monotonic() - inicio, estado(), e)
                 if intento == 3:
                     raise ErrorAsistenteIA(f"No se pudo conectar con {self.nombre_proveedor}: {e}") from e
-                time.sleep(2 ** intento)
+                _esperar(2 ** intento, cancelar)
                 continue
             segundos = time.monotonic() - inicio
 
@@ -324,7 +334,7 @@ class AsistenteIA:
                             respuesta.status_code, segundos, 2 ** (intento + 1), respuesta.text[:200])
                 if intento == 3:
                     raise ErrorAsistenteIA(f"{self.nombre_proveedor} respondió {respuesta.status_code}: {respuesta.text[:300]}")
-                time.sleep(2 ** (intento + 1))
+                _esperar(2 ** (intento + 1), cancelar)
                 continue
             if respuesta.status_code >= 400:
                 log.error("%s respondió %d en %.1f s: %s", self.nombre_proveedor, respuesta.status_code,

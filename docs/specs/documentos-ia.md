@@ -73,3 +73,30 @@ Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
   hay ningún modelo de IA configurado. Elige uno en el selector o en `ia.modelo` de config/settings.yaml.»
 
 Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
+
+### Cancelar la generación
+- Given una generación de la minuta o del resumen en curso, when pulso «■ Cancelar» en la pestaña de ese documento,
+  then en 1 segundo como máximo, aunque la petición a Copilot siga abierta, la línea de estado de la pestaña dice
+  «Generación cancelada», la barra de estado dice «Generación de la minuta cancelada» (o «del resumen»), la pestaña
+  Registro anota la cancelación, la transcripción no cambia, «Generar» de las dos pestañas y el selector de modelo
+  quedan habilitados, «Transcribir» vuelve a su estado anterior, y puedo generar otra vez, cargar otro archivo o abrir
+  el historial al momento.
+- Given una regeneración cancelada de un documento ya guardado, when se cancela, then la pestaña vuelve a mostrar el
+  documento anterior con «↻ Regenerar», «Copiar» y «Guardar como…» habilitados, y la línea de estado dice «Generación
+  cancelada · se conserva la minuta anterior» (o «el resumen anterior»).
+- Given una generación cancelada, when Copilot termina esa petición después, con un documento, con un error o con un
+  401, then el documento no se guarda en el historial ni se exporta junto al audio, y no aparece ningún diálogo ni se
+  abre el inicio de sesión en Copilot.
+- Given una generación cancelada, when Copilot recibe peticiones después de la cancelación, then ninguna es de ese
+  documento.
+
+Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
+
+### Cerrar la ventana durante una generación
+- Given una generación de la minuta o del resumen en curso, when cierro la ventana y respondo «no» a «Hay una generación
+  de la minuta en curso. ¿Cancelarla y salir?» (o «del resumen»), then la ventana sigue abierta y la generación continúa.
+- Given una generación de la minuta o del resumen en curso, when cierro la ventana y respondo «sí», then la generación
+  se cancela, la ventana se cierra y el documento no se guarda en el historial ni junto al audio, aunque Copilot lo
+  termine después.
+
+Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md

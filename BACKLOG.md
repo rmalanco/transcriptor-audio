@@ -36,7 +36,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 
 ## Backlog
 
-1. Como usuario, quiero cancelar la generación de un resumen o una minuta, para no tener que cerrar la app cuando el modelo tarda. — hallazgo A-04 — carril M
+1. ✅ Como usuario, quiero cancelar la generación de un resumen o una minuta, para no tener que cerrar la app cuando el modelo tarda. — hallazgo A-04 — carril M
 2. ✅ Como usuario con una cuenta de empresa, quiero que mi transcripción nunca se envíe a un modelo de una familia no autorizada, tampoco en modo `auto` ni con un modelo escrito a mano, para cumplir la política de mi empresa. — hallazgo A-12 — carril M
 3. Como usuario, quiero que la app me avise cuando un documento quedó incompleto y que conserve las partes ya procesadas si una falla, para no pagar de nuevo toda la generación. — hallazgo A-11 (en parte posible) — carril M
 4. Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S

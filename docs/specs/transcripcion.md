@@ -41,9 +41,11 @@ Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
   carpeta» quedan deshabilitados, y las pestañas Resumen y Minuta vuelven a su estado inicial con «Generar»
   deshabilitado.
 - Given una transcripción o una generación de documento en curso, when se intenta cargar otro archivo, then no se carga
-  y un aviso dice «Espera a que termine el proceso en curso.».
+  y un aviso dice «Espera a que termine el proceso en curso.». Una generación cancelada deja de contar como
+  proceso en curso.
 
 Origen: carril S, 2026-11-22: al cargar otro archivo se invalida el resultado, las pestañas de IA y el vínculo con el historial (A-02)
+Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
 
 ### Descartar un resultado sin guardar
 - Given una transcripción en pantalla que no quedó guardada ni en el historial ni como archivo, when se carga otro
