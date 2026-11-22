@@ -4,20 +4,22 @@
 
 Paquete único de la aplicación. Contiene la transcripción local con faster-whisper, la generación de resumen y
 minuta con GitHub Copilot, el historial en SQLite, la interfaz gráfica (CustomTkinter) y la CLI. No tiene
-subpaquetes: los once módulos se importan entre sí como `src.<módulo>`.
+subpaquetes: sus trece archivos `.py` se importan entre sí como `src.<módulo>`.
 
 Dependencias entre módulos (quién importa a quién):
 
 | Módulo | Usa |
 |---|---|
-| `main.py` | `transcriber`, `utils`, `registro`, `copilot`; `ui` solo con `--ui` |
-| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `historial`, `registro`, `ui_copilot`, `ui_historial` |
+| `__init__.py` | `transcriber`, `utils` (imports relativos) |
+| `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
+| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
 | `ui_historial.py` | `historial`, y métodos de `AppTranscriptor` (incluidos privados) |
 | `asistente_ia.py` | `copilot`, `registro` |
+| `persistencia.py` | `utils`; `historial` y `transcriber` solo como tipos |
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
-| `transcriber.py` | `registro` |
-| `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
+| `transcriber.py` | `registro`, `utils` |
+| `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
 ## Interface
 
@@ -27,6 +29,7 @@ Dependencias entre módulos (quién importa a quién):
   `-d/--dispositivo`, `-c/--compute-type`, `-l/--idioma`, `-t/--task`, `-f/--formato`, `--no-timestamps`,
   `--word-timestamps`, `--config`, `--listar-modelos`, `--copilot-login`, `--copilot-logout`, `--copilot-modelos`,
   `--ui`, `-v/--verbose`, `--log`. `--copilot-modelos` (`main.py:listar_modelos_copilot`) omite los modelos de `FAMILIAS_EXCLUIDAS`.
+  `main.py:listar_modelos` lista los modelos de Whisper (no es `copilot.listar_modelos`).
 - `ui.py:main` — interfaz gráfica (`python -m src.ui`, o `run_ui.py` en la raíz).
 - `__init__.py` — reexporta `TranscriptorAudio`, `validar_archivo` y `obtener_info_archivo`; `__version__ = "0.1.0"`.
 
@@ -39,13 +42,29 @@ Dependencias entre módulos (quién importa a quién):
 - `transcriber.py:SegmentoTranscripcion(inicio, fin, texto, palabras)` y
   `transcriber.py:ResultadoTranscripcion(texto_completo, segmentos, idioma_detectado, probabilidad_idioma, duracion_total)`.
 - `transcriber.py:es_alucinacion_conocida(texto)` y el conjunto `ALUCINACIONES_CONOCIDAS`.
-- `configuracion.py:RUTA_POR_DEFECTO` (`<raíz del proyecto>/config/settings.yaml`), `configuracion.py:ErrorConfiguracion`.
+- `configuracion.py:RAIZ_PROYECTO`, `RUTA_POR_DEFECTO` (`<raíz del proyecto>/config/settings.yaml`), `RUTA_PREFERENCIAS`
+  (`~/.local/share/transcriptor-audio/preferencias.json`), `ErrorConfiguracion`, y las listas `MODELOS_WHISPER` (la única
+  de modelos de Whisper: la usan la CLI, la ventana y la validación), `DISPOSITIVOS`, `TIPOS_COMPUTO` y `FORMATOS`.
 - `configuracion.py:cargar_configuracion(ruta=None) -> dict`: sin `ruta`, usa `RUTA_POR_DEFECTO`;
   una ruta relativa se interpreta desde la carpeta de trabajo. Devuelve todas las secciones y las 21 claves que usa la
-  app, con sus valores por defecto. valida `modelo.nombre` contra `configuracion.MODELOS_WHISPER`, la única lista de modelos de Whisper (la usan la CLI y la ventana).
+  app, con sus valores por defecto, y valida cada una (por ejemplo, `modelo.nombre` contra `MODELOS_WHISPER`).
+- `configuracion.py:leer_modelo_preferido() -> Optional[str]`, `guardar_modelo_preferido(modelo)` (lanza `OSError` si
+  no puede escribir) y `modelo_ia_efectivo(configuracion, preferido) -> str`: el modelo de IA elegido en el selector
+  gana a `ia.modelo`.
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
-- `utils.py:formatear_tiempo`, `formatear_tiempo_srt`, `formatear_tiempo_vtt`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
+- `utils.py:formatear_duracion` (marcas de la interfaz), `formatear_tiempo`, `formatear_tiempo_srt`,
+  `formatear_tiempo_vtt` (cada formato de salida); `filtros_seleccion_archivo`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
+
+### Guardado sin interfaz — `persistencia.py`
+
+- `persistencia.py:persistir_transcripcion(historial, archivo, resultado, modelo_whisper, ruta_salida, formato,
+  incluir_timestamps) -> Persistencia`: guarda primero en el historial y después escribe el archivo. No lanza por un
+  fallo de guardado: lo devuelve en `Persistencia.motivo_historial` o `motivo_exportacion`.
+- `persistencia.py:persistir_documento(historial, id_historial, clave, contenido, modelo, ruta_salida)` y
+  `persistir_documento_si_vigente(cancelada, …)`, que con `cancelada=True` no guarda nada y devuelve `None`.
+- `persistencia.py:Persistencia(id_historial, ruta_exportada, motivo_historial, motivo_exportacion)`,
+  `motivo_de_error`, `texto_sin_guardado` y `texto_destino_documento` (los textos de aviso).
 
 ### Resumen y minuta — `asistente_ia.py`
 
@@ -54,10 +73,13 @@ Dependencias entre módulos (quién importa a quién):
   - `.generar_resumen(texto, on_progreso=None, cancelar=None) -> str`
   - `.generar_minuta(texto, on_progreso=None, cancelar=None, fecha=None) -> str`
   - `.modelo_usado` — `"auto → <modelo>"` en modo auto con sesión abierta; si no, el modelo configurado.
-- `asistente_ia.py:ErrorAsistenteIA` y su subclase `ErrorSinSesionCopilot`.
-- Funciones de apoyo: `dividir_texto`, `limpiar_respuesta`, `normalizar_tabla_tareas`, `secciones_faltantes`.
-- Constantes: `NOMBRE_PROVEEDOR = "GitHub Copilot"`, `MODELO_POR_DEFECTO = "gpt-4.1"`, `PROMPT_SISTEMA`,
-  `PROMPT_RESUMEN`, `PROMPT_MINUTA`, `PROMPT_REVISION`, `PROMPT_NOTAS_BLOQUE`, `SECCIONES_RESUMEN`, `SECCIONES_MINUTA`.
+- `asistente_ia.py:ErrorAsistenteIA` y sus subclases `ErrorSinSesionCopilot` (hay que iniciar sesión) y `ErrorModeloIA`
+  (modelo vacío, de una familia no autorizada o sin ninguno válido en `auto`: no se envía nada).
+- Funciones de apoyo: `dividir_texto`, `limpiar_respuesta`, `normalizar_tabla_tareas`, `secciones_faltantes`,
+  `notas_de_la_aplicacion`, `nota_de_notas`.
+- Constantes: `NOMBRE_PROVEEDOR = "GitHub Copilot"`, `MODELO_POR_DEFECTO = "gpt-4.1"`, `LIMITE_NOTAS_EN_CACHE = 64`,
+  `TOPE_RETRY_AFTER = 60`, `MAX_MOTIVO_NOTA = 120`, `PROMPT_SISTEMA`, `PROMPT_RESUMEN`, `PROMPT_MINUTA`,
+  `PROMPT_REVISION`, `PROMPT_NOTAS_BLOQUE`, `SECCIONES_RESUMEN`, `SECCIONES_MINUTA`.
 
 ### Acceso a GitHub Copilot — `copilot.py`
 
@@ -65,9 +87,12 @@ Dependencias entre módulos (quién importa a quién):
   `invalidar_token`.
 - Login: `iniciar_login(enterprise_url=None) -> CodigoDispositivo`, `esperar_login(codigo, …) -> str`.
 - Modelos: `listar_modelos(sesion)`, `precio_entrada(modelo)`, `modelos_economicos(sesion)`,
+  `familia_excluida(id_modelo) -> Optional[str]`, `opciones_de_modelo(modelos, configurado)`,
+  `cargar_opciones_de_modelo(sesion, actual) -> list[str]` (una sola consulta a `/models`, sin sesión `auto`) y
   `abrir_sesion_auto(sesion) -> SesionAuto`.
 - HTTP: `url_api(enterprise_url=None)`, `cabeceras(token, iniciador="user")`, `normalizar_dominio(url)`.
-- Tipos: `Sesion(token, enterprise_url, origen)`, `CodigoDispositivo`, `SesionAuto` (con `.vigente()`), `ErrorCopilot`.
+- Tipos: `Sesion(token, enterprise_url, origen)`, `CodigoDispositivo`, `SesionAuto` (con `.vigente()`), `ErrorCopilot` y sus subclases `ErrorSesionCopilot` (401 de GitHub: hay que iniciar
+  sesión) y `ErrorModeloCopilot` (el modo `auto` no ofrece ningún modelo utilizable).
 - Constantes: `RUTA_TOKEN` (`~/.local/share/transcriptor-audio/copilot.json`), `RUTA_AUTH_OPENCODE`
   (`~/.local/share/opencode/auth.json`), `VARIABLE_ENTORNO = "COPILOT_GITHUB_TOKEN"`, `CLIENT_ID`, `API_VERSION`,
   `USER_AGENT`, `ESPERA_EXTRA`, `PRECIO_MAX_ECONOMICO = 50`, `FAMILIAS_EXCLUIDAS = ("kimi", "mistral")`,
@@ -85,8 +110,10 @@ Dependencias entre módulos (quién importa a quién):
 
 ### Interfaz gráfica — `ui.py`, `ui_copilot.py`, `ui_historial.py`
 
-- `ui.py:AppTranscriptor` — ventana principal. Métodos que usa `PanelHistorial`: `mostrar_vista(vista)`,
-  `cargar_desde_historial(id_historial) -> bool`, `historial_eliminado(id_historial)`.
+- `ui.py:AppTranscriptor` — ventana principal. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
+  `historial_eliminado(id_historial)`, el atributo `id_historial` y los métodos privados `_configurar_estilos_markdown`,
+  `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las vistas de la barra de navegación.
+- `ui.py:_GeneracionIA` — una generación de resumen o minuta en curso, con su propia señal de cancelación.
 - `ui_copilot.py:DialogoLoginCopilot(master, enterprise_url, al_terminar)` — diálogo modal de login.
 - `ui_historial.py:PanelHistorial(master, app, historial)` con `refrescar()`; `LIMITE_LISTA = 200`.
 - `ui.py:DOCUMENTOS_IA` — define los sufijos `_resumen.md` y `_minuta.md`.
@@ -102,12 +129,27 @@ Dependencias entre módulos (quién importa a quién):
 
 - Los widgets solo se tocan desde el hilo principal. Los hilos de fondo pasan por `ui.py:AppTranscriptor._en_ui`,
   que usa `self.after(0, …)` y no hace nada si la ventana se está cerrando.
-- Solo hay una transcripción a la vez (`ui.py:AppTranscriptor._transcribiendo`), y no se genera un documento de IA
-  mientras se transcribe ni al revés (`ui.py:AppTranscriptor._generar_documento_ia`).
-- La cancelación es cooperativa: un `threading.Event` (`cancelar_flag`) que `transcriber.py:TranscriptorAudio.transcribir`
-  revisa tras cada segmento; al activarse, devuelve lo transcrito hasta ahí.
-- `ui.py:AppTranscriptor._procesar_documento_ia` recibe el `id_historial` vigente al pulsar el botón, así que el
-  documento se guarda en esa entrada aunque después se abra otra.
+- Solo hay una transcripción a la vez (`ui.py:AppTranscriptor._transcribiendo`) y una generación de IA a la vez
+  (`ui.py:AppTranscriptor._generacion`); no se genera un documento mientras se transcribe
+  (`ui.py:AppTranscriptor._generar_documento_ia`) ni se transcribe mientras se genera
+  (`ui.py:AppTranscriptor._alternar_transcripcion`).
+- La cancelación de la transcripción es cooperativa: un `threading.Event` (`cancelar_flag`) que
+  `transcriber.py:TranscriptorAudio.transcribir` revisa tras cada segmento aceptado (no tras los descartados como
+  alucinación, ni durante la carga del modelo ni la preparación con VAD); al activarse, devuelve lo transcrito hasta
+  ahí, pero la ventana lo descarta: no escribe el archivo ni guarda en el historial.
+- Cada generación de IA es un `ui.py:_GeneracionIA` con su propio `threading.Event` (`cancelar`), así que cancelar una
+  no afecta a la siguiente. El hilo de fondo (`ui.py:AppTranscriptor._procesar_documento_ia`) solo llama a
+  `AsistenteIA`: no toca widgets, historial ni archivos. El único punto de decisión es
+  `ui.py:AppTranscriptor._recibir_documento_ia`, en el hilo principal: si la generación ya no es la vigente
+  (`self._generacion`), descarta el resultado, un error o un 401 sin guardar nada ni abrir el login.
+  `ui.py:AppTranscriptor._cancelar_documento_ia` devuelve la ventana al instante; la petición ya abierta no se aborta:
+  el hilo abandonado termina al recibir la siguiente línea de la respuesta, o tras `AsistenteIA.timeout` sin datos.
+- `_GeneracionIA.id_historial` es el `id_historial` vigente al pulsar el botón, así que el documento se guarda en esa
+  entrada aunque después se abra otra; el guardado lo hace `persistencia.py:persistir_documento_si_vigente` desde
+  `_recibir_documento_ia`.
+- La ventana reutiliza una instancia de `AsistenteIA` (y con ella la caché de notas) y la descarta al cambiar el
+  modelo, al cancelar una generación y tras un `ErrorSinSesionCopilot`. La configuración se lee una sola vez al
+  arrancar: cambiar `settings.yaml` exige reiniciar la ventana.
 - Si `Historial` no se puede abrir, `self.historial` queda en `None` y la app sigue sin historial
   (`ui.py:AppTranscriptor.__init__`).
 
@@ -120,6 +162,16 @@ Dependencias entre módulos (quién importa a quién):
 - `transcriber.py:es_alucinacion_conocida` descarta un segmento solo si, en minúsculas y sin puntuación en los
   extremos, coincide entero con una frase de `ALUCINACIONES_CONOCIDAS`.
 - `utils.py:serializar_transcripcion` (y, por tanto, `guardar_transcripcion`) lanza `ValueError` con un formato distinto de `txt`, `srt`, `vtt` o `json`.
+
+### Guardado
+
+- `persistencia.py` guarda primero en el historial y después el archivo junto al audio. Un fallo de uno no impide el
+  otro y ninguno descarta el resultado: se devuelve como aviso (`Persistencia.motivo_historial`, `motivo_exportacion`) y
+  la ventana lo muestra. Si no quedó ni en el historial ni como archivo, el aviso lo dice
+  (`persistencia.py:texto_sin_guardado`).
+- Un documento solo se guarda en el historial si `Historial` existe, hay `id_historial` y la entrada sigue existiendo
+  (`Historial.obtener`); si el audio ya no existe, el documento solo va al historial.
+- Una generación cancelada no guarda nada (`persistencia.py:persistir_documento_si_vigente`).
 
 ### Configuración
 
@@ -145,15 +197,33 @@ Dependencias entre módulos (quién importa a quién):
 - `copilot.py:listar_modelos` acepta un modelo si `policy.state == "enabled"` o `model_picker_enabled`, si es de tipo
   `chat` y, cuando declara `supported_endpoints`, si incluyen `/chat/completions`.
 - `copilot.py:modelos_economicos` descarta los modelos sin precio, con precio de entrada mayor que
-  `PRECIO_MAX_ECONOMICO` o de `FAMILIAS_EXCLUIDAS`.
-- `copilot.py:abrir_sesion_auto` elige el primer modelo ofrecido que admite `/chat/completions` y no es de una familia
-  de `FAMILIAS_EXCLUIDAS`, y lanza `ErrorCopilot` si no queda ninguno. `copilot.py:SesionAuto.vigente` da la sesión por caducada 300 s antes de `expires_at`.
-- `asistente_ia.py:AsistenteIA._completar` hace hasta 4 intentos con espera exponencial ante errores de red, 429 y
-  5xx. Ante un 429 o 5xx con `Retry-After` en segundos espera ese tiempo, hasta 60 s; por encima no reintenta y falla
-  (`asistente_ia.py:_retry_after`, `TOPE_RETRY_AFTER`). Un 401, dentro o fuera del modo auto, pasa por
-  `AsistenteIA._error_de_token_rechazado`: si el token viene de `COPILOT_GITHUB_TOKEN` lanza `ErrorAsistenteIA` sin abrir
-  el login; si no, invalida el token guardado y lanza `ErrorSinSesionCopilot`. Un 401 al abrir la sesión `auto` lanza
-  `copilot.ErrorSesionCopilot` y sigue ese mismo camino.
+  `PRECIO_MAX_ECONOMICO` o de `FAMILIAS_EXCLUIDAS`; deja un solo modelo por `name` (el primero) y los ordena por precio
+  de entrada.
+- `copilot.py:abrir_sesion_auto` elige el primer modelo ofrecido (el `selected_model` del servidor, luego
+  `available_models`) que admite `/chat/completions` y no es de una familia de `FAMILIAS_EXCLUIDAS`. Un modelo sin
+  metadatos de endpoints cuenta como compatible, y todos lo son si falla el `GET /models`. Lanza `ErrorSesionCopilot`
+  ante un 401 y `ErrorModeloCopilot` si falta `session_token`, no se ofrece ningún modelo o ninguno queda autorizado y
+  compatible. Sin `expires_at`, la sesión caduca a la hora; `copilot.py:SesionAuto.vigente` la da por caducada 300 s
+  antes. `listar_modelos` y `abrir_sesion_auto` salen siempre con `x-initiator: user`; las peticiones de generación en
+  modo `auto` llevan además la cabecera `Copilot-Session-Token`.
+- `copilot.py:familia_excluida` se comprueba al elegir el modelo de `auto` y justo antes de cada envío
+  (`asistente_ia.py:AsistenteIA._modelo_para_peticion`): ni la transcripción ni ninguna parte sale hacia un modelo de
+  `FAMILIAS_EXCLUIDAS`, tampoco con un modelo escrito a mano (`ErrorModeloIA`, sin enviar nada). Un modelo vacío da el
+  mismo error. La familia se reconoce porque el id del modelo contiene su nombre, sin distinguir mayúsculas.
+- `copilot.py:esperar_login` consulta cada `interval + 3` s; trata `slow_down` (sube el intervalo), `expired_token`,
+  `access_denied` y `authorization_pending`, y lanza `InterruptedError` si se cancela. `iniciar_login` pide el
+  scope `read:user`.
+- `asistente_ia.py:AsistenteIA._completar` hace hasta 4 intentos en total (los reintentos que se describen abajo
+  gastan intentos del mismo límite). Tras un error de red espera 1, 2 y 4 s; tras un 429 o 5xx, 2, 4 y 8 s, o el
+  `Retry-After` en segundos si lo trae, hasta 60 s: por encima no reintenta y falla (`asistente_ia.py:_retry_after`,
+  `TOPE_RETRY_AFTER`). Las esperas se cortan al activarse la cancelación. Un 400 que menciona `temperature` se reintenta
+  sin ese campo; `model_not_supported` y 403 dan `ErrorAsistenteIA` con mensajes propios. El timeout de conexión es de
+  30 s y el de lectura, `AsistenteIA.timeout`.
+- Un 401 fuera del modo auto pasa por `AsistenteIA._error_de_token_rechazado`: si el token viene de
+  `COPILOT_GITHUB_TOKEN` lanza `ErrorAsistenteIA` sin abrir el login; si no, invalida el token guardado y lanza
+  `ErrorSinSesionCopilot`. En modo `auto`, un 401 de `/chat/completions` primero descarta la sesión `auto` y abre otra
+  (en los tres primeros intentos); un 401 en el último intento, o al abrir la sesión (`ErrorSesionCopilot`), sigue ese
+  mismo camino.
 - Las respuestas de GitHub con formato o tipos inesperados (`copilot.py:_datos_de`, `copilot.py:_lista_de_objetos`)
   lanzan `ErrorCopilot` con «GitHub devolvió una respuesta inesperada al <acción>.», para que el diálogo de login y la
   CLI no se queden colgados ni muestren un trazo.
@@ -167,9 +237,13 @@ Dependencias entre módulos (quién importa a quién):
   contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`).
 - Las notas de cada parte se guardan en memoria en cuanto esa parte termina, hasta 64 partes (o todas las de la generación en curso si son más). Al generar otra vez con el mismo modelo, solo se piden las que faltan (`asistente_ia.py:AsistenteIA._notas_por_bloque`). Si una parte falla, no se lanzan las que aún no han empezado, el error dice cuál es y cuántas notas se conservan, y el modelo se valida antes de enviar nada.
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
-  faltan menos que antes.
+  faltan menos que antes. La revisión de fidelidad solo se acepta si no deja más secciones sin cubrir que el borrador.
 - La fecha de la minuta la pone la aplicación: `asistente_ia.py:AsistenteIA.generar_minuta` reescribe la línea
-  `**Fecha:**` con la fecha recibida o con `No especificada`.
+  `**Fecha:**` con la fecha recibida o con `No especificada`. La ventana la saca de la fecha de modificación del audio;
+  si el audio ya no existe, de `creado_en` de la entrada del historial; si no, es `No especificada`
+  (`ui.py:AppTranscriptor._fecha_archivo`).
+- El texto que se envía a la IA son los segmentos de la transcripción unidos con saltos de línea, no `texto_completo`
+  (`ui.py:AppTranscriptor._generar_documento_ia`).
 
 ### Historial
 
@@ -177,7 +251,9 @@ Dependencias entre módulos (quién importa a quién):
   protege el nombre de columna, que se interpola en el SQL.
 - Un título editado a mano no se reemplaza: el título tomado de la minuta se aplica solo donde `titulo_editado = 0`,
   y `historial.py:Historial.renombrar` pone `titulo_editado = 1`.
-- `historial.py:Historial.renombrar` lanza `ValueError` si el título queda vacío.
+- `historial.py:Historial.renombrar` lanza `ValueError` si el título queda vacío. `Historial.crear` con `titulo` pone
+  `titulo_editado = 1`.
+- `historial.py:Historial.listar` ordena por `creado_en DESC, id DESC` y escapa los comodines de `LIKE`.
 - Una ruta relativa se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo
   (`historial.py:Historial.__init__`).
 - La búsqueda ignora mayúsculas y acentos (`historial.py:normalizar`) y cubre `titulo`, `archivo_nombre`, `texto`,
@@ -191,7 +267,8 @@ Dependencias entre módulos (quién importa a quién):
 - `POST https://<dominio o github.com>/login/device/code` — `copilot.py:iniciar_login`.
 - `POST https://<dominio o github.com>/login/oauth/access_token`, en bucle — `copilot.py:esperar_login`.
 - `GET <url_api>/models` — `copilot.py:listar_modelos` y `copilot.py:abrir_sesion_auto`.
-- `POST <url_api>/models/session` — `copilot.py:abrir_sesion_auto`.
+- `POST <url_api>/models/session` — `copilot.py:abrir_sesion_auto`: la llama `AsistenteIA` al generar con el modelo `auto` y
+  la CLI con `--copilot-modelos`.
 - `POST <url_api>/chat/completions` en streaming — `asistente_ia.py:AsistenteIA._completar`.
 - `url_api` es `https://api.githubcopilot.com`, o `https://copilot-api.<dominio>` con GitHub Enterprise
   (`copilot.py:url_api`).
@@ -209,8 +286,10 @@ Dependencias entre módulos (quién importa a quién):
   reescribe. La ruta se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
   (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
-- Junto al audio: `<nombre>_transcripcion.<formato>` (`ui.py:AppTranscriptor._generar_ruta_salida`), y
-  `<nombre>_resumen.md` y `<nombre>_minuta.md` (`ui.py:AppTranscriptor._procesar_documento_ia`).
+- Junto al audio: `<nombre>_transcripcion.<formato>` (la ruta sale de `ui.py:AppTranscriptor._generar_ruta_salida` y la
+  escribe `persistencia.py:persistir_transcripcion`), y `<nombre>_resumen.md` y `<nombre>_minuta.md` (la ruta sale de
+  `ui.py:AppTranscriptor._generar_documento_ia` y la escribe `persistencia.py:persistir_documento`). Se sobrescriben
+  sin preguntar (`BACKLOG.md`, Salud del código #18).
 - La CLI escribe en `stdout` o en el archivo de `-o`; los dos usan `utils.py:serializar_transcripcion`, y `--verbose` escribe en stderr. Con `srt` o `vtt` sin `-o`, termina con código 1 antes de cargar Whisper.
 
 ### Base de datos
@@ -229,8 +308,8 @@ Dependencias entre módulos (quién importa a quién):
 - `xdg-open`, `open` u `os.startfile` para abrir la carpeta de salida (`ui.py:AppTranscriptor._abrir_carpeta`).
 - `webbrowser.open` y copia del código al portapapeles (`ui_copilot.py:DialogoLoginCopilot._abrir_github`).
 - Hilos `daemon`: transcripción, generación de IA y consulta de modelos (`ui.py`), `login-copilot`
-  (`ui_copilot.py`), `latido` (`registro.py:latido`) y un `ThreadPoolExecutor` `ia-parte`
-  (`asistente_ia.py:AsistenteIA._notas_por_bloque`).
+  (`ui_copilot.py`) y `latido` (`registro.py:latido`). Además, un `ThreadPoolExecutor` `ia-parte`
+  (`asistente_ia.py:AsistenteIA._notas_por_bloque`) cuyos hilos no son `daemon`: el `with` los espera antes de salir.
 - `registro.py:configurar_logging` reemplaza los manejadores del logger raíz por uno a `stderr` y asigna
   `threading.excepthook`.
 

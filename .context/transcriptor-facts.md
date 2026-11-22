@@ -9,8 +9,10 @@
   modelo local para mitigar la dependencia de una API no documentada (A-14). Se rechazó: el riesgo se acepta y la
   regla se mantiene. No lo vuelvas a proponer.
 - **La exclusión de las familias `kimi` y `mistral` es un requisito real de la empresa del usuario** (A-12), no una
-  preferencia. No propongas quitarla ni moverla a una opción que el usuario pueda desactivar. Lo pendiente es
-  aplicarla también en modo `auto` y con un modelo escrito a mano (`BACKLOG.md`, historia #2).
+  preferencia. No propongas quitarla ni moverla a una opción que el usuario pueda desactivar. Ya se aplica también
+  en modo `auto` y con un modelo escrito a mano (`copilot.familia_excluida`, historia 03). Sigue abierta una decisión
+  del usuario: si cubre también a Codestral, Devstral y otros de Mistral AI sin «mistral» en el nombre (`BACKLOG.md`,
+  Salud del código #21).
 - **Los contratos se llaman `EGM.md`**, no `README.md`, para no tocar el README escrito a mano.
 - **`docs/` se versiona.** La regla que lo ignoraba se quitó del `.gitignore` el 2026-11-22.
 
@@ -19,11 +21,16 @@
 - La CLI no genera resumen ni minuta y no guarda en el historial; solo la interfaz lo hace.
 - El token se busca en este orden: `COPILOT_GITHUB_TOKEN`, `~/.local/share/transcriptor-audio/copilot.json`,
   `~/.local/share/opencode/auth.json`.
-- `config/settings.yaml` se lee con ruta relativa al directorio de trabajo; `historial.ruta` se resuelve contra la
-  raíz del proyecto.
+- `config/settings.yaml` se lee siempre contra la raíz del proyecto (`configuracion.py`), salvo que `--config` indique
+  otra ruta, que se interpreta desde la carpeta de trabajo; `historial.ruta` también se resuelve contra la raíz. La app
+  ya no reescribe el YAML: el modelo de IA elegido en el selector va a
+  `~/.local/share/transcriptor-audio/preferencias.json` y gana a `ia.modelo`.
+- Al abrir la ventana no hay tráfico con Copilot ni se lee el token; «↻» consulta el catálogo una vez, sin sesión `auto`.
 - Con más de un bloque, el documento se redacta a partir de notas y la revisión de fidelidad compara contra ellas.
-- `transcribir_archivo_largo` no tiene llamadores; `audio.sample_rate`, `audio.chunk_duration` y
-  `transcripcion.task` no se leen.
+- Cancelar una transcripción descarta lo transcrito. Cancelar una generación de IA devuelve la ventana al instante;
+  el hilo abandonado termina solo y su resultado se descarta.
+- `transcribir_archivo_largo` y las claves `audio.*` y `transcripcion.task` ya no existen; si un YAML antiguo las
+  trae, se ignoran.
 - `MODELO_POR_DEFECTO` en el código es `gpt-4.1`; `settings.yaml` trae `claude-haiku-5.5`.
 
 ## Según la documentación, sin verificar con llamadas reales
@@ -43,7 +50,7 @@ Fuente: `docs/integracion-copilot.md`.
 | A-24 | Los permisos `600` del token no se reaplican si el archivo ya existía | Sin escenario confirmado |
 | A-28 | `--ui` pierde `--log` y `--config` | Hay otras dos formas de lanzar la interfaz |
 | A-31 | Un hilo de `latido` por operación larga | Aceptable hoy |
-| A-32 | Supuestos de los tests sin documentar | Absorbido por A-22 |
+| A-32 | Supuestos de los tests sin documentar | Absorbido por A-22: están en «Cómo se prueba» de `docs/disenos/00-actual.md` |
 
 ## Pospuesto
 
@@ -52,5 +59,5 @@ Fuente: `docs/integracion-copilot.md`.
 ## Sin verificar
 
 - Que los tests pasen en otros equipos o versiones de Python: solo se ejecutaron con Python 3.14.10 en Linux (2026-11-22).
-- El comportamiento real de la API de Copilot y de la interfaz gráfica: la auditoría fue por lectura.
+- El comportamiento real de la API de Copilot y de la interfaz gráfica: la auditoría y la sincronización de la documentación fueron por lectura del código.
 - Que no haya secretos en commits anteriores.

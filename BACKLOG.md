@@ -25,7 +25,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 11. ✅ [🟡] Guardar el modelo de IA elegido fuera del repo, junto al token, en vez de reescribir `config/settings.yaml` — hallazgo A-19 — carril S
 12. ✅ [🟡] Eliminar `transcribir_archivo_largo`, `_on_drop`, `duracion_archivo`, `pydantic` y `tqdm`, y tratar los metadatos de `ffprobe` como opcionales — hallazgo A-20 — carril S
 13. ✅ [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
-14. [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S
+14. ✅ [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S
 15. ✅ [🟡] Convertir en `ErrorCopilot` las respuestas de GitHub con formato inesperado, para que el diálogo de login no se quede colgado — hallazgo A-17 (posible) — carril S
 16. ✅ [🟢] No habilitar «Transcribir» tras generar un documento de una entrada cuyo audio ya no existe — hallazgo A-26 — carril S
 17. ✅ [🟢] Mostrar en pantalla o en la pestaña Registro los errores de «Guardar como…» — hallazgo A-27 — carril S
