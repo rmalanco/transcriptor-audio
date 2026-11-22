@@ -40,8 +40,11 @@ Dependencias entre módulos (quién importa a quién):
 - `transcriber.py:SegmentoTranscripcion(inicio, fin, texto, palabras)` y
   `transcriber.py:ResultadoTranscripcion(texto_completo, segmentos, idioma_detectado, probabilidad_idioma, duracion_total)`.
 - `transcriber.py:es_alucinacion_conocida(texto)` y el conjunto `ALUCINACIONES_CONOCIDAS`.
-- `transcriber.py:cargar_configuracion(ruta="config/settings.yaml") -> dict`
-- `transcriber.py:guardar_modelo_ia(modelo, ruta="config/settings.yaml") -> bool`
+- `configuracion.py:RUTA_POR_DEFECTO` (`<raíz del proyecto>/config/settings.yaml`), `configuracion.py:ErrorConfiguracion`.
+- `configuracion.py:cargar_configuracion(ruta=None, *, modelos_whisper=None) -> dict`: sin `ruta`, usa `RUTA_POR_DEFECTO`;
+  una ruta relativa se interpreta desde la carpeta de trabajo. Devuelve todas las secciones y las 21 claves que usa la
+  app, con sus valores por defecto. `modelos_whisper` (la lista de la CLI o de la ventana) valida `modelo.nombre`.
+- `configuracion.py:guardar_modelo_ia(modelo, ruta=None) -> bool`
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo`,
   `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`.
 - `utils.py:formatear_tiempo`, `formatear_tiempo_srt`, `formatear_tiempo_vtt`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
@@ -118,22 +121,21 @@ Dependencias entre módulos (quién importa a quién):
   convierte `idioma == "auto"` en `language=None`.
 - `transcriber.py:es_alucinacion_conocida` descarta un segmento solo si, en minúsculas y sin puntuación en los
   extremos, coincide entero con una frase de `ALUCINACIONES_CONOCIDAS`.
-- `transcriber.py:guardar_modelo_ia` cambia solo la primera línea `modelo:` dentro del bloque `ia:` y conserva los
+- `configuracion.py:guardar_modelo_ia` cambia solo la primera línea `modelo:` dentro del bloque `ia:` y conserva los
   comentarios; devuelve `False` si no la encuentra.
 - `utils.py:guardar_transcripcion` lanza `ValueError` con un formato distinto de `txt`, `srt`, `vtt` o `json`.
 
 ### Configuración
 
-- La CLI y la interfaz leen `modelo.*` y `transcripcion.{beam_size, best_of, temperature, condition_on_previous_text,
-  compression_ratio_threshold, logprob_threshold, no_speech_threshold}` con `[]`, sin valor por defecto: si falta
-  una clave, hay `KeyError` (`main.py:main`, `ui.py:AppTranscriptor.__init__`, `ui.py:AppTranscriptor._procesar_transcripcion`).
-- La sección `ia:` se lee con `.get` y valores por defecto en `ui.py:AppTranscriptor._generar_documento_ia`:
-  `temperatura` 0.3, `max_caracteres_bloque` 60000, `revision_fidelidad` `True`, `peticiones_paralelas` 3. Si falta
-  `ia.modelo`, se usa `MODELO_POR_DEFECTO` (`"gpt-4.1"`).
-- En la CLI, `-l`, `-t`, `-f`, `--no-timestamps` y `--word-timestamps` tienen valores propios y no leen
-  `transcripcion.idioma`, `transcripcion.task`, `salida.formato`, `salida.incluir_timestamps` ni
-  `salida.palabra_por_palabra`. La interfaz sí lee esas claves, salvo `task`, que fija en `"transcribe"`.
-- `audio.sample_rate` y `audio.chunk_duration` no se leen en ningún módulo.
+- La CLI y la interfaz toman todos los valores de `configuracion.py:cargar_configuracion`, que devuelve el dict
+  completo (las 21 claves con sus valores por defecto y validadas). No hay valores por defecto propios en `main.py` ni
+  en `ui.py`. Un YAML con errores da `configuracion.py:ErrorConfiguracion`: la CLI sale con código 1 y
+  `Error: <mensaje>` en `stderr` antes de cargar Whisper; la ventana muestra el mensaje en un diálogo y no arranca.
+- Claves con valor `null` (por ejemplo `beam_size:` sin valor) se tratan como ausentes y toman su valor por defecto.
+  Las claves desconocidas (incluidas `audio.*` y `transcripcion.task` de configuraciones antiguas) se ignoran sin error.
+- En la CLI, `-l`, `-f`, `--no-timestamps` y `--word-timestamps` no tienen valor fijo: si no se pasan, valen
+  `transcripcion.idioma`, `salida.formato`, `salida.incluir_timestamps` y `salida.palabra_por_palabra`. `-t` sigue con
+  `transcribe` por defecto y no lee configuración. La interfaz lee esas claves y fija `task` en `"transcribe"`.
 - La CLI no usa `AsistenteIA` ni `Historial`: no genera resumen ni minuta y no guarda en el historial.
 
 ### GitHub Copilot
@@ -198,8 +200,9 @@ Dependencias entre módulos (quién importa a quién):
   en `copilot.py:cerrar_sesion` y `copilot.py:invalidar_token`.
 - `~/.local/share/opencode/auth.json`: solo lectura (`copilot.py:leer_token`).
 - `~/.cache/faster-whisper`: caché de modelos (`transcriber.py:TranscriptorAudio.__init__`).
-- `config/settings.yaml`: lectura con `yaml.safe_load` (`transcriber.py:cargar_configuracion`) y reescritura completa
-  al cambiar el modelo de IA (`transcriber.py:guardar_modelo_ia`). La ruta es relativa al directorio de trabajo.
+- `config/settings.yaml`: lectura con `yaml.safe_load` (`configuracion.py:cargar_configuracion`) y reescritura de la
+  línea `ia.modelo` al cambiar el modelo de IA (`configuracion.py:guardar_modelo_ia`). La ruta se resuelve contra
+  `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - Junto al audio: `<nombre>_transcripcion.<formato>` (`ui.py:AppTranscriptor._generar_ruta_salida`), y
   `<nombre>_resumen.md` y `<nombre>_minuta.md` (`ui.py:AppTranscriptor._procesar_documento_ia`).
 - `/tmp/chunk_<nombre>_<inicio>_<fin>.wav`: archivo temporal de `transcriber.py:TranscriptorAudio.transcribir_archivo_largo`.

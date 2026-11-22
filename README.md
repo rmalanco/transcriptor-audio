@@ -143,7 +143,10 @@ va a ~1x y los acierta. Para ir más rápido con calidad aceptable, usa `small` 
 ## Configuración
 
 Edita `config/settings.yaml` para ajustar los parámetros por defecto (modelo de Whisper, idioma, formato de
-salida, modelo de Copilot, etc.). Cada opción está comentada en el propio archivo.
+salida, modelo de Copilot, etc.). Cada opción está comentada en el propio archivo. La CLI y la ventana leen ese mismo
+archivo desde cualquier carpeta; en la CLI, las opciones de la línea de órdenes (`-l`, `-f`, `--no-timestamps`…) ganan
+a lo que diga el YAML. Si el YAML tiene un error, la CLI lo muestra en la terminal y no transcribe; la ventana lo
+muestra en un diálogo y no arranca.
 
 ## Privacidad y datos locales
 

@@ -55,9 +55,13 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
    `POST <url_api>/chat/completions` en streaming.
 3. Si el texto supera `max_caracteres_bloque`, primero se piden notas por bloque en paralelo y el documento se
    redacta a partir de esas notas.
-4. `persistencia.persistir_documento` guarda primero en el historial: `Historial.guardar_documento` guarda el
-   documento y el modelo usado y, con la minuta, también actualiza el título si no se editó a mano.
-5. Después el resultado se escribe en `<nombre>_resumen.md` o `<nombre>_minuta.md` junto al audio, si el audio
+4. Mientras dura la generación, el botón de la pestaña es «■ Cancelar»: `AppTranscriptor._cancelar_documento_ia`
+   devuelve la ventana al instante y deja abandonado el hilo de fondo, cuyo resultado se descartará.
+5. Al terminar, el hilo de fondo entrega el resultado al hilo principal (`AppTranscriptor._recibir_documento_ia`),
+   único punto que decide si sigue vigente. Si lo está, `persistencia.persistir_documento_si_vigente` guarda primero
+   en el historial: `Historial.guardar_documento` guarda el documento y el modelo usado y, con la minuta, también
+   actualiza el título si no se editó a mano.
+6. Después el resultado se escribe en `<nombre>_resumen.md` o `<nombre>_minuta.md` junto al audio, si el audio
    existe. Un fallo de guardado no descarta el documento: se avisa en la línea de estado de la pestaña y en Registro.
 
 ### Iniciar sesión en Copilot

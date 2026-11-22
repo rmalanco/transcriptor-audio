@@ -17,7 +17,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 3. ✅ [🟡] Al cargar otro archivo, invalidar el resultado, las pestañas de IA y el vínculo al historial del anterior, y avisar si la entrada del historial se eliminó mientras se generaba un documento (review de la historia 01) — hallazgo A-02 — carril S
 4. [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
 5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
-6. [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
+6. ✅ [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
 7. [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
 8. [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
 9. [🟡] En la CLI, validar la combinación de formato y salida antes de transcribir y usar el mismo serializador que la exportación a archivo — hallazgo A-10 — carril S
@@ -33,6 +33,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 19. [🟡] Cubrir con tests los rechazos de la CLI (archivo inexistente o extensión no admitida, fallo al transcribir) y sus órdenes de sesión (`--copilot-logout`, `--copilot-modelos` sin sesión), con las rutas de token aisladas y sin red, sin fijar lo que cambiará el punto 9 — hallazgo A-16, separado del punto 2 — carril S
 20. [🟡] Que `--copilot-modelos` y el selector de modelo de la ventana no ofrezcan modelos de familias no autorizadas ni sugieran ponerlos en `ia.modelo` — hallazgo A-12, complemento de la historia 03 — carril S
 21. [🟡] Decidir si la exclusión de Mistral AI cubre también los modelos cuyo nombre no contiene «mistral» (Codestral, Devstral, Ministral, Pixtral, Magistral) y, si es así, ampliar la lista de familias — decisión del usuario pendiente, historia 03 — carril S
+22. [🟡] Que la ventana no cambie en silencio por «Auto-detectar» un idioma de `transcripcion.idioma` que Whisper admite pero que no está en su selector (por ejemplo `nl`): hoy el mismo YAML da resultados distintos en la ventana y en la CLI — hallazgo nuevo de la historia 05 — carril S
 
 ## Backlog
 

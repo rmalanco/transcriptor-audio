@@ -4,13 +4,8 @@ modelo:
   dispositivo: "cpu"        # cpu, cuda, auto
   compute_type: "int8"      # int8, int16, float16, float32
 
-audio:
-  sample_rate: 16000
-  chunk_duration: 30        # segundos por chunk para archivos largos
-
 transcripcion:
   idioma: "es"              # auto, es, en, fr, etc.
-  task: "transcribe"        # transcribe, translate
   beam_size: 5
   best_of: 5
   temperature: 0.0

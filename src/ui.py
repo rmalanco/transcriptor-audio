@@ -20,12 +20,13 @@ try:
 except ImportError:
     TKDND_DISPONIBLE = False
 
-from src.asistente_ia import (MODELO_POR_DEFECTO, NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
+from src.asistente_ia import (NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
                               ErrorSinSesionCopilot)
 from src import copilot
 from src.historial import Historial
 from src.registro import configurar_logging
-from src.transcriber import TranscriptorAudio, cargar_configuracion, guardar_modelo_ia
+from src.configuracion import ErrorConfiguracion, cargar_configuracion, guardar_modelo_ia
+from src.transcriber import TranscriptorAudio
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
@@ -104,7 +105,7 @@ else:
 
 
 class AppTranscriptor(ctk.CTk, _BaseDnD):
-    def __init__(self):
+    def __init__(self, configuracion: dict):
         super().__init__()
 
         # Carga tkdnd sobre el mismo intérprete Tcl de CTk (no crear un segundo Tk)
@@ -116,7 +117,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             except RuntimeError:
                 pass
 
-        self.configuracion = cargar_configuracion("config/settings.yaml")
+        self.configuracion = configuracion
         self.title("Transcriptor de Audio/Video")
         self.geometry("1100x720")
         self.minsize(900, 640)
@@ -142,7 +143,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.vista_actual = VISTA_TRANSCRIBIR
         self._titulo_mostrado = ""
         try:
-            self.historial: Optional[Historial] = Historial(self.configuracion.get("historial", {}).get("ruta"))
+            self.historial: Optional[Historial] = Historial(self.configuracion["historial"]["ruta"])
         except Exception as e:  # el historial no debe impedir usar la app
             self.historial = None
             log.exception("No se pudo abrir el historial: %s", e)
@@ -845,16 +846,16 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def _generar_documento_ia(self, clave: str):
         if not self.resultado_actual or self._generando_ia() or self._transcribiendo():
             return
-        cfg = self.configuracion.get("ia", {})
+        cfg = self.configuracion["ia"]
         try:
             if self._asistente is None:
                 self._asistente = AsistenteIA(
                     modelo=self._modelo_ia_configurado(),
-                    temperatura=cfg.get("temperatura", 0.3),
-                    max_caracteres_bloque=cfg.get("max_caracteres_bloque", 60000),
-                    revision_fidelidad=cfg.get("revision_fidelidad", True),
-                    peticiones_paralelas=cfg.get("peticiones_paralelas", 3),
-                    enterprise_url=cfg.get("copilot_enterprise_url") or None,
+                    temperatura=cfg["temperatura"],
+                    max_caracteres_bloque=cfg["max_caracteres_bloque"],
+                    revision_fidelidad=cfg["revision_fidelidad"],
+                    peticiones_paralelas=cfg["peticiones_paralelas"],
+                    enterprise_url=cfg["copilot_enterprise_url"] or None,
                 )
         except ErrorSinSesionCopilot:
             self._iniciar_sesion_copilot(lambda: self._generar_documento_ia(clave))
@@ -998,14 +999,14 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._refrescar_historial()
 
     def _modelo_ia_configurado(self) -> str:
-        return self.configuracion.get("ia", {}).get("modelo", MODELO_POR_DEFECTO)
+        return self.configuracion["ia"]["modelo"]
 
     def _texto_modelo_ia(self) -> str:
         return f"Modelo: {NOMBRE_PROVEEDOR} · {self._modelo_ia_configurado()}"
 
     def _cargar_modelos_ia(self):
         """Consulta en segundo plano qué modelos económicos (y si el modo auto) puede usar la cuenta."""
-        enterprise_url = self.configuracion.get("ia", {}).get("copilot_enterprise_url") or None
+        enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
 
         def consultar():
             sesion = copilot.leer_token(enterprise_url)
@@ -1039,7 +1040,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         if modelo == self._modelo_ia_configurado():
             return
         texto_anterior = self._texto_modelo_ia()
-        self.configuracion.setdefault("ia", {})["modelo"] = modelo
+        self.configuracion["ia"]["modelo"] = modelo
         self._asistente = None  # se recrea con el modelo nuevo en la próxima generación
         for tab in self.tabs_ia.values():
             if tab["estado"].cget("text") == texto_anterior:
@@ -1060,7 +1061,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 al_conectar()
             else:
                 self.label_estado.configure(text="Inicio de sesión en GitHub Copilot cancelado")
-        enterprise_url = self.configuracion.get("ia", {}).get("copilot_enterprise_url") or None
+        enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
         DialogoLoginCopilot(self, enterprise_url, al_terminar)
 
     def _fecha_archivo(self) -> str:
@@ -1332,7 +1333,16 @@ def main():
     configurar_logging()
     log.info("Iniciando interfaz (nivel de log %s; cámbialo con TRANSCRIPTOR_LOG=DEBUG)",
              logging.getLevelName(logging.getLogger("transcriptor").level))
-    app = AppTranscriptor()
+    try:
+        configuracion = cargar_configuracion(modelos_whisper=MODELOS_DISPONIBLES)
+    except ErrorConfiguracion as e:
+        log.error("%s", e)
+        raiz = tk.Tk()  # ventana oculta solo para poder mostrar el diálogo antes de construir la app
+        raiz.withdraw()
+        messagebox.showerror("Configuración", str(e), parent=raiz)
+        raiz.destroy()
+        sys.exit(1)
+    app = AppTranscriptor(configuracion)
     app.mainloop()
 
 

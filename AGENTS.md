@@ -57,14 +57,16 @@ Las reglas 6 y 7 se cumplen desde el 2026-11-22: la 6 en `src/persistencia.py` y
 ```
 
 Las dependencias de desarrollo, incluido `pytest`, se instalan con `./venv/bin/python -m pip install -r requirements-dev.txt`
-(ese archivo incluye `requirements.txt`). Los comandos se ejecutan desde la raíz del repo, porque
-`config/settings.yaml` se lee con ruta relativa.
+(ese archivo incluye `requirements.txt`). Los comandos se ejecutan desde la raíz del repo: `python -m src.main` necesita
+que el paquete `src` sea importable. La configuración (`config/settings.yaml`) se resuelve contra la raíz del proyecto,
+aunque se ejecute desde otra carpeta.
 
 ## Arquitectura (`src/`)
 
 | Archivo | Responsabilidad |
 |---|---|
-| `transcriber.py` | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones, `cargar_configuracion` |
+| `transcriber.py` | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones |
+| `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`, `guardar_modelo_ia` |
 | `copilot.py` | Integración con GitHub Copilot: login (device flow), token, catálogo de modelos, modo `auto` |
 | `asistente_ia.py` | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, post-proceso de la minuta |
 | `ui.py` | Ventana principal: transcribir, pestañas Texto/Resumen/Minuta, atajos |

@@ -6,11 +6,20 @@ import logging
 import sys
 
 from src.registro import configurar_logging
-from src.transcriber import TranscriptorAudio, cargar_configuracion
+from src.configuracion import ErrorConfiguracion, cargar_configuracion
+from src.transcriber import TranscriptorAudio
 from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
 
 MODELOS_DISPONIBLES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3"]
+
+
+def _cargar_configuracion_o_salir(ruta):
+    try:
+        return cargar_configuracion(ruta, modelos_whisper=MODELOS_DISPONIBLES)
+    except ErrorConfiguracion as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def listar_modelos():
@@ -85,12 +94,12 @@ Ejemplos:
     parser.add_argument("-m", "--modelo", choices=MODELOS_DISPONIBLES, help="Modelo Whisper (por defecto: el de config/settings.yaml)")
     parser.add_argument("-d", "--dispositivo", choices=["cpu", "cuda", "auto"], help="Dispositivo de cómputo (por defecto: config)")
     parser.add_argument("-c", "--compute-type", choices=["int8", "int16", "float16", "float32"], help="Tipo de computación (por defecto: config)")
-    parser.add_argument("-l", "--idioma", default="es", help="Idioma (es, en, fr, auto, etc.)")
+    parser.add_argument("-l", "--idioma", help="Idioma (es, en, fr, auto, etc.) (por defecto: el de la configuración)")
     parser.add_argument("-t", "--task", default="transcribe", choices=["transcribe", "translate"], help="Tarea: transcribir o traducir a inglés")
-    parser.add_argument("-f", "--formato", default="txt", choices=["txt", "srt", "vtt", "json"], help="Formato de salida")
-    parser.add_argument("--no-timestamps", action="store_true", help="No incluir timestamps en salida")
-    parser.add_argument("--word-timestamps", action="store_true", help="Timestamps por palabra (JSON)")
-    parser.add_argument("--config", default="config/settings.yaml", help="Archivo de configuración YAML")
+    parser.add_argument("-f", "--formato", choices=["txt", "srt", "vtt", "json"], help="Formato de salida (por defecto: el de la configuración)")
+    parser.add_argument("--no-timestamps", action="store_true", help="No incluir timestamps en salida (por defecto: el de la configuración)")
+    parser.add_argument("--word-timestamps", action="store_true", help="Timestamps por palabra (por defecto: el de la configuración)")
+    parser.add_argument("--config", help="Archivo de configuración YAML (por defecto: config/settings.yaml del proyecto)")
     parser.add_argument("--listar-modelos", action="store_true", help="Listar modelos disponibles y salir")
     parser.add_argument("--copilot-login", action="store_true", help="Iniciar sesión en GitHub Copilot y salir")
     parser.add_argument("--copilot-logout", action="store_true", help="Cerrar la sesión de GitHub Copilot y salir")
@@ -112,7 +121,7 @@ Ejemplos:
         listar_modelos()
 
     if args.copilot_login or args.copilot_modelos or args.copilot_logout:
-        enterprise_url = cargar_configuracion(args.config).get("ia", {}).get("copilot_enterprise_url") or None
+        enterprise_url = _cargar_configuracion_o_salir(args.config)["ia"]["copilot_enterprise_url"] or None
         if args.copilot_logout:
             from src import copilot
             print("Sesión cerrada" if copilot.cerrar_sesion() else "No había sesión guardada por esta app")
@@ -130,7 +139,11 @@ Ejemplos:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     
-    config = cargar_configuracion(args.config)
+    config = _cargar_configuracion_o_salir(args.config)
+    idioma = args.idioma or config["transcripcion"]["idioma"]
+    formato = args.formato or config["salida"]["formato"]
+    incluir_timestamps = not args.no_timestamps and config["salida"]["incluir_timestamps"]
+    palabra_por_palabra = args.word_timestamps or config["salida"]["palabra_por_palabra"]
     
     modelo_nombre = args.modelo or config['modelo']['nombre']
     dispositivo = args.dispositivo or config['modelo']['dispositivo']
@@ -146,7 +159,7 @@ Ejemplos:
         print(f"Canales: {info.canales}" if info.canales else "Canales: desconocido")
         print(f"Es video: {'Sí' if info.es_video else 'No'}")
         print(f"Modelo: {modelo_nombre} ({dispositivo}, {compute_type})")
-        print(f"Idioma: {args.idioma}")
+        print(f"Idioma: {idioma}")
         print(f"Task: {args.task}")
         print("-" * 50)
     
@@ -159,7 +172,7 @@ Ejemplos:
     try:
         resultado = transcriptor.transcribir(
             args.archivo,
-            idioma=args.idioma,
+            idioma=idioma,
             task=args.task,
             beam_size=config['transcripcion']['beam_size'],
             best_of=config['transcripcion']['best_of'],
@@ -168,7 +181,7 @@ Ejemplos:
             compression_ratio_threshold=config['transcripcion']['compression_ratio_threshold'],
             logprob_threshold=config['transcripcion']['logprob_threshold'],
             no_speech_threshold=config['transcripcion']['no_speech_threshold'],
-            word_timestamps=args.word_timestamps
+            word_timestamps=palabra_por_palabra
         )
         
         if args.verbose:
@@ -181,18 +194,18 @@ Ejemplos:
             guardar_transcripcion(
                 resultado,
                 args.salida,
-                formato=args.formato,
-                incluir_timestamps=not args.no_timestamps
+                formato=formato,
+                incluir_timestamps=incluir_timestamps
             )
             print(f"Transcripción guardada en: {args.salida}")
         else:
-            if args.formato == "txt":
-                if not args.no_timestamps:
+            if formato == "txt":
+                if incluir_timestamps:
                     for seg in resultado.segmentos:
                         print(f"[{seg.inicio:.2f}s --> {seg.fin:.2f}s] {seg.texto}")
                 else:
                     print(resultado.texto_completo)
-            elif args.formato == "json":
+            elif formato == "json":
                 import json
                 print(json.dumps({
                     "texto": resultado.texto_completo,

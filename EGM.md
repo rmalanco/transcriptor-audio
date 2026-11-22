@@ -12,14 +12,15 @@ reglas para agentes, en [CLAUDE.md](./CLAUDE.md). Este archivo es el contrato de
 ## Local Interface & Invariants
 
 - `run_ui.py` — lanzador de la interfaz gráfica: importa `src.ui.main` y lo ejecuta.
-- `config/settings.yaml` — configuración con las secciones `modelo`, `audio`, `transcripcion`, `salida`, `ia` e
-  `historial`. La aplicación lo lee con una ruta relativa al directorio de trabajo, así que se ejecuta desde la raíz.
+- `config/settings.yaml` — configuración con las secciones `modelo`, `transcripcion`, `salida`, `ia` e `historial`.
+  La lee `configuracion.py` contra la raíz del proyecto, así que la CLI y la ventana la usan desde cualquier carpeta.
+  `python -m src.main` sigue necesitando la raíz para importar `src`.
 - `requirements.txt` (ejecución) y `requirements-dev.txt` (desarrollo, incluye al anterior y fija `pytest`) — manifiestos de dependencias. No hay lockfile.
 
 ## Subdirectories & System Boundaries
 
 - `src`: [./src/EGM.md](./src/EGM.md) — transcripción, IA, acceso a Copilot, historial, interfaz gráfica y CLI.
-- `tests`: sin contrato (solo tests) — nueve archivos `test_*.py` y `conftest.py`, con `pytest`.
+- `tests`: sin contrato (solo tests) — diez archivos `test_*.py` y `conftest.py`, con `pytest`.
 - `docs`: sin contrato (solo documentación) — [docs/integracion-copilot.md](./docs/integracion-copilot.md) y
   [docs/disenos/00-actual.md](./docs/disenos/00-actual.md).
 - `config`: sin contrato — solo `settings.yaml`.
