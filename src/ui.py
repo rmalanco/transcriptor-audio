@@ -48,6 +48,22 @@ IDIOMAS_DISPONIBLES = {
     "ja": "Japonés",
     "ko": "Coreano"
 }
+
+
+def opciones_de_idioma(idioma_configurado: str) -> list[str]:
+    """Nombres del selector de idioma. Si el código configurado no está en él (p. ej. `nl`, que Whisper admite),
+    se añade tal cual, para que la ventana transcriba en ese idioma igual que la CLI."""
+    opciones = list(IDIOMAS_DISPONIBLES.values())
+    if idioma_configurado not in IDIOMAS_DISPONIBLES:
+        opciones.append(idioma_configurado)
+    return opciones
+
+
+def codigo_de_idioma(opcion: str) -> str:
+    """Código de una opción del selector; una opción que no es un nombre conocido se devuelve tal cual."""
+    return next((codigo for codigo, nombre in IDIOMAS_DISPONIBLES.items() if nombre == opcion), opcion)
+
+
 FORMATOS_DISPONIBLES = ["txt", "srt", "vtt", "json"]
 log = logging.getLogger("transcriptor.ui")
 TEMAS = {"Sistema": "System", "Claro": "Light", "Oscuro": "Dark"}
@@ -141,7 +157,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         # Variables de control
         idioma_cfg = self.configuracion["transcripcion"]["idioma"]
         self.var_modelo = tk.StringVar(value=self.configuracion["modelo"]["nombre"])
-        self.var_idioma = tk.StringVar(value=IDIOMAS_DISPONIBLES.get(idioma_cfg, "Auto-detectar"))
+        self.var_idioma = tk.StringVar(value=IDIOMAS_DISPONIBLES.get(idioma_cfg, idioma_cfg))
         self.var_formato = tk.StringVar(value=self.configuracion["salida"]["formato"])
         self.var_dispositivo = tk.StringVar(value=self.configuracion["modelo"]["dispositivo"])
         self.var_compute = tk.StringVar(value=self.configuracion["modelo"]["compute_type"])
@@ -247,7 +263,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         self._etiqueta(opciones, "Idioma", 1, 1)
         self.combo_idioma = ctk.CTkOptionMenu(
-            opciones, values=list(IDIOMAS_DISPONIBLES.values()), variable=self.var_idioma
+            opciones, values=opciones_de_idioma(self.configuracion["transcripcion"]["idioma"]),
+            variable=self.var_idioma
         )
         self.combo_idioma.grid(row=2, column=1, padx=(6, 14), pady=(0, 8), sticky="ew")
 
@@ -578,8 +595,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             self._iniciar_transcripcion()
 
     def _codigo_idioma(self) -> str:
-        nombre = self.var_idioma.get()
-        return next((codigo for codigo, n in IDIOMAS_DISPONIBLES.items() if n == nombre), "auto")
+        return codigo_de_idioma(self.var_idioma.get())
 
     def _iniciar_transcripcion(self):
         if not self.archivo_actual:
@@ -1008,12 +1024,16 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _mostrar_modelos_ia(self, modelos: list[str]):
         actual = self._modelo_ia_configurado()
+        # Se respeta el modelo de settings.yaml aunque no esté en la lista de económicos, salvo que sea de una
+        # familia no autorizada: entonces no se ofrece
+        opciones = copilot.opciones_de_modelo(modelos, actual)
         if actual not in modelos:
-            # Se respeta el modelo elegido en settings.yaml aunque no esté en la lista de económicos
-            modelos.append(actual)
-            self._log(f"El modelo configurado ({actual}) no está entre los económicos disponibles; se mantiene")
-        self.combo_modelo_ia.configure(values=modelos)
-        self._log(f"Modelos de IA disponibles: {', '.join(modelos)}")
+            if actual in opciones:
+                self._log(f"El modelo configurado ({actual}) no está entre los económicos disponibles; se mantiene")
+            else:
+                self._log(f"El modelo configurado ({actual}) es de una familia no autorizada por la empresa; no se ofrece")
+        self.combo_modelo_ia.configure(values=opciones)
+        self._log(f"Modelos de IA disponibles: {', '.join(opciones)}")
 
     def _al_cambiar_modelo_ia(self, modelo: str):
         if modelo == self._modelo_ia_configurado():

@@ -8,7 +8,12 @@ import sys
 from src.registro import configurar_logging
 from src.configuracion import MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion
 from src.transcriber import TranscriptorAudio
-from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
+from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion, serializar_transcripcion
+
+
+def _informar(texto):
+    """Mensaje informativo (`--verbose`): va a stderr para no mezclarse con la transcripción de stdout."""
+    print(texto, file=sys.stderr)
 
 
 def _cargar_configuracion_o_salir(ruta):
@@ -60,12 +65,18 @@ def listar_modelos_copilot(enterprise_url):
         print(f"  - {'auto':<22} {'Copilot elige':<18}  (ahora: {auto.modelo}; descuento premium {descuento:.0%})")
     except copilot.ErrorCopilot as e:
         print(f"  - auto no disponible: {e}")
-    for m in modelos:
+    autorizados = [m for m in modelos if not copilot.familia_excluida(m["id"])]
+    for m in autorizados:
         facturacion = m.get("billing") or {}
         coste = f"  ×{facturacion['multiplier']} premium" if facturacion.get("is_premium") and "multiplier" in facturacion else ""
         limite = ((m.get("capabilities") or {}).get("limits") or {}).get("max_prompt_tokens")
         entrada = f"  (entrada máx. {limite // 1000}k tokens)" if limite else ""
         print(f"  - {m['id']:<22} {m.get('name', ''):<18}{entrada}{coste}")
+    omitidos = len(modelos) - len(autorizados)
+    if omitidos == 1:
+        print("Se omite 1 modelo de una familia no autorizada por la empresa.")
+    elif omitidos:
+        print(f"Se omiten {omitidos} modelos de familias no autorizadas por la empresa.")
     print("\nPara usar uno, pon su id en `ia.modelo` de config/settings.yaml")
     sys.exit(0)
 
@@ -139,26 +150,31 @@ Ejemplos:
     config = _cargar_configuracion_o_salir(args.config)
     idioma = args.idioma or config["transcripcion"]["idioma"]
     formato = args.formato or config["salida"]["formato"]
+    # Antes de cargar Whisper: srt y vtt sin archivo no tienen a dónde ir, y transcribir para fallar después no sirve
+    if formato in ("srt", "vtt") and not args.salida:
+        print(f"Error: el formato {formato} necesita un archivo de salida: añade -o <archivo>.", file=sys.stderr)
+        sys.exit(1)
     incluir_timestamps = not args.no_timestamps and config["salida"]["incluir_timestamps"]
     palabra_por_palabra = args.word_timestamps or config["salida"]["palabra_por_palabra"]
-    
+
     modelo_nombre = args.modelo or config['modelo']['nombre']
     dispositivo = args.dispositivo or config['modelo']['dispositivo']
     compute_type = args.compute_type or config['modelo']['compute_type']
-    
+
+    # Lo informativo va a stderr: así la salida estándar solo contiene la transcripción
     if args.verbose:
         info = obtener_info_archivo(args.archivo)
-        print(f"Archivo: {info.nombre}{info.extension}")
-        print(f"Tamaño: {info.tamaño_bytes / 1024 / 1024:.2f} MB")
-        print(f"Duración: {info.duracion_segundos:.1f}s" if info.duracion_segundos else "Duración: desconocida")
-        print(f"Codec audio: {info.codec_audio}" if info.codec_audio else "Codec audio: desconocido")
-        print(f"Sample rate: {info.sample_rate}Hz" if info.sample_rate else "Sample rate: desconocido")
-        print(f"Canales: {info.canales}" if info.canales else "Canales: desconocido")
-        print(f"Es video: {'Sí' if info.es_video else 'No'}")
-        print(f"Modelo: {modelo_nombre} ({dispositivo}, {compute_type})")
-        print(f"Idioma: {idioma}")
-        print(f"Task: {args.task}")
-        print("-" * 50)
+        _informar(f"Archivo: {info.nombre}{info.extension}")
+        _informar(f"Tamaño: {info.tamaño_bytes / 1024 / 1024:.2f} MB")
+        _informar(f"Duración: {info.duracion_segundos:.1f}s" if info.duracion_segundos else "Duración: desconocida")
+        _informar(f"Codec audio: {info.codec_audio}" if info.codec_audio else "Codec audio: desconocido")
+        _informar(f"Sample rate: {info.sample_rate}Hz" if info.sample_rate else "Sample rate: desconocido")
+        _informar(f"Canales: {info.canales}" if info.canales else "Canales: desconocido")
+        _informar(f"Es video: {'Sí' if info.es_video else 'No'}")
+        _informar(f"Modelo: {modelo_nombre} ({dispositivo}, {compute_type})")
+        _informar(f"Idioma: {idioma}")
+        _informar(f"Task: {args.task}")
+        _informar("-" * 50)
     
     transcriptor = TranscriptorAudio(
         modelo_nombre=modelo_nombre,
@@ -182,11 +198,11 @@ Ejemplos:
         )
         
         if args.verbose:
-            print(f"Idioma detectado: {resultado.idioma_detectado} ({resultado.probabilidad_idioma:.2%})")
-            print(f"Duración: {resultado.duracion_total:.1f}s")
-            print(f"Segmentos: {len(resultado.segmentos)}")
-            print("-" * 50)
-        
+            _informar(f"Idioma detectado: {resultado.idioma_detectado} ({resultado.probabilidad_idioma:.2%})")
+            _informar(f"Duración: {resultado.duracion_total:.1f}s")
+            _informar(f"Segmentos: {len(resultado.segmentos)}")
+            _informar("-" * 50)
+
         if args.salida:
             guardar_transcripcion(
                 resultado,
@@ -196,26 +212,9 @@ Ejemplos:
             )
             print(f"Transcripción guardada en: {args.salida}")
         else:
-            if formato == "txt":
-                if incluir_timestamps:
-                    for seg in resultado.segmentos:
-                        print(f"[{seg.inicio:.2f}s --> {seg.fin:.2f}s] {seg.texto}")
-                else:
-                    print(resultado.texto_completo)
-            elif formato == "json":
-                import json
-                print(json.dumps({
-                    "texto": resultado.texto_completo,
-                    "idioma": resultado.idioma_detectado,
-                    "segmentos": [
-                        {"inicio": s.inicio, "fin": s.fin, "texto": s.texto}
-                        for s in resultado.segmentos
-                    ]
-                }, ensure_ascii=False, indent=2))
-            else:
-                print("Para formatos srt/vtt use --salida", file=sys.stderr)
-                sys.exit(1)
-                
+            # Mismo texto que escribiría `-o`, sin añadir nada más
+            sys.stdout.write(serializar_transcripcion(resultado, formato, incluir_timestamps))
+
     except Exception as e:
         logging.getLogger("transcriptor").error("Error durante la transcripción: %s", e, exc_info=args.verbose)
         sys.exit(1)

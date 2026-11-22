@@ -67,3 +67,26 @@ def test_formatear_duracion_corta_legible():
     assert formatear_duracion(309) == "05:09"
     assert formatear_duracion(3909.7) == "1:05:09"
     assert formatear_duracion(-4) == "00:00"
+
+
+@pytest.mark.parametrize("formato", ["txt", "srt", "vtt", "json"])
+def test_serializar_y_guardar_escriben_lo_mismo(formato, tmp_path):
+    from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
+    from src.utils import serializar_transcripcion
+
+    resultado = ResultadoTranscripcion(
+        texto_completo="Hola equipo. Cerramos el punto.",
+        segmentos=[
+            SegmentoTranscripcion(0.0, 2.0, "Hola equipo."),
+            SegmentoTranscripcion(3.0, 5.0, "Cerramos el punto.",
+                                  palabras=[{"inicio": 3.0, "fin": 3.5, "palabra": "Cerramos"}]),
+        ],
+        idioma_detectado="es",
+        probabilidad_idioma=0.98,
+        duracion_total=5.0,
+    )
+    ruta = tmp_path / f"salida.{formato}"
+
+    utils.guardar_transcripcion(resultado, str(ruta), formato=formato, incluir_timestamps=True)
+
+    assert ruta.read_text(encoding="utf-8") == serializar_transcripcion(resultado, formato, True)

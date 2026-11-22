@@ -298,3 +298,13 @@ def test_auto_401_abre_nueva_sesion_sin_borrar_el_token(monkeypatch):
     assert AsistenteIA(modelo="auto")._completar("hola") == "OK"
     assert usados == ["st_caducado", "st_nuevo"]
     assert copilot.leer_token().token == "gho_valido"
+
+
+def test_opciones_de_modelo_incluyen_el_configurado_si_esta_autorizado():
+    opciones = copilot.opciones_de_modelo(["auto", "claude-haiku-5.5"], "gpt-5.4")
+    assert opciones == ["auto", "claude-haiku-5.5", "gpt-5.4"]
+
+
+def test_opciones_de_modelo_no_incluyen_un_configurado_de_familia_excluida():
+    opciones = copilot.opciones_de_modelo(["auto", "claude-haiku-5.5"], "kimi-k3")
+    assert opciones == ["auto", "claude-haiku-5.5"]

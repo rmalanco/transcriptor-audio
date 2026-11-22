@@ -244,6 +244,15 @@ def familia_excluida(id_modelo: str) -> Optional[str]:
     return next((familia for familia in FAMILIAS_EXCLUIDAS if familia in id_minusculas), None)
 
 
+def opciones_de_modelo(modelos: list[str], configurado: str) -> list[str]:
+    """Opciones del selector de modelo de IA: los modelos ofrecidos y, al final, el configurado si no está en la
+    lista. Un configurado de familia excluida no se añade: no se sugiere ponerlo en `ia.modelo`."""
+    opciones = list(modelos)
+    if configurado and configurado not in opciones and not familia_excluida(configurado):
+        opciones.append(configurado)
+    return opciones
+
+
 def precio_entrada(modelo: dict) -> Optional[float]:
     """Precio de entrada de la tarifa normal según `billing.token_prices`; None si la API no lo informa."""
     precios = ((modelo.get("billing") or {}).get("token_prices") or {}).get("default") or {}

@@ -38,7 +38,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
 ### Claves ausentes
 - Given un YAML con `ia:` vacío y sin la sección `salida` ni la clave `transcripcion.idioma`, when se ejecuta la CLI con
   `reunion.m4a -o salida.txt`, then termina con código 0, Whisper recibe el idioma `es` y `salida.txt` sale en formato
-  `txt` con marcas de tiempo (`[00:00:00 --> 00:00:02] Hola equipo.`).
+  `txt` con marcas de tiempo (`[00:00:00,000 --> 00:00:02,000] Hola equipo.`).
 - Given un archivo de configuración vacío, when se carga, then todas las claves toman su valor por defecto.
 - Given una clave que falta, when se carga la configuración en la CLI o en la ventana, then toma el mismo valor por
   defecto en las dos.

@@ -1,5 +1,7 @@
 """Utilidades para el transcriptor."""
 
+import json
+
 import ffmpeg
 from pathlib import Path
 from typing import Optional
@@ -127,40 +129,29 @@ def formatear_tiempo_vtt(segundos: float) -> str:
     return f"{horas:02d}:{minutos:02d}:{segs:02d}.{miliseg:03d}"
 
 
-def guardar_transcripcion(
-    resultado,
-    ruta_salida: str,
-    formato: str = "txt",
-    incluir_timestamps: bool = True
-) -> None:
-    path = Path(ruta_salida)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
+def serializar_transcripcion(resultado, formato: str, incluir_timestamps: bool = True) -> str:
+    """Texto exacto de la transcripción en `formato`. Es el único serializador: lo usan el archivo (`-o`, la
+    exportación de la ventana) y la salida estándar de la CLI, para que sean iguales byte a byte."""
     if formato == "txt":
-        with open(path, 'w', encoding='utf-8') as f:
-            if incluir_timestamps:
-                for seg in resultado.segmentos:
-                    f.write(f"[{formatear_tiempo(seg.inicio)} --> {formatear_tiempo(seg.fin)}] {seg.texto}\n")
-            else:
-                f.write(resultado.texto_completo)
-    
-    elif formato == "srt":
-        with open(path, 'w', encoding='utf-8') as f:
-            for i, seg in enumerate(resultado.segmentos, 1):
-                f.write(f"{i}\n")
-                f.write(f"{formatear_tiempo_srt(seg.inicio)} --> {formatear_tiempo_srt(seg.fin)}\n")
-                f.write(f"{seg.texto}\n\n")
-    
-    elif formato == "vtt":
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write("WEBVTT\n\n")
-            for seg in resultado.segmentos:
-                f.write(f"{formatear_tiempo_vtt(seg.inicio)} --> {formatear_tiempo_vtt(seg.fin)}\n")
-                f.write(f"{seg.texto}\n\n")
-    
-    elif formato == "json":
-        import json
-        data = {
+        if incluir_timestamps:
+            return "".join(f"[{formatear_tiempo(seg.inicio)} --> {formatear_tiempo(seg.fin)}] {seg.texto}\n"
+                           for seg in resultado.segmentos)
+        return resultado.texto_completo
+
+    if formato == "srt":
+        return "".join(
+            f"{i}\n{formatear_tiempo_srt(seg.inicio)} --> {formatear_tiempo_srt(seg.fin)}\n{seg.texto}\n\n"
+            for i, seg in enumerate(resultado.segmentos, 1)
+        )
+
+    if formato == "vtt":
+        return "WEBVTT\n\n" + "".join(
+            f"{formatear_tiempo_vtt(seg.inicio)} --> {formatear_tiempo_vtt(seg.fin)}\n{seg.texto}\n\n"
+            for seg in resultado.segmentos
+        )
+
+    if formato == "json":
+        datos = {
             "texto": resultado.texto_completo,
             "idioma": resultado.idioma_detectado,
             "probabilidad_idioma": resultado.probabilidad_idioma,
@@ -175,8 +166,18 @@ def guardar_transcripcion(
                 for s in resultado.segmentos
             ]
         }
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    else:
-        raise ValueError(f"Formato no soportado: {formato}")
+        return json.dumps(datos, ensure_ascii=False, indent=2)
+
+    raise ValueError(f"Formato no soportado: {formato}")
+
+
+def guardar_transcripcion(
+    resultado,
+    ruta_salida: str,
+    formato: str = "txt",
+    incluir_timestamps: bool = True
+) -> None:
+    texto = serializar_transcripcion(resultado, formato, incluir_timestamps)
+    path = Path(ruta_salida)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(texto, encoding="utf-8")

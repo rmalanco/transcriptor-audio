@@ -65,8 +65,10 @@ Origen: carril S, 2026-11-22: al cargar otro archivo, las pestañas de IA quedan
   `gpt-5.3-codex` (solo `/responses`), when se pide una minuta, then no se envía ninguna petición y aparece el error
   «El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions (<modelos ofrecidos>). Elige un
   modelo concreto en `ia.modelo`.»
+- Given `ia.modelo` configurado con un modelo de una familia no autorizada, when se carga la lista de modelos del selector de la ventana, then ese modelo no se añade a las opciones.
 
 Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
+Origen: carril S, 2026-11-22: el selector de modelo de la ventana no ofrece modelos de familias no autorizadas (A-12)
 
 ### Modelo sin configurar
 - Given `ia.modelo` vacío, when se pide un resumen o una minuta, then no se envía nada a Copilot y aparece el error «No

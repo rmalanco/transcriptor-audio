@@ -26,7 +26,7 @@ Dependencias entre módulos (quién importa a quién):
 - `main.py:main` — CLI (`python -m src.main`). Argumentos: `archivo` (posicional), `-o/--salida`, `-m/--modelo`,
   `-d/--dispositivo`, `-c/--compute-type`, `-l/--idioma`, `-t/--task`, `-f/--formato`, `--no-timestamps`,
   `--word-timestamps`, `--config`, `--listar-modelos`, `--copilot-login`, `--copilot-logout`, `--copilot-modelos`,
-  `--ui`, `-v/--verbose`, `--log`.
+  `--ui`, `-v/--verbose`, `--log`. `--copilot-modelos` (`main.py:listar_modelos_copilot`) omite los modelos de `FAMILIAS_EXCLUIDAS`.
 - `ui.py:main` — interfaz gráfica (`python -m src.ui`, o `run_ui.py` en la raíz).
 - `__init__.py` — reexporta `TranscriptorAudio`, `validar_archivo` y `obtener_info_archivo`; `__version__ = "0.1.0"`.
 
@@ -45,7 +45,7 @@ Dependencias entre módulos (quién importa a quién):
   app, con sus valores por defecto. valida `modelo.nombre` contra `configuracion.MODELOS_WHISPER`, la única lista de modelos de Whisper (la usan la CLI y la ventana).
 - `configuracion.py:guardar_modelo_ia(modelo, ruta=None) -> bool`
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
-  `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`.
+  `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
 - `utils.py:formatear_tiempo`, `formatear_tiempo_srt`, `formatear_tiempo_vtt`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
 
 ### Resumen y minuta — `asistente_ia.py`
@@ -122,7 +122,7 @@ Dependencias entre módulos (quién importa a quién):
   extremos, coincide entero con una frase de `ALUCINACIONES_CONOCIDAS`.
 - `configuracion.py:guardar_modelo_ia` cambia solo la primera línea `modelo:` dentro del bloque `ia:` y conserva los
   comentarios; devuelve `False` si no la encuentra.
-- `utils.py:guardar_transcripcion` lanza `ValueError` con un formato distinto de `txt`, `srt`, `vtt` o `json`.
+- `utils.py:serializar_transcripcion` (y, por tanto, `guardar_transcripcion`) lanza `ValueError` con un formato distinto de `txt`, `srt`, `vtt` o `json`.
 
 ### Configuración
 
@@ -205,7 +205,7 @@ Dependencias entre módulos (quién importa a quién):
   `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - Junto al audio: `<nombre>_transcripcion.<formato>` (`ui.py:AppTranscriptor._generar_ruta_salida`), y
   `<nombre>_resumen.md` y `<nombre>_minuta.md` (`ui.py:AppTranscriptor._procesar_documento_ia`).
-- La CLI escribe en `stdout`, o en el archivo de `-o` mediante `utils.py:guardar_transcripcion`.
+- La CLI escribe en `stdout` o en el archivo de `-o`; los dos usan `utils.py:serializar_transcripcion`, y `--verbose` escribe en stderr. Con `srt` o `vtt` sin `-o`, termina con código 1 antes de cargar Whisper.
 
 ### Base de datos
 

@@ -18,6 +18,11 @@ class SegmentoFalso:
     words: Optional[list] = None
 
 
+def _segmento_falso(inicio, fin, texto, palabras=None):
+    words = [SimpleNamespace(start=a, end=b, word=p) for a, b, p in palabras] if palabras else None
+    return SegmentoFalso(inicio, fin, texto, words)
+
+
 class ModeloWhisperFalso:
     """Doble de `WhisperModel` con segmentos fijos: no lee el audio ni necesita el modelo en caché."""
 
@@ -39,8 +44,9 @@ def modelo_whisper_falso(monkeypatch):
     `TranscriptorAudio` que crea la CLI, porque se parchea la clase y no una instancia.
     """
     def colocar(segmentos, duracion=5.0, idioma="es", probabilidad=0.98):
-        """`segmentos` es una lista de tuplas (inicio, fin, texto)."""
-        fabricados = [SegmentoFalso(inicio, fin, texto) for inicio, fin, texto in segmentos]
+        """`segmentos` es una lista de tuplas (inicio, fin, texto) o (inicio, fin, texto, palabras), donde
+        `palabras` es una lista de tuplas (inicio, fin, palabra) como las que daría Whisper con word_timestamps."""
+        fabricados = [_segmento_falso(*tupla) for tupla in segmentos]
         doble = ModeloWhisperFalso(fabricados, duracion=duracion, idioma=idioma, probabilidad=probabilidad)
         monkeypatch.setattr(TranscriptorAudio, "modelo", property(lambda self: doble))
         return doble

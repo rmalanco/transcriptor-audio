@@ -35,3 +35,24 @@ def test_ui_importa_correctamente():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+def test_idioma_configurado_fuera_del_selector_se_ofrece_y_se_usa_tal_cual():
+    from src.ui import codigo_de_idioma, opciones_de_idioma
+
+    assert "nl" in opciones_de_idioma("nl")
+    assert codigo_de_idioma("nl") == "nl"
+
+
+def test_idioma_del_selector_se_muestra_con_su_nombre():
+    from src.ui import codigo_de_idioma, opciones_de_idioma
+
+    assert "Español" in opciones_de_idioma("es")
+    assert "es" not in opciones_de_idioma("es")
+    assert codigo_de_idioma("Español") == "es"
+
+
+def test_auto_sigue_siendo_autodetectar():
+    from src.ui import codigo_de_idioma, opciones_de_idioma
+
+    assert "Auto-detectar" in opciones_de_idioma("auto")
+    assert codigo_de_idioma("Auto-detectar") == "auto"

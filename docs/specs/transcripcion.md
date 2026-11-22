@@ -71,3 +71,8 @@ Origen: carril S, 2026-11-22: «Transcribir» no se habilita tras generar un doc
 - Given el diálogo de selección de archivo, when se abre, then ofrece las mismas extensiones de audio y vídeo que la app admite al validar un archivo (incluidas `.ts` y `.mts`).
 
 Origen: carril S, 2026-11-22: los metadatos de ffprobe son opcionales (A-20)
+
+### Idioma configurado fuera del selector
+- Given `transcripcion.idioma` con un código que no está en el selector de idioma de la ventana (por ejemplo `nl`), when se abre la ventana, then el selector muestra ese código como opción seleccionada y la transcripción lo usa, igual que la CLI.
+
+Origen: carril S, 2026-11-22: la ventana no cambia a «Auto-detectar» un idioma configurado que Whisper admite (hallazgo nuevo de la historia 05)
