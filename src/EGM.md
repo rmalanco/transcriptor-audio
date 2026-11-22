@@ -4,7 +4,7 @@
 
 Paquete único de la aplicación. Contiene la transcripción local con faster-whisper, la generación de resumen y
 minuta con GitHub Copilot, el historial en SQLite, la interfaz gráfica (CustomTkinter) y la CLI. No tiene
-subpaquetes: sus catorce archivos `.py` se importan entre sí como `src.<módulo>`.
+subpaquetes: sus quince archivos `.py` se importan entre sí como `src.<módulo>`.
 
 Dependencias entre módulos (quién importa a quién):
 
@@ -12,7 +12,7 @@ Dependencias entre módulos (quién importa a quién):
 |---|---|
 | `__init__.py` | nada (solo `__version__`) |
 | `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
-| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`; `ui_historial` al mostrar el historial por primera vez |
+| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`, `flujo_documentos`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
 | `ui_historial.py` | `historial`, y métodos de `AppTranscriptor` (incluidos privados) |
 | `asistente_ia.py` | `copilot`, `registro` |
@@ -20,6 +20,7 @@ Dependencias entre módulos (quién importa a quién):
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
 | `transcriber.py` | `registro`, `utils` |
 | `flujo_transcripcion.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
+| `flujo_documentos.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
 | `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
 ## Interface
@@ -240,11 +241,12 @@ Dependencias entre módulos (quién importa a quién):
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
   faltan menos que antes. La revisión de fidelidad solo se acepta si no deja más secciones sin cubrir que el borrador y, en la minuta, si no deja menos filas en la tabla de tareas ni menos viñetas en Acuerdos (`asistente_ia.py:AsistenteIA._generar`, con `contar_filas_tareas` y `contar_vinetas_acuerdos`).
 - La fecha de la minuta la pone la aplicación: `asistente_ia.py:AsistenteIA.generar_minuta` reescribe la línea
-  `**Fecha:**` con la fecha recibida o con `No especificada`. La ventana la saca de la fecha de modificación del audio;
-  si el audio ya no existe, de `creado_en` de la entrada del historial; si no, es `No especificada`
-  (`ui.py:AppTranscriptor._fecha_archivo`).
+  `**Fecha:**` con la fecha recibida o con `No especificada`. La ventana la calcula en el hilo principal, al pulsar
+  «Generar minuta», con `flujo_documentos.py:fecha_de_la_reunion`: la fecha de modificación del audio; si el audio ya no
+  existe, `creado_en` de la entrada del historial; si no se puede leer, `No especificada`. El hilo de fondo la recibe
+  como argumento y no lee la ventana.
 - El texto que se envía a la IA son los segmentos de la transcripción unidos con saltos de línea, no `texto_completo`
-  (`ui.py:AppTranscriptor._generar_documento_ia`).
+  (`flujo_documentos.py:texto_para_ia`).
 
 ### Historial
 
@@ -289,7 +291,7 @@ Dependencias entre módulos (quién importa a quién):
   (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
 - Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `flujo_transcripcion.py:ruta_transcripcion` y la
   escribe `persistencia.py:persistir_transcripcion`), y `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (la ruta sale de
-  `ui.py:AppTranscriptor._generar_documento_ia` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe
+  `flujo_documentos.py:ruta_documento` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe
   sin preguntar; dos grabaciones con el mismo nombre no comparten archivos (`BACKLOG.md`, Salud del código #18).
 - La CLI escribe en `stdout` o en el archivo de `-o`; los dos usan `utils.py:serializar_transcripcion`, y `--verbose` escribe en stderr. Con `srt` o `vtt` sin `-o`, termina con código 1 antes de cargar Whisper.
 

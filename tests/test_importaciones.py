@@ -14,11 +14,12 @@ RAIZ = Path(__file__).resolve().parent.parent
 # Orden del criterio 1 de la historia 08.
 MODULOS = [
     "src", "src.registro", "src.configuracion", "src.utils", "src.transcriber", "src.historial",
-    "src.persistencia", "src.flujo_transcripcion", "src.copilot", "src.asistente_ia", "src.main", "src.ui_copilot",
-    "src.ui_historial", "src.ui",
+    "src.persistencia", "src.flujo_transcripcion", "src.copilot", "src.asistente_ia", "src.flujo_documentos",
+    "src.main", "src.ui_copilot", "src.ui_historial", "src.ui",
 ]
-# Módulos que no deben cargar tkinter ni customtkinter. Contiene `src.flujo_transcripcion` (historia 09); C1 añadirá el suyo.
-SIN_TK: list[str] = ["src.flujo_transcripcion"]
+# Módulos que no deben cargar tkinter ni customtkinter: `src.flujo_transcripcion` (historia 09) y
+# `src.flujo_documentos` (historia 10).
+SIN_TK: list[str] = ["src.flujo_transcripcion", "src.flujo_documentos"]
 
 GUION = """
 import importlib

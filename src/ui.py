@@ -29,6 +29,7 @@ from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_confi
                                leer_modelo_preferido, modelo_ia_efectivo)
 from src.transcriber import TranscriptorAudio
 from src.flujo_transcripcion import OpcionesTranscripcion, ruta_transcripcion, transcribir, transcriptor_para
+from src.flujo_documentos import SUFIJOS_DOCUMENTO, fecha_de_la_reunion, ruta_documento, texto_para_ia
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
@@ -73,10 +74,10 @@ VISTA_TRANSCRIBIR = "🎙  Transcribir"
 VISTA_HISTORIAL = "📚  Historial"
 TAB_TEXTO = "Texto"  # nombre corto: las pestañas se recortan en ventanas estrechas
 DOCUMENTOS_IA = {
-    "resumen": {"pestana": "Resumen", "sufijo": "_resumen.md", "genitivo": "del resumen",
+    "resumen": {"pestana": "Resumen", "sufijo": SUFIJOS_DOCUMENTO["resumen"], "genitivo": "del resumen",
                 "anterior": "el resumen anterior",
                 "vacio": "Transcribe un archivo y pulsa «Generar resumen» para crear un resumen con IA."},
-    "minuta": {"pestana": "Minuta", "sufijo": "_minuta.md", "genitivo": "de la minuta",
+    "minuta": {"pestana": "Minuta", "sufijo": SUFIJOS_DOCUMENTO["minuta"], "genitivo": "de la minuta",
                "anterior": "la minuta anterior",
                "vacio": "Transcribe una reunión y pulsa «Generar minuta» para obtener objetivo, temas, "
                         "acuerdos y tareas."},
@@ -843,11 +844,11 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             return
 
         # Una línea por segmento: facilita dividir transcripciones largas en bloques
-        texto = "\n".join(seg.texto for seg in self.resultado_actual.segmentos)
+        texto = texto_para_ia(self.resultado_actual)
         # Si el audio se abrió desde el historial y ya no existe, el documento solo se guarda en el historial
-        base = Path(self.archivo_actual)
-        ruta_salida = (ruta_junto_al_audio(self.archivo_actual, DOCUMENTOS_IA[clave]["sufijo"])
-                       if base.exists() else None)
+        ruta_salida = ruta_documento(self.archivo_actual, clave)
+        # La fecha se calcula aquí, en el hilo principal, y solo la usa la minuta
+        fecha = fecha_de_la_reunion(self.archivo_actual, self._fecha_historial) if clave == "minuta" else None
 
         tab = self.tabs_ia[clave]
         asistente = self._asistente
@@ -868,16 +869,15 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.label_estado.configure(text=f"Generando {DOCUMENTOS_IA[clave]['pestana'].lower()}…")
         self._log(f"Generando {clave} con {asistente.modelo}")
 
-        threading.Thread(target=self._procesar_documento_ia, args=(generacion, texto), daemon=True).start()
+        threading.Thread(target=self._procesar_documento_ia, args=(generacion, texto, fecha), daemon=True).start()
 
-    def _procesar_documento_ia(self, generacion: _GeneracionIA, texto: str):
+    def _procesar_documento_ia(self, generacion: _GeneracionIA, texto: str, fecha: Optional[str]):
         """Hilo de fondo: no toca widgets, el historial ni el archivo; entrega el resultado al hilo principal."""
         asistente, clave = generacion.asistente, generacion.clave
         try:  # cualquier fallo debe llegar al hilo principal: si no, la generación nunca se daría por terminada
             if clave == "resumen":
                 generar = asistente.generar_resumen
             else:
-                fecha = self._fecha_archivo()
                 generar = lambda t, **kw: asistente.generar_minuta(t, fecha=fecha, **kw)
             inicio = time.monotonic()
             contenido = generar(texto, on_progreso=lambda m: self._en_ui(self._progreso_documento_ia, generacion, m),
@@ -1051,20 +1051,6 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 self.label_estado.configure(text="Inicio de sesión en GitHub Copilot cancelado")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
         DialogoLoginCopilot(self, enterprise_url, al_terminar)
-
-    def _fecha_archivo(self) -> str:
-        """Fecha de modificación del archivo de audio, como aproximación a la fecha de la reunión."""
-        meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-                 "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-        if os.path.exists(self.archivo_actual):
-            t = time.localtime(os.path.getmtime(self.archivo_actual))
-            origen = "fecha del archivo"
-        elif self._fecha_historial:
-            t = time.strptime(self._fecha_historial[:10], "%Y-%m-%d")
-            origen = "fecha de transcripción"
-        else:
-            return "No especificada"
-        return f"{t.tm_mday} de {meses[t.tm_mon - 1]} de {t.tm_year} ({origen})"
 
     def _copiar_documento_ia(self, clave: str):
         contenido = self.tabs_ia[clave]["contenido"]

@@ -206,3 +206,10 @@ Origen: carril S, 2026-11-22: si falla la pasada de completar secciones o la rev
   IA», el motivo queda en la pestaña Registro y «↻» vuelve a estar habilitado.
 
 Origen: carril S, 2026-11-22: la ventana no consulta Copilot al arrancar y «↻» carga la lista de modelos una sola vez, sin sesión `auto` (A-13)
+
+### Fecha de la minuta
+- Given un audio que existe, when se genera la minuta, then la línea `**Fecha:**` lleva la fecha de modificación del audio con el formato «<día> de <mes> de <año> (fecha del archivo)», por ejemplo «5 de marzo de 2026 (fecha del archivo)».
+- Given una entrada del historial cuyo audio ya no existe, when se genera la minuta, then la línea `**Fecha:**` lleva la fecha de creación de la entrada con el formato «<día> de <mes> de <año> (fecha de transcripción)».
+- Given que la fecha no se puede leer (el archivo desaparece mientras se lee su fecha o la fecha guardada en el historial no es válida), when se genera la minuta, then la línea `**Fecha:**` dice «No especificada» y la minuta se genera igual.
+
+Origen: docs/historias/hechas/2026-11-22-10-texto-ruta-y-fecha-de-documentos.md
