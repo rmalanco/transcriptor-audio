@@ -7,8 +7,13 @@ widgets: quien pasa callbacks (p. ej. la ventana) es responsable de llevarlos al
 from dataclasses import dataclass, replace
 from typing import Optional
 
+from src.historial import Historial
+from src.persistencia import Persistencia, persistir_transcripcion
 from src.transcriber import ResultadoTranscripcion, TranscriptorAudio
 from src.utils import ruta_junto_al_audio
+
+FASE_CARGANDO_MODELO = "cargando_modelo"
+FASE_TRANSCRIBIENDO = "transcribiendo"
 
 
 @dataclass(frozen=True)
@@ -74,3 +79,35 @@ def transcribir(transcriptor: TranscriptorAudio, opciones: OpcionesTranscripcion
         on_segmento=on_segmento,
         cancelar=cancelar,
     )
+
+
+@dataclass
+class TranscripcionPersistida:
+    """Lo transcrito y lo guardado. `persistencia` dice dónde quedó (o qué no se pudo guardar)."""
+    resultado: ResultadoTranscripcion
+    persistencia: Persistencia
+
+
+def transcribir_y_persistir(transcriptor: TranscriptorAudio, opciones: OpcionesTranscripcion, parametros: dict,
+                            historial: Optional[Historial], *, on_fase=None, on_segmento=None,
+                            cancelar=None) -> TranscripcionPersistida:
+    """Carga el modelo, transcribe y guarda (historial primero, archivo después). Sin ventana: avisa por callbacks.
+
+    Las excepciones del modelo salen tal cual y no se guarda nada. Los fallos de guardado no lanzan: van en
+    `persistencia`.
+    """
+    if on_fase:
+        on_fase(FASE_CARGANDO_MODELO)
+    _ = transcriptor.modelo  # fuerza la carga aquí, para poder avisar de la fase
+    if cancelar is not None and cancelar.is_set():
+        raise InterruptedError
+    if on_fase:
+        on_fase(FASE_TRANSCRIBIENDO)
+    resultado = transcribir(transcriptor, opciones, parametros, on_segmento=on_segmento, cancelar=cancelar)
+    if cancelar is not None and cancelar.is_set():
+        raise InterruptedError  # se descarta lo transcrito, como hoy
+    persistencia = persistir_transcripcion(
+        historial, opciones.archivo, resultado, opciones.modelo,
+        ruta_transcripcion(opciones.archivo, opciones.formato), opciones.formato, opciones.incluir_timestamps,
+    )
+    return TranscripcionPersistida(resultado, persistencia)

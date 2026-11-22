@@ -19,7 +19,7 @@ Dependencias entre módulos (quién importa a quién):
 | `persistencia.py` | `utils`; `historial` y `transcriber` solo como tipos |
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
 | `transcriber.py` | `registro`, `utils` |
-| `flujo_transcripcion.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
+| `flujo_transcripcion.py` | `transcriber`, `utils`, `historial`, `persistencia`; sin Tk ni `faster_whisper` al importarse |
 | `flujo_documentos.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
 | `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
@@ -67,6 +67,14 @@ Dependencias entre módulos (quién importa a quién):
   `persistir_documento_si_vigente(cancelada, …)`, que con `cancelada=True` no guarda nada y devuelve `None`.
 - `persistencia.py:Persistencia(id_historial, ruta_exportada, motivo_historial, motivo_exportacion)`,
   `motivo_de_error`, `texto_sin_guardado` y `texto_destino_documento` (los textos de aviso).
+
+### Transcribir y persistir sin interfaz — `flujo_transcripcion.py`
+
+- `flujo_transcripcion.py:transcribir_y_persistir(transcriptor, opciones, parametros, historial, *, on_fase, on_segmento,
+  cancelar) -> TranscripcionPersistida`: avisa de `FASE_CARGANDO_MODELO` y `FASE_TRANSCRIBIENDO`, transcribe y guarda con
+  `persistencia.py:persistir_transcripcion`. Lanza `InterruptedError` si se cancela (no guarda nada) y deja salir las
+  excepciones del modelo; los fallos de guardado van en `TranscripcionPersistida.persistencia`. La ventana la llama desde
+  el hilo de fondo (`ui.py:AppTranscriptor._procesar_transcripcion`) y solo pinta el resultado.
 
 ### Resumen y minuta — `asistente_ia.py`
 

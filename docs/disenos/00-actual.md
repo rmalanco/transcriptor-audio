@@ -47,7 +47,8 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
 2. `AppTranscriptor._iniciar_transcripcion` lee las opciones en el hilo principal y lanza un hilo de fondo.
 3. En ese hilo, `TranscriptorAudio.transcribir` procesa el audio con faster-whisper y entrega cada segmento a la
    interfaz mediante `on_segmento`.
-4. Todavía en el hilo de fondo, `persistencia.persistir_transcripcion` guarda primero en el historial
+4. Todavía en el hilo de fondo, `flujo_transcripcion.transcribir_y_persistir` (sin ventana) llama a
+   `persistencia.persistir_transcripcion`, que guarda primero en el historial
    (`Historial.crear` inserta la fila en `transcripciones`) y después escribe
    `<archivo>.<ext>_transcripcion.<formato>` junto al audio con `utils.guardar_transcripcion`.
 5. Un fallo del historial o de la exportación no descarta el resultado: vuelve como aviso y la ventana lo muestra
@@ -116,8 +117,9 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   que usa `self.after(0, …)` y no hace nada si la ventana se está cerrando (`_cerrando`). `_log` y `_actualizar_estado`
   ya pasan por ahí. El diálogo de login tiene su propio `_en_ui`.
 - **Hilo de la transcripción.** Uno solo a la vez (`_transcribiendo` mira si sigue vivo). Las opciones se leen en el
-  hilo principal antes de lanzarlo. Elige el transcriptor (`flujo_transcripcion.py:transcriptor_para`), carga el modelo, transcribe (`flujo_transcripcion.py:transcribir`), y todavía en ese hilo llama
-  a `persistir_transcripcion`; después entrega el resultado con `_en_ui`. Se cancela con un `threading.Event`
+  hilo principal antes de lanzarlo. Llama a `flujo_transcripcion.py:transcribir_y_persistir`, que elige el transcriptor (`transcriptor_para`), carga el
+  modelo, transcribe (`transcribir`) y, todavía en ese hilo, llama a `persistir_transcripcion`; después entrega el
+  resultado con `_en_ui`. Se cancela con un `threading.Event`
   (`cancelar_flag`) que `TranscriptorAudio.transcribir` revisa tras cada segmento aceptado.
 - **Hilo de fondo por generación de IA.** Cada resumen o minuta crea un `_GeneracionIA` con su propia señal de
   cancelación (`cancelar`) y un hilo que solo llama a `AsistenteIA`: no toca widgets, historial ni archivos y entrega

@@ -28,10 +28,12 @@ from src.registro import configurar_logging
 from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_preferido,
                                leer_modelo_preferido, modelo_ia_efectivo)
 from src.transcriber import TranscriptorAudio
-from src.flujo_transcripcion import OpcionesTranscripcion, ruta_transcripcion, transcribir, transcriptor_para
+from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, OpcionesTranscripcion,
+                                     TranscripcionPersistida, ruta_transcripcion, transcribir_y_persistir,
+                                     transcriptor_para)
 from src.flujo_documentos import SUFIJOS_DOCUMENTO, fecha_de_la_reunion, ruta_documento, texto_para_ia
 from src.ui_copilot import DialogoLoginCopilot
-from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
+from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import (validar_archivo, obtener_info_archivo, guardar_transcripcion, filtros_seleccion_archivo,
                        formatear_duracion, ruta_junto_al_audio)
@@ -642,34 +644,26 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _procesar_transcripcion(self, opciones: OpcionesTranscripcion):
         try:
-            self._actualizar_estado(f"Cargando modelo {opciones.modelo}…")
             self._log(f"Iniciando transcripción con modelo: {opciones.modelo}")
             transcriptor = transcriptor_para(self._transcriptor, opciones.modelo, opciones.dispositivo,
                                              opciones.compute_type)
-            _ = transcriptor.modelo  # fuerza la carga/descarga aquí para poder informar del estado
             self._transcriptor = transcriptor
 
-            if self.cancelar_flag.is_set():
-                raise InterruptedError
-
-            self._actualizar_estado("Transcribiendo…", 0)
+            def on_fase(fase):
+                if fase == FASE_CARGANDO_MODELO:
+                    self._actualizar_estado(f"Cargando modelo {opciones.modelo}…")
+                elif fase == FASE_TRANSCRIBIENDO:
+                    self._actualizar_estado("Transcribiendo…", 0)
 
             def on_segmento(segmento, duracion_total):
                 progreso = min(segmento.fin / duracion_total, 1.0) if duracion_total else -1
                 self._en_ui(self._agregar_segmento, segmento, progreso)
 
-            resultado = transcribir(transcriptor, opciones, self.configuracion["transcripcion"],
-                                    on_segmento=on_segmento, cancelar=self.cancelar_flag)
-
-            if self.cancelar_flag.is_set():
-                raise InterruptedError
-
-            # Primero el historial y después el archivo junto al audio (regla 6); no lanza por fallos de guardado
-            persistencia = persistir_transcripcion(
-                self.historial, opciones.archivo, resultado, opciones.modelo,
-                ruta_transcripcion(opciones.archivo, opciones.formato), opciones.formato, opciones.incluir_timestamps,
+            transcripcion = transcribir_y_persistir(
+                transcriptor, opciones, self.configuracion["transcripcion"], self.historial,
+                on_fase=on_fase, on_segmento=on_segmento, cancelar=self.cancelar_flag,
             )
-            self._en_ui(self._finalizar_ok, resultado, persistencia)
+            self._en_ui(self._finalizar_ok, transcripcion)
 
         except InterruptedError:
             self._en_ui(self._finalizar, "Transcripción cancelada", 0)
@@ -691,7 +685,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             self.progress.set(progreso)
             self.label_estado.configure(text=f"Transcribiendo… {progreso:.0%}")
 
-    def _finalizar_ok(self, resultado, persistencia: Persistencia):
+    def _finalizar_ok(self, transcripcion: TranscripcionPersistida):
+        resultado, persistencia = transcripcion.resultado, transcripcion.persistencia
         self.resultado_actual = resultado
         self.ruta_guardada = persistencia.ruta_exportada
         self._fecha_historial = None
