@@ -72,12 +72,7 @@ def _modulo_falso(llamadas):
     return modulo
 
 
-def _prohibido(*args, **kwargs):
-    raise AssertionError("se intentó construir el WhisperModel real")
-
-
 def test_modelo_importa_faster_whisper_al_cargarse(monkeypatch, tmp_path):
-    monkeypatch.setattr("src.transcriber.WhisperModel", _prohibido, raising=False)
     transcriptor = TranscriptorAudio("small", "cpu", "int8", cache_dir=str(tmp_path))
     llamadas = []
     monkeypatch.setitem(sys.modules, "faster_whisper", _modulo_falso(llamadas))
@@ -90,7 +85,6 @@ def test_modelo_importa_faster_whisper_al_cargarse(monkeypatch, tmp_path):
 
 
 def test_si_falla_el_import_se_reintenta_al_volver_a_pedir_el_modelo(monkeypatch, tmp_path):
-    monkeypatch.setattr("src.transcriber.WhisperModel", _prohibido, raising=False)
     transcriptor = TranscriptorAudio("small", "cpu", "int8", cache_dir=str(tmp_path))
     monkeypatch.setitem(sys.modules, "faster_whisper", None)
 

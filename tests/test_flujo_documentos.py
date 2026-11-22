@@ -465,6 +465,18 @@ def test_recibir_sin_sesion_vigente_olvida_el_asistente(historial, tmp_path):
     assert fabrica.llamadas == 2
 
 
+@pytest.mark.parametrize("error, mensaje", [(ErrorAsistenteIA(""), "ErrorAsistenteIA"),
+                                             (InterruptedError(), "InterruptedError")])
+def test_recibir_error_sin_texto_usa_el_nombre_del_error(historial, tmp_path, error, mensaje):
+    gestor = fd.GestorDocumentos(historial, FabricaAsistentes())
+    generacion = gestor.iniciar("minuta", _resultado_reunion(), _audio(tmp_path), None, None)
+
+    recepcion = gestor.recibir(generacion, None, error)
+
+    assert recepcion.estado == "error"
+    assert recepcion.mensaje == mensaje
+
+
 # ---- Fallo de una parte con AsistenteIA real (httpx simulado, sin red)
 
 DOCUMENTO_COMPLETO = "\n\n".join(f"{seccion}\nContenido." for seccion in SECCIONES_RESUMEN + SECCIONES_MINUTA)

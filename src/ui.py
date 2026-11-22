@@ -641,8 +641,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def _procesar_transcripcion(self, opciones: OpcionesTranscripcion):
         try:
             self._log(f"Iniciando transcripción con modelo: {opciones.modelo}")
-            transcriptor = transcriptor_para(self._transcriptor, opciones.modelo, opciones.dispositivo,
-                                             opciones.compute_type)
+            anterior = self._transcriptor
+            transcriptor = transcriptor_para(anterior, opciones.modelo, opciones.dispositivo, opciones.compute_type)
             self._transcriptor = transcriptor
 
             def on_fase(fase):
@@ -655,10 +655,14 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 progreso = min(segmento.fin / duracion_total, 1.0) if duracion_total else -1
                 self._en_ui(self._agregar_segmento, segmento, progreso)
 
-            transcripcion = transcribir_y_persistir(
-                transcriptor, opciones, self.configuracion["transcripcion"], self.historial,
-                on_fase=on_fase, on_segmento=on_segmento, cancelar=self.cancelar_flag,
-            )
+            try:
+                transcripcion = transcribir_y_persistir(
+                    transcriptor, opciones, self.configuracion["transcripcion"], self.historial,
+                    on_fase=on_fase, on_segmento=on_segmento, cancelar=self.cancelar_flag,
+                )
+            finally:
+                if transcriptor is not anterior and transcriptor._modelo is None:
+                    self._transcriptor = anterior  # no llegó a cargarse: se conserva el modelo que ya estaba cargado
             self._en_ui(self._finalizar_ok, transcripcion)
 
         except InterruptedError:

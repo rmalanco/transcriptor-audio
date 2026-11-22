@@ -20,7 +20,7 @@ reglas para agentes, en [AGENTS.md](./AGENTS.md). Este archivo es el contrato de
 ## Subdirectories & System Boundaries
 
 - `src`: [./src/EGM.md](./src/EGM.md) — transcripción, IA, acceso a Copilot, historial, interfaz gráfica y CLI.
-- `tests`: sin contrato (solo tests) — once archivos `test_*.py` y `conftest.py`, con `pytest`.
+- `tests`: sin contrato (solo tests) — trece archivos `test_*.py` y `conftest.py`, con `pytest`.
 - `docs`: sin contrato (solo documentación) — [docs/integracion-copilot.md](./docs/integracion-copilot.md),
   [docs/disenos/00-actual.md](./docs/disenos/00-actual.md), `docs/specs/` (comportamiento verificado) y `docs/historias/`.
 - `config`: sin contrato — solo `settings.yaml`.

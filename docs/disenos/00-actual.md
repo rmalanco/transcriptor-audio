@@ -14,7 +14,7 @@ usuario lo pide, genera un resumen y una minuta enviando el texto transcrito a G
 terminada en la interfaz gráfica se guarda en un historial SQLite local, con su resumen y su minuta. Hay dos formas
 de uso: una interfaz gráfica (CustomTkinter) y una CLI que transcribe, lista los modelos de Whisper y gestiona la
 sesión de Copilot (iniciar y cerrar sesión, ver los modelos disponibles); con `--ui` también lanza la interfaz. Todo el
-código está en un paquete, `src/`, de trece archivos y 4 009 líneas.
+código está en un paquete, `src/`, de quince archivos y 4 269 líneas.
 
 ## Componentes
 
@@ -33,7 +33,7 @@ No hay subcarpetas con código: los componentes son módulos de `src/`. Todos se
 | CLI | `main.py` | Transcribir a `stdout` o a un archivo; listar los modelos de Whisper; login, logout y lista de modelos de Copilot; lanzar la interfaz con `--ui` |
 | Registro | `registro.py` | Configurar el logging y avisar cada cierto tiempo en operaciones largas (`latido`) |
 
-Fuera de `src/`: `run_ui.py` (lanzador), `config/settings.yaml` (configuración) y `tests/` (once archivos `test_*.py` y `conftest.py`).
+Fuera de `src/`: `run_ui.py` (lanzador), `config/settings.yaml` (configuración) y `tests/` (trece archivos `test_*.py` y `conftest.py`).
 
 ## Flujo de datos
 
@@ -192,9 +192,9 @@ comprobado que los commits anteriores estén libres de secretos.
 
 - Comando: `./venv/bin/python -m pytest -q`, **desde la raíz del repositorio**: el paquete `src` debe poder
   importarse.
-- Estado al 2026-11-22: **268 tests en verde** con Python 3.14.10 en Linux (`pytest` 9.2.0, fijado en
+- Estado al 2026-11-22: **330 tests en verde** con Python 3.14.10 en Linux (`pytest` 9.2.0, fijado en
   `requirements-dev.txt`; instalar con `pip install -r requirements-dev.txt`).
-- Hay 234 funciones de test (el resto son casos parametrizados) en once archivos `test_*.py` de `tests/`, más
+- Hay 277 funciones de test (el resto son casos parametrizados) en trece archivos `test_*.py` de `tests/`, más
   `conftest.py`. No hacen llamadas reales a la red (`httpx` se simula), no cargan ningún modelo de Whisper (el doble
   `modelo_whisper_falso` sustituye al modelo) ni abren ventanas. Las rutas del token y las preferencias se aíslan en
   carpetas temporales (`rutas_aisladas` en `tests/test_copilot.py`, `preferencias_aisladas` en `tests/conftest.py`).

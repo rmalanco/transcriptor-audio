@@ -12,7 +12,7 @@
 - Remoto: `origin` → GitHub (`rmalanco/transcriptor-audio`, por SSH).
 - Refs ocultas: 7 refs `refs/agents/<id>/checkpoints/turn/0..6` con 13 commits del 2026-11-21 titulados
   «Agent host session … turn N» (puntos de control de una sesión de agente). No están en `main` ni en `origin`.
-- Tamaño: 4 009 líneas en `src/` (13 archivos `.py`), 3 378 en `tests/` (11 archivos `test_*.py` y `conftest.py`).
+- Tamaño: 4 269 líneas en `src/` (15 archivos `.py`), 4 365 en `tests/` (13 archivos `test_*.py` y `conftest.py`).
 
 ## Stack (verificado)
 | Pieza | Declarado | Instalado aquí | Fuente |
@@ -35,19 +35,21 @@ El binario `ffmpeg` no se ejecuta: solo `ffprobe`, a través de `ffmpeg.probe` d
 |---|---|---|
 | `run_ui.py` | Lanzador de la interfaz gráfica | `python run_ui.py` → `src.ui.main` |
 | `src/main.py` (223 líneas) | CLI con `argparse`: transcribir, `--listar-modelos`, `--copilot-login/-logout/-modelos`, `--ui` | `python -m src.main` |
-| `src/ui.py` (1 357) | Ventana principal `AppTranscriptor` (CustomTkinter + arrastrar y soltar) | `python -m src.ui` |
+| `src/ui.py` (1 296) | Ventana principal `AppTranscriptor` (CustomTkinter + arrastrar y soltar) | `python -m src.ui` |
 | `src/ui_copilot.py` (101) | `DialogoLoginCopilot`: diálogo modal del device flow | — |
 | `src/ui_historial.py` (277) | `PanelHistorial`: vista del historial | — |
-| `src/transcriber.py` (167) | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones | — |
+| `src/transcriber.py` (173) | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones | — |
 | `src/configuracion.py` (177) | Carga y validación de `config/settings.yaml` (21 claves con valores por defecto), `ErrorConfiguracion`, `MODELOS_WHISPER` y las preferencias del usuario en `preferencias.json` | — |
-| `src/persistencia.py` (129) | Guardar sin interfaz: primero el historial y después el archivo junto al audio; devuelve avisos en vez de lanzar | — |
-| `src/asistente_ia.py` (702) | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, revisión de fidelidad, post-proceso de la minuta | — |
+| `src/persistencia.py` (114) | Guardar sin interfaz: primero el historial y después el archivo junto al audio; devuelve avisos en vez de lanzar | — |
+| `src/flujo_transcripcion.py` (113) | Flujo de transcribir y persistir, sin interfaz (sacado de `ui.py`) | — |
+| `src/flujo_documentos.py` (179) | Gestor sin interfaz de los documentos: generación vigente, asistente y decisión de qué se guarda de cada generación | — |
+| `src/asistente_ia.py` (734) | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, revisión de fidelidad, post-proceso de la minuta | — |
 | `src/copilot.py` (395) | Login por device flow, lectura/guardado del token, catálogo de modelos, familias excluidas, sesión `auto` | — |
 | `src/historial.py` (233) | `Historial` y `EntradaHistorial` sobre SQLite | — |
 | `src/registro.py` (60) | `configurar_logging` y `latido` | — |
 | `src/utils.py` (182) | Validación e info de archivos (`ffprobe`, opcional), formatos de tiempo, `serializar_transcripcion` y `guardar_transcripcion` | — |
 | `config/settings.yaml` | Configuración: `modelo`, `transcripcion`, `salida`, `ia`, `historial`; la app solo la lee | — |
-| `tests/` | 11 archivos `test_*.py` y `conftest.py`; 287 tests (234 funciones `test_*`, el resto casos parametrizados) | `python -m pytest -q` |
+| `tests/` | 13 archivos `test_*.py` y `conftest.py`; 330 tests (277 funciones `test_*`, el resto casos parametrizados) | `python -m pytest -q` |
 | `docs/` | `integracion-copilot.md` (97 líneas), `disenos/00-actual.md`, `specs/` (4 specs), `historias/hechas/` (7 historias) | — |
 | `data/` (ignorado) | `historial.db` (1,4 MB) y `ui.log` (59 KB, del 6 de noviembre: ningún código actual lo escribe), locales | — |
 | `venv/` (ignorado) | Entorno virtual, recreado el 2026-11-21 | — |
@@ -74,7 +76,7 @@ instalación anterior. El venv tiene 40 paquetes en total.
 
 ## Verificación
 - Comando de tests: `./venv/bin/python -m pytest -q` (documentado en `AGENTS.md` y `README.md`) ·
-  Resultado: **287 tests en verde** (Python 3.14.10, Linux, sin red).
+  Resultado: **330 tests en verde** (Python 3.14.10, Linux, sin red).
 - Comprobación de humo: `./venv/bin/python -m src.main --listar-modelos` funciona (lista 8 modelos de Whisper).
 - CI: **no hay** (no existe `.github/`, ni otro pipeline).
 - Linters / formatters / typecheck: **ninguno configurado**; tampoco hay ruff, black, mypy ni flake8 instalados.
@@ -101,14 +103,14 @@ No existen `.github/copilot-instructions.md` ni `.cursor/rules/`.
   `docs/integracion-copilot.md:29` llevan el `client_id` de OAuth de opencode, que el README declara público.
 - `data/ui.log`: sin cadenas con forma de token (búsqueda por patrón; no se leyó el contenido).
 - TODO/FIXME/HACK: 0.
-- Tests ejecutables con `requirements-dev.txt`, que fija `pytest` (9.2.0): 268 pasan el 2026-11-22.
+- Tests ejecutables con `requirements-dev.txt`, que fija `pytest` (9.2.0): 330 pasan el 2026-11-22.
 - Sin CI, sin linter y sin typecheck: nada verifica los cambios de forma automática.
 - Sin lockfile y con Python 3.14 instalado frente al 3.12 «probado».
 - ~~`.gitignore` ignoraba `docs/`~~ — resuelto el 2026-11-22: se quitó la regla (cambio sin commitear).
 - `.gitignore` ignora `*.json` y `*.txt` de forma global (con excepciones para `README.md`, `requirements.txt`,
   `requirements-dev.txt` y `config/settings.yaml`): cualquier JSON o TXT nuevo del proyecto queda fuera sin aviso.
 - `.context/` se versiona (no está en `.gitignore`).
-- `src/ui.py` concentra 1 357 líneas (34 % de `src/`) y solo tiene 7 tests en `tests/test_ui.py` (el guardado se prueba sin
+- `src/ui.py` concentra 1 296 líneas (30 % de `src/`) y solo tiene 7 tests en `tests/test_ui.py` (el guardado se prueba sin
   interfaz a través de `persistencia.py`; el resto de la orquestación sigue en la clase Tk, `BACKLOG.md` punto 5).
 - Binarios o archivos grandes versionados: ninguno (el mayor es `tests/test_asistente_ia.py`, 75 KB; el mayor de `src/`, `ui.py`, 66 KB).
 - El repositorio vive en un disco montado con `core.fileMode=false`: todos los archivos se ven ejecutables en disco;
