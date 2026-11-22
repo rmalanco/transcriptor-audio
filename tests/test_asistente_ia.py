@@ -464,3 +464,181 @@ def test_auto_con_catalogo_caido_tambien_salta_las_familias_excluidas(monkeypatc
     asistente = AsistenteIA(api_key="gho_x", modelo="auto", revision_fidelidad=False)
     assert asistente._completar("hola") == "OK"
     assert enviados == ["gpt-5.4"]
+
+
+def test_nota_de_notas_dice_el_numero_de_partes():
+    from src.asistente_ia import nota_de_notas
+    assert nota_de_notas(2, False) == (
+        "\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó a "
+        "partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, cifras "
+        "y condiciones con la transcripción antes de darlo por bueno.")
+
+
+def test_nota_de_notas_con_revision_anade_la_frase_de_la_revision():
+    from src.asistente_ia import nota_de_notas
+    nota = nota_de_notas(3, True)
+    assert "en 3 partes" in nota
+    assert nota.endswith("bueno. La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
+
+
+class _StreamConTexto(_Stream):
+    """Respuesta de chat simulada con el contenido indicado."""
+    def __init__(self, contenido):
+        super().__init__()
+        self._contenido = contenido
+    def iter_lines(self):
+        import json
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": self._contenido}, "finish_reason": "stop"}]})
+        yield "data: [DONE]"
+
+
+def _simular_chat(monkeypatch, respuesta):
+    """Chat simulado: `respuesta(cuerpo)` dice qué contesta el modelo a cada petición. Devuelve los cuerpos enviados."""
+    cuerpos = []
+    def stream(metodo, url, json, headers, timeout):
+        cuerpos.append(json)
+        return _StreamConTexto(respuesta(json))
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    return cuerpos
+
+
+def _es_prompt_de_notas(cuerpo) -> bool:
+    return "Esta es la parte" in cuerpo["messages"][-1]["content"]
+
+
+MINUTA_MODELO = """# Minuta: Revisión del presupuesto
+
+**Fecha:** Viernes 15 de noviembre
+**Participantes:** Ana y Luis
+
+## Objetivo
+Revisar el presupuesto trimestral.
+
+## Temas tratados
+1. **Presupuesto:** se revisaron las cifras de octubre.
+
+## Acuerdos
+- Sin acuerdos explícitos.
+
+## Tareas y pendientes
+| Tarea | Responsable | Fecha límite |
+|-------|-------------|--------------|
+| Enviar cifras de octubre | Ana | No asignado |
+
+## Próximos pasos
+- Próxima reunión, si se menciona."""
+
+
+def test_minuta_de_varias_partes_termina_con_la_nota_de_la_aplicacion(monkeypatch):
+    from src.asistente_ia import SECCIONES_MINUTA
+    from src.historial import titulo_desde_minuta
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2  # la transcripción se procesa en 2 partes
+    _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto, fecha="29 de septiembre de 2026")
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento "
+                           "se redactó a partir de notas extraídas de cada parte, no de la transcripción completa. "
+                           "Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+    assert minuta.splitlines()[0] == "# Minuta: Revisión del presupuesto"
+    assert titulo_desde_minuta(minuta) == "Revisión del presupuesto"
+    assert "**Fecha:** 29 de septiembre de 2026" in minuta and "Viernes 15" not in minuta
+    assert all(seccion in minuta for seccion in SECCIONES_MINUTA)
+
+
+def test_la_nota_no_se_envia_a_copilot(monkeypatch):
+    import json
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(texto)
+    assert "Nota de la aplicación" in minuta
+    assert len(cuerpos) == 4  # 2 partes de notas, la minuta y la revisión: todas las pasadas del modelo
+    assert not any("Nota de la aplicación" in json.dumps(cuerpo, ensure_ascii=False) for cuerpo in cuerpos)
+
+
+RESUMEN_MODELO = """## Resumen
+Se revisó el presupuesto trimestral.
+
+### Puntos clave
+- Cifras de octubre.
+
+### Conclusiones
+- Sin conclusiones explícitas."""
+
+
+def test_resumen_con_notas_reutilizadas_tambien_lleva_la_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                            else RESUMEN_MODELO if "Redacta un resumen" in cuerpo["messages"][-1]["content"]
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    asistente.generar_minuta(texto)
+    peticiones_minuta = len(cuerpos)
+    resumen = asistente.generar_resumen(texto)
+    nuevas = cuerpos[peticiones_minuta:]
+    assert len(nuevas) == 1 and not _es_prompt_de_notas(nuevas[0])  # las notas se reutilizan: solo el resumen
+    assert resumen.startswith("## Resumen")
+    assert resumen.endswith("\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento "
+                            "se redactó a partir de notas extraídas de cada parte, no de la transcripción completa. "
+                            "Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+
+
+def test_revision_con_varias_partes_dice_que_revisa_contra_las_notas(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Ana enviará las cifras de octubre." if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    progreso = []
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(texto, on_progreso=progreso.append)
+    assert "Revisando fidelidad con las notas de las 2 partes…" in progreso
+    revision = cuerpos[-1]["messages"][-1]["content"]
+    assert "DOCUMENTO:" in revision  # es la petición de revisión
+    assert "Notas de la parte 1" in revision
+    assert not any(linea in revision for linea in texto.splitlines())  # ninguna línea de la transcripción original
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento "
+                           "se redactó a partir de notas extraídas de cada parte, no de la transcripción completa. "
+                           "Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno. "
+                           "La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
+
+
+def test_una_sola_parte_no_lleva_nota_y_revisa_contra_la_transcripcion(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = ("Línea con contenido de prueba para la reunión.\n" * 30)[:900]  # exactamente el límite: una parte
+    assert len(texto) == 900 and len(dividir_texto(texto, 900)) == 1
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: MINUTA_MODELO)
+    progreso = []
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(texto, on_progreso=progreso.append)
+    assert "Nota de la aplicación" not in minuta
+    assert minuta.endswith("- Próxima reunión, si se menciona.")
+    assert "Revisando fidelidad con la transcripción…" in progreso
+    assert len(cuerpos) == 2  # la minuta y la revisión, sin notas por parte
+    assert texto in cuerpos[-1]["messages"][-1]["content"]  # la revisión recibe la transcripción completa
+
+
+def test_un_caracter_mas_del_limite_se_procesa_en_dos_partes_y_lleva_la_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = ("Línea con contenido de prueba para la reunión.\n" * 30)[:900] + "x"  # límite + 1
+    assert len(dividir_texto(texto, 900)) == 2
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto)
+    assert "\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes" in minuta
+    assert len(cuerpos) == 3  # 2 partes de notas y la minuta
+
+
+def test_sin_revision_la_nota_no_menciona_la_revision(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto)
+    assert "> Nota de la aplicación: la transcripción se procesó en 2 partes" in minuta
+    assert "La revisión de fidelidad" not in minuta

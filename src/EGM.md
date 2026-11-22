@@ -161,7 +161,7 @@ Dependencias entre módulos (quién importa a quién):
 
 - Una transcripción vacía lanza `ErrorAsistenteIA` (`asistente_ia.py:AsistenteIA._generar`).
 - Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad compara
-  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`).
+  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`).
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
   faltan menos que antes.
 - La fecha de la minuta la pone la aplicación: `asistente_ia.py:AsistenteIA.generar_minuta` reescribe la línea

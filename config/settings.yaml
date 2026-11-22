@@ -24,7 +24,7 @@ ia:
   temperatura: 0.2               # se omite automáticamente si el modelo no la admite
   max_caracteres_bloque: 60000   # transcripciones más largas se procesan por partes (de tamaño parejo)
   peticiones_paralelas: 3        # partes analizadas a la vez; bájalo si Copilot responde 429 (límite)
-  revision_fidelidad: false      # 2.ª pasada contra la transcripción (una petición más por documento)
+  revision_fidelidad: false      # 2.ª pasada contra la transcripción o, con varias partes, contra las notas (una petición más por documento)
 
 historial:
   ruta: "data/historial.db"      # relativa a la carpeta del proyecto

@@ -341,3 +341,19 @@ def test_motivo_de_error_de_sistema_usa_solo_la_causa():
 
 def test_motivo_de_error_sin_mensaje_usa_el_tipo():
     assert motivo_de_error(RuntimeError()) == "RuntimeError"
+
+
+def test_documento_con_nota_de_la_aplicacion_se_guarda_y_exporta_intacto(historial, tmp_path):
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    ruta = str(tmp_path / "reunion_minuta.md")
+    minuta = ("# Minuta: Revisión del presupuesto\n\n**Fecha:** 29 de septiembre de 2026\n\n"
+              "## Próximos pasos\n- Próxima reunión, si se menciona."
+              "\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó "
+              "a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, "
+              "cifras y condiciones con la transcripción antes de darlo por bueno. La revisión de fidelidad se hizo "
+              "contra esas notas, no contra la transcripción.")
+    p = persistir_documento(historial, id_, "minuta", minuta, "gpt-5.4", ruta)
+    assert historial.obtener(id_).minuta == minuta
+    assert Path(ruta).read_text(encoding="utf-8") == minuta + "\n"
+    assert historial.obtener(id_).titulo == "Revisión del presupuesto"
+    assert p.ruta_exportada == ruta and p.motivo_exportacion is None and p.motivo_historial is None

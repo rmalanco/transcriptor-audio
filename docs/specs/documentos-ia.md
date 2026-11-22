@@ -100,3 +100,26 @@ Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
   termine después.
 
 Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
+
+### Nota de la aplicación en documentos redactados a partir de notas
+- Given una transcripción que supera `ia.max_caracteres_bloque` y se procesa en N partes (N de 2 o más), when se genera
+  la minuta o el resumen, then el documento que se muestra, se guarda en el historial y se exporta termina, tras una
+  línea horizontal, con «> Nota de la aplicación: la transcripción se procesó en N partes y este documento se redactó a
+  partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, cifras y
+  condiciones con la transcripción antes de darlo por bueno.»; la nota la añade la app, no se envía a Copilot y no
+  cambia el título, la fecha ni las secciones.
+- Given una transcripción que supera `ia.max_caracteres_bloque` y se procesa en N partes, when el segundo documento
+  (minuta o resumen) reutiliza las notas ya extraídas, then ese documento también termina con la nota.
+- Given una transcripción que cabe en una sola parte, when se genera la minuta o el resumen, then el documento no lleva
+  la nota.
+
+Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
+
+### Revisión de fidelidad contra las notas
+- Given la revisión de fidelidad activada y una transcripción procesada en N partes, when se genera el documento, then
+  durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y la nota añade «La
+  revisión de fidelidad se hizo contra esas notas, no contra la transcripción.».
+- Given la revisión de fidelidad activada y una transcripción que cabe en una sola parte, when se genera el documento,
+  then la línea de estado dice «Revisando fidelidad con la transcripción…».
+
+Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md

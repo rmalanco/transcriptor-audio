@@ -200,6 +200,17 @@ def normalizar_tabla_tareas(minuta: str) -> str:
     return "\n".join(lineas)
 
 
+def nota_de_notas(partes: int, revisado: bool) -> str:
+    """Bloque que la app añade al final de un documento redactado a partir de notas (2 o más partes).
+    Lo añade la app, no el modelo: ningún prompt lo contiene y el post-proceso no lo toca."""
+    nota = (f"\n---\n\n> Nota de la aplicación: la transcripción se procesó en {partes} partes y este documento se "
+            "redactó a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
+            "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+    if revisado:
+        nota += " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción."
+    return nota
+
+
 def _esperar(segundos: float, cancelar: Optional[threading.Event]) -> None:
     """Espera entre reintentos. Con `cancelar`, la espera se corta en cuanto se activa la señal."""
     if cancelar:
@@ -450,7 +461,8 @@ class AsistenteIA:
         on_progreso: Optional[Callable[[str], None]] = None,
         cancelar: Optional[threading.Event] = None,
         secciones: Optional[list[str]] = None,
-    ) -> str:
+    ) -> tuple[str, int]:
+        """Devuelve el documento y el número de partes en que se dividió la transcripción."""
         texto = texto.strip()
         if not texto:
             raise ErrorAsistenteIA("La transcripción está vacía")
@@ -487,20 +499,30 @@ class AsistenteIA:
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
             if on_progreso:
-                on_progreso("Revisando fidelidad con la transcripción…")
+                fuente = "la transcripción" if len(bloques) == 1 else f"las notas de las {len(bloques)} partes"
+                on_progreso(f"Revisando fidelidad con {fuente}…")
             revisado = self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar)
             # Solo se acepta si conserva todas las secciones que tenía
             if len(secciones_faltantes(revisado, secciones or [])) <= len(secciones_faltantes(documento, secciones or [])):
                 documento = revisado
-        return documento
+        return documento, len(bloques)
+
+    def _con_nota(self, documento: str, partes: int) -> str:
+        """Con 2 o más partes, añade al final la nota de la aplicación. Va después de todas las pasadas del modelo
+        y del post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
+        if partes < 2:
+            return documento
+        return documento.rstrip() + "\n" + nota_de_notas(partes, self.revision_fidelidad)
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:
-        return self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN)
+        documento, partes = self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN)
+        return self._con_nota(documento, partes)
 
     def generar_minuta(self, texto: str, on_progreso=None, cancelar=None, fecha: Optional[str] = None) -> str:
         # La fecha la aporta la app (el modelo tiende a confundirla con fechas límite de tareas)
         plantilla = PROMPT_MINUTA.replace("{fecha}", fecha or "No especificada")
-        minuta = self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA)
+        minuta, partes = self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA)
         minuta = normalizar_tabla_tareas(minuta)
-        return re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
+        minuta = re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
+        return self._con_nota(minuta, partes)
 

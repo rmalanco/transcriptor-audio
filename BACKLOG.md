@@ -19,7 +19,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
 6. ✅ [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
 7. [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
-8. [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
+8. ✅ [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
 9. [🟡] En la CLI, validar la combinación de formato y salida antes de transcribir y usar el mismo serializador que la exportación a archivo — hallazgo A-10 — carril S
 10. [🟡] Consultar el catálogo de Copilot una sola vez y bajo demanda, sin abrir una sesión `auto` al arrancar, y documentar ese tráfico y el orden de búsqueda del token — hallazgo A-13 — carril S
 11. [🟡] Guardar el modelo de IA elegido fuera del repo, junto al token, en vez de reescribir `config/settings.yaml` — hallazgo A-19 — carril S
@@ -34,6 +34,8 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 20. [🟡] Que `--copilot-modelos` y el selector de modelo de la ventana no ofrezcan modelos de familias no autorizadas ni sugieran ponerlos en `ia.modelo` — hallazgo A-12, complemento de la historia 03 — carril S
 21. [🟡] Decidir si la exclusión de Mistral AI cubre también los modelos cuyo nombre no contiene «mistral» (Codestral, Devstral, Ministral, Pixtral, Magistral) y, si es así, ampliar la lista de familias — decisión del usuario pendiente, historia 03 — carril S
 22. [🟡] Que la ventana no cambie en silencio por «Auto-detectar» un idioma de `transcripcion.idioma` que Whisper admite pero que no está en su selector (por ejemplo `nl`): hoy el mismo YAML da resultados distintos en la ventana y en la CLI — hallazgo nuevo de la historia 05 — carril S
+23. [🟡] Que la revisión de fidelidad contraste el documento con la transcripción original y no con las notas, para que un dato que se coló al extraer las notas no pase como revisado: revisar por partes no detecta datos inventados y una sola petición supera `max_caracteres_bloque`, así que necesita diseño — hallazgo A-05 (salida «revisar contra el original»), historia 06 — carril L
+24. [🟡] Aceptar la revisión de fidelidad solo si conserva las tareas y los acuerdos del documento, no solo sus secciones, para que una revisión que borra tareas no sustituya a la minuta — hallazgo A-05 (segunda mitad del escenario) — carril S
 
 ## Backlog
 
