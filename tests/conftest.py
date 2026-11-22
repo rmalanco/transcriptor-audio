@@ -6,6 +6,7 @@ from typing import Optional
 
 import pytest
 
+from src import configuracion
 from src.transcriber import TranscriptorAudio
 
 
@@ -51,3 +52,10 @@ def modelo_whisper_falso(monkeypatch):
         monkeypatch.setattr(TranscriptorAudio, "modelo", property(lambda self: doble))
         return doble
     return colocar
+
+
+@pytest.fixture(autouse=True)
+def preferencias_aisladas(monkeypatch, tmp_path_factory):
+    """Ningún test lee ni escribe las preferencias reales del usuario: apuntan a una carpeta temporal."""
+    carpeta = tmp_path_factory.mktemp("preferencias")
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", carpeta / "preferencias.json")

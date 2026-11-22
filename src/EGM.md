@@ -43,7 +43,6 @@ Dependencias entre módulos (quién importa a quién):
 - `configuracion.py:cargar_configuracion(ruta=None) -> dict`: sin `ruta`, usa `RUTA_POR_DEFECTO`;
   una ruta relativa se interpreta desde la carpeta de trabajo. Devuelve todas las secciones y las 21 claves que usa la
   app, con sus valores por defecto. valida `modelo.nombre` contra `configuracion.MODELOS_WHISPER`, la única lista de modelos de Whisper (la usan la CLI y la ventana).
-- `configuracion.py:guardar_modelo_ia(modelo, ruta=None) -> bool`
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
 - `utils.py:formatear_tiempo`, `formatear_tiempo_srt`, `formatear_tiempo_vtt`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
@@ -120,8 +119,6 @@ Dependencias entre módulos (quién importa a quién):
   convierte `idioma == "auto"` en `language=None`.
 - `transcriber.py:es_alucinacion_conocida` descarta un segmento solo si, en minúsculas y sin puntuación en los
   extremos, coincide entero con una frase de `ALUCINACIONES_CONOCIDAS`.
-- `configuracion.py:guardar_modelo_ia` cambia solo la primera línea `modelo:` dentro del bloque `ia:` y conserva los
-  comentarios; devuelve `False` si no la encuentra.
 - `utils.py:serializar_transcripcion` (y, por tanto, `guardar_transcripcion`) lanza `ValueError` con un formato distinto de `txt`, `srt`, `vtt` o `json`.
 
 ### Configuración
@@ -198,7 +195,8 @@ Dependencias entre módulos (quién importa a quién):
 - `POST <url_api>/chat/completions` en streaming — `asistente_ia.py:AsistenteIA._completar`.
 - `url_api` es `https://api.githubcopilot.com`, o `https://copilot-api.<dominio>` con GitHub Enterprise
   (`copilot.py:url_api`).
-- Al arrancar la interfaz, `ui.py:AppTranscriptor._cargar_modelos_ia` consulta los modelos y abre una sesión auto.
+- Al pulsar «↻» junto al selector de modelo, `ui.py:AppTranscriptor._cargar_modelos_ia` consulta una vez los modelos
+  (`copilot.py:cargar_opciones_de_modelo`), sin abrir sesión auto. Al arrancar la ventana no hay tráfico con Copilot.
 - Descarga del modelo de Whisper la primera vez que se usa — `transcriber.py:TranscriptorAudio.modelo`.
 
 ### Disco
@@ -207,9 +205,10 @@ Dependencias entre módulos (quién importa a quién):
   en `copilot.py:cerrar_sesion` y `copilot.py:invalidar_token`.
 - `~/.local/share/opencode/auth.json`: solo lectura (`copilot.py:leer_token`).
 - `~/.cache/faster-whisper`: caché de modelos (`transcriber.py:TranscriptorAudio.__init__`).
-- `config/settings.yaml`: lectura con `yaml.safe_load` (`configuracion.py:cargar_configuracion`) y reescritura de la
-  línea `ia.modelo` al cambiar el modelo de IA (`configuracion.py:guardar_modelo_ia`). La ruta se resuelve contra
-  `RAIZ_PROYECTO`, no contra el directorio de trabajo.
+- `config/settings.yaml`: solo lectura con `yaml.safe_load` (`configuracion.py:cargar_configuracion`); la app no lo
+  reescribe. La ruta se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo.
+- `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
+  (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
 - Junto al audio: `<nombre>_transcripcion.<formato>` (`ui.py:AppTranscriptor._generar_ruta_salida`), y
   `<nombre>_resumen.md` y `<nombre>_minuta.md` (`ui.py:AppTranscriptor._procesar_documento_ia`).
 - La CLI escribe en `stdout` o en el archivo de `-o`; los dos usan `utils.py:serializar_transcripcion`, y `--verbose` escribe en stderr. Con `srt` o `vtt` sin `-o`, termina con código 1 antes de cargar Whisper.

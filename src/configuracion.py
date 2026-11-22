@@ -4,15 +4,20 @@ No importa faster_whisper ni customtkinter, para que la CLI pueda validarla sin 
 """
 
 import copy
-import re
+import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import yaml
 
+log = logging.getLogger("transcriptor.configuracion")
+
 RAIZ_PROYECTO = Path(__file__).resolve().parent.parent
 RUTA_POR_DEFECTO = RAIZ_PROYECTO / "config" / "settings.yaml"
+# Preferencias del usuario (p. ej. el modelo de IA elegido): fuera del repo, junto al token de Copilot
+RUTA_PREFERENCIAS = Path("~/.local/share/transcriptor-audio/preferencias.json").expanduser()
 
 SECCIONES = ("modelo", "transcripcion", "salida", "ia", "historial")
 DISPOSITIVOS = ("cpu", "cuda", "auto")
@@ -132,20 +137,41 @@ def cargar_configuracion(ruta=None) -> dict:
     return resultado
 
 
-def guardar_modelo_ia(modelo: str, ruta=None) -> bool:
-    """Cambia `ia.modelo` en el archivo editando solo esa línea, para no perder los comentarios del YAML.
-    Devuelve False si no encuentra la clave."""
-    ruta = RUTA_POR_DEFECTO if ruta is None else ruta
-    lineas = Path(ruta).read_text(encoding="utf-8").splitlines(keepends=True)
-    en_ia = False
-    for i, linea in enumerate(lineas):
-        if linea.strip() and not linea[0].isspace():
-            en_ia = linea.startswith("ia:")
-            continue
-        if en_ia:
-            nueva, cambios = re.subn(r'^(\s+modelo:\s*)("[^"]*"|[^\s#]+)', lambda m: f'{m[1]}"{modelo}"', linea)
-            if cambios:
-                lineas[i] = nueva
-                Path(ruta).write_text("".join(lineas), encoding="utf-8")
-                return True
-    return False
+def _leer_preferencias() -> dict:
+    """Preferencias del usuario. Si el archivo no existe o no es un objeto JSON, devuelve {}."""
+    try:
+        datos = json.loads(RUTA_PREFERENCIAS.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        log.warning("Las preferencias %s no son un JSON válido; se ignoran", RUTA_PREFERENCIAS)
+        return {}
+    if not isinstance(datos, dict):
+        log.warning("Las preferencias %s no son un objeto JSON; se ignoran", RUTA_PREFERENCIAS)
+        return {}
+    return datos
+
+
+def leer_modelo_preferido() -> Optional[str]:
+    """Modelo de IA que el usuario eligió en el selector, o None si no hay ninguno válido."""
+    datos = _leer_preferencias()
+    if "modelo_ia" not in datos:
+        return None
+    modelo = datos["modelo_ia"]
+    if isinstance(modelo, str) and modelo.strip():
+        return modelo
+    log.warning("En %s, «modelo_ia» no es un texto válido; se usa el de settings.yaml", RUTA_PREFERENCIAS)
+    return None
+
+
+def guardar_modelo_preferido(modelo: str) -> None:
+    """Guarda el modelo de IA elegido conservando las demás preferencias. Lanza OSError si no puede escribir."""
+    datos = _leer_preferencias()
+    datos["modelo_ia"] = modelo
+    RUTA_PREFERENCIAS.parent.mkdir(parents=True, exist_ok=True)
+    RUTA_PREFERENCIAS.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def modelo_ia_efectivo(configuracion: dict, preferido: Optional[str]) -> str:
+    """El modelo que usa la ventana: el preferido por el usuario si lo hay; si no, `ia.modelo` del YAML."""
+    return preferido or configuracion["ia"]["modelo"]

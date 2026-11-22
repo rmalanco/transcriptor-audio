@@ -66,7 +66,7 @@ aunque se ejecute desde otra carpeta.
 | Archivo | Responsabilidad |
 |---|---|
 | `transcriber.py` | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones |
-| `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`, `guardar_modelo_ia` |
+| `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`; preferencias del usuario en `preferencias.json` (modelo de IA elegido, `modelo_ia_efectivo`) |
 | `copilot.py` | Integración con GitHub Copilot: login (device flow), token, catálogo de modelos, modo `auto` |
 | `asistente_ia.py` | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, post-proceso de la minuta |
 | `ui.py` | Ventana principal: transcribir, pestañas Texto/Resumen/Minuta, atajos |
@@ -112,10 +112,12 @@ Detalle completo, fuentes y hallazgos en [docs/integracion-copilot.md](docs/inte
 ## Pendientes / decisiones abiertas
 
 - **Modelo por defecto:** `settings.yaml` tiene `modelo: "claude-haiku-5.5"` (el modo `auto` llegó a ofrecer solo
-  modelos `/responses`). La UI tiene un selector que, al arrancar, carga `auto` (si funciona) y los modelos de
-  `copilot.modelos_economicos` (precio de entrada ≤ `PRECIO_MAX_ECONOMICO`); al cambiarlo se reescribe solo la
-  línea `ia.modelo` del YAML (`guardar_modelo_ia`). Para minutas de calidad, fijar `claude-sonnet-5.5` a mano.
-- Al arrancar se abre una sesión `auto` solo para comprobar si funciona; aún no se reutiliza en el `AsistenteIA`.
+  modelos `/responses`). La UI tiene un selector que, al arrancar, solo ofrece `auto` y el modelo configurado, sin
+  conectarse a Copilot; el botón «↻» carga una vez los modelos (`copilot.cargar_opciones_de_modelo`, con
+  `modelos_economicos` y precio de entrada ≤ `PRECIO_MAX_ECONOMICO`). Al cambiarlo se guarda en `preferencias.json`
+  (`guardar_modelo_preferido`), no en el YAML, y esa preferencia gana a `ia.modelo`. Para minutas de calidad, fijar
+  `claude-sonnet-5.5` a mano (y borrar la preferencia guardada, o elegirlo en el selector).
+- Al arrancar y al pulsar «↻» no se abre ninguna sesión `auto`; aún no se reutiliza en el `AsistenteIA`.
 - Posible mejora: soporte de `/responses` para usar los modelos que hoy se saltan en `auto`.
 
 Estos tres pendientes no están en `BACKLOG.md` (decisión del 2026-11-22); se añaden con `/backlog` cuando toque.

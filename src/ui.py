@@ -25,7 +25,8 @@ from src.asistente_ia import (NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
 from src import copilot
 from src.historial import Historial
 from src.registro import configurar_logging
-from src.configuracion import MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_ia
+from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_preferido,
+                               leer_modelo_preferido, modelo_ia_efectivo)
 from src.transcriber import TranscriptorAudio
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
@@ -162,12 +163,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.var_dispositivo = tk.StringVar(value=self.configuracion["modelo"]["dispositivo"])
         self.var_compute = tk.StringVar(value=self.configuracion["modelo"]["compute_type"])
         self.var_timestamps = tk.BooleanVar(value=self.configuracion["salida"]["incluir_timestamps"])
+        self._modelo_preferido = leer_modelo_preferido()  # el que eligió el usuario en el selector, si lo hay
         self.var_modelo_ia = tk.StringVar(value=self._modelo_ia_configurado())
 
         self._construir_ui()
         self._configurar_drag_drop()
         self._configurar_atajos()
-        self._cargar_modelos_ia()
         self.protocol("WM_DELETE_WINDOW", self._al_cerrar)
 
     # ------------------------------------------------------------------ UI
@@ -277,13 +278,15 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.check_timestamps = ctk.CTkSwitch(opciones, text="Incluir marcas de tiempo", variable=self.var_timestamps)
         self.check_timestamps.grid(row=5, column=0, columnspan=2, padx=14, pady=(0, 10), sticky="w")
 
-        # Al arrancar solo se conoce el modelo configurado; la lista se completa al consultar Copilot
+        # Al arrancar no se consulta Copilot: el selector solo ofrece «auto» y el configurado; «↻» carga el resto
         self._etiqueta(opciones, "Modelo de IA (resumen y minuta)", 6, 0, columnspan=2)
         self.combo_modelo_ia = ctk.CTkOptionMenu(
-            opciones, values=[self.var_modelo_ia.get()], variable=self.var_modelo_ia,
-            command=self._al_cambiar_modelo_ia
+            opciones, values=copilot.opciones_de_modelo([copilot.MODELO_AUTO], self.var_modelo_ia.get()),
+            variable=self.var_modelo_ia, command=self._al_cambiar_modelo_ia
         )
-        self.combo_modelo_ia.grid(row=7, column=0, columnspan=2, padx=14, pady=(0, 10), sticky="ew")
+        self.combo_modelo_ia.grid(row=7, column=0, padx=(14, 6), pady=(0, 10), sticky="ew")
+        self.btn_cargar_modelos_ia = ctk.CTkButton(opciones, text="↻", width=36, command=self._cargar_modelos_ia)
+        self.btn_cargar_modelos_ia.grid(row=7, column=1, padx=(6, 14), pady=(0, 10), sticky="e")
 
         # Avanzado (plegable)
         self.btn_avanzado = ctk.CTkButton(
@@ -994,69 +997,74 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._refrescar_historial()
 
     def _modelo_ia_configurado(self) -> str:
-        return self.configuracion["ia"]["modelo"]
+        return modelo_ia_efectivo(self.configuracion, self._modelo_preferido)
 
     def _texto_modelo_ia(self) -> str:
         return f"Modelo: {NOMBRE_PROVEEDOR} · {self._modelo_ia_configurado()}"
 
     def _cargar_modelos_ia(self):
-        """Consulta en segundo plano qué modelos económicos (y si el modo auto) puede usar la cuenta."""
+        """Pulsación de «↻»: consulta una vez el catálogo de Copilot, en segundo plano, y lo muestra en el selector.
+        Sin sesión, abre el inicio de sesión y vuelve a cargar al terminar bien."""
+        self.btn_cargar_modelos_ia.configure(state="disabled")
+        self.label_estado.configure(text="Consultando los modelos de GitHub Copilot…")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
+        actual = self._modelo_ia_configurado()
 
         def consultar():
-            sesion = copilot.leer_token(enterprise_url)
-            if not sesion:
-                self._log("Sin sesión de GitHub Copilot: la lista de modelos de IA se cargará al iniciar sesión")
-                return
             try:
-                modelos = copilot.modelos_economicos(sesion)
-            except copilot.ErrorCopilot as e:
-                self._log(f"No se pudo consultar los modelos de GitHub Copilot: {e}")
+                sesion = copilot.leer_token(enterprise_url)
+                if not sesion:
+                    self._en_ui(self._sin_sesion_para_modelos)
+                    return
+                opciones = copilot.cargar_opciones_de_modelo(sesion, actual)
+            except Exception as e:  # siempre se llega al hilo principal, para que «↻» vuelva a estar habilitado
+                self._en_ui(self._fallo_cargar_modelos_ia, str(e) or type(e).__name__)
                 return
-            try:
-                copilot.abrir_sesion_auto(sesion)
-                modelos.insert(0, copilot.MODELO_AUTO)
-            except copilot.ErrorCopilot as e:
-                self._log(f"Modo auto no disponible: {e}")
-            self._en_ui(self._mostrar_modelos_ia, modelos)
+            self._en_ui(self._mostrar_modelos_ia, opciones)
 
         threading.Thread(target=consultar, daemon=True).start()
 
-    def _mostrar_modelos_ia(self, modelos: list[str]):
-        actual = self._modelo_ia_configurado()
-        # Se respeta el modelo de settings.yaml aunque no esté en la lista de económicos, salvo que sea de una
-        # familia no autorizada: entonces no se ofrece
-        opciones = copilot.opciones_de_modelo(modelos, actual)
-        if actual not in modelos:
-            if actual in opciones:
-                self._log(f"El modelo configurado ({actual}) no está entre los económicos disponibles; se mantiene")
-            else:
-                self._log(f"El modelo configurado ({actual}) es de una familia no autorizada por la empresa; no se ofrece")
+    def _sin_sesion_para_modelos(self):
+        self.btn_cargar_modelos_ia.configure(state="normal")
+        self._log("Sin sesión de GitHub Copilot: se abre el inicio de sesión para cargar los modelos")
+        self._iniciar_sesion_copilot(self._cargar_modelos_ia)
+
+    def _fallo_cargar_modelos_ia(self, mensaje: str):
+        self.btn_cargar_modelos_ia.configure(state="normal")
+        self._log(f"No se pudo consultar los modelos de GitHub Copilot: {mensaje}")
+        self.label_estado.configure(text="No se pudieron cargar los modelos de IA")
+
+    def _mostrar_modelos_ia(self, opciones: list[str]):
         self.combo_modelo_ia.configure(values=opciones)
+        self.btn_cargar_modelos_ia.configure(state="normal")
+        actual = self._modelo_ia_configurado()
+        if copilot.familia_excluida(actual):
+            self._log(f"El modelo configurado ({actual}) es de una familia no autorizada por la empresa; no se ofrece")
         self._log(f"Modelos de IA disponibles: {', '.join(opciones)}")
+        self.label_estado.configure(text="Modelos de IA cargados")
 
     def _al_cambiar_modelo_ia(self, modelo: str):
         if modelo == self._modelo_ia_configurado():
             return
         texto_anterior = self._texto_modelo_ia()
-        self.configuracion["ia"]["modelo"] = modelo
+        self._modelo_preferido = modelo
         self._asistente = None  # se recrea con el modelo nuevo en la próxima generación
         for tab in self.tabs_ia.values():
             if tab["estado"].cget("text") == texto_anterior:
                 tab["estado"].configure(text=self._texto_modelo_ia())
         try:
-            guardado = guardar_modelo_ia(modelo)
+            guardar_modelo_preferido(modelo)
+            guardado = True
         except OSError as e:
-            log.warning("No se pudo guardar el modelo en settings.yaml: %s", e)
+            log.warning("No se pudo guardar la preferencia de modelo: %s", e)
             guardado = False
-        self._log(f"Modelo de IA: {modelo}" + ("" if guardado else " (solo para esta sesión; no se guardó en settings.yaml)"))
+        self._log(f"Modelo de IA: {modelo}" + ("" if guardado else " (solo para esta sesión; no se pudo guardar en preferencias.json)"))
 
     def _iniciar_sesion_copilot(self, al_conectar):
         """Abre el diálogo de inicio de sesión; si termina bien, ejecuta `al_conectar`."""
         def al_terminar(ok: bool):
             if ok:
                 self._log("Sesión de GitHub Copilot iniciada")
-                self._cargar_modelos_ia()
                 al_conectar()
             else:
                 self.label_estado.configure(text="Inicio de sesión en GitHub Copilot cancelado")

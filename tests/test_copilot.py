@@ -432,3 +432,54 @@ def test_sesion_auto_con_catalogo_de_formato_inesperado_sigue_sin_endpoints(monk
     monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(sesion))
     monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: _Respuesta({"data": data}))
     assert copilot.abrir_sesion_auto(copilot.Sesion("gho_x")).modelo == "gpt-5.4"
+
+
+def test_cargar_opciones_hace_una_sola_consulta_y_no_abre_sesion_auto(monkeypatch):
+    gets, posts = [], []
+    datos = {"data": [{"id": "claude-haiku-5.5", "policy": {"state": "enabled"},
+                       "billing": {"token_prices": {"default": {"input_price": 10}}}}]}
+
+    def get(url, headers, timeout):
+        gets.append(url)
+        return _Respuesta(datos)
+
+    monkeypatch.setattr(copilot.httpx, "get", get)
+    monkeypatch.setattr(copilot.httpx, "post", lambda url, **kw: posts.append(url) or _Respuesta({}))
+
+    copilot.cargar_opciones_de_modelo(copilot.Sesion("gho_x"), "claude-haiku-5.5")
+
+    assert len(gets) == 1 and gets[0].endswith("/models")
+    assert posts == []
+
+
+def test_cargar_opciones_incluye_auto_y_el_modelo_actual(monkeypatch):
+    datos = {"data": [
+        {"id": "claude-haiku-5.5", "policy": {"state": "enabled"},
+         "billing": {"token_prices": {"default": {"input_price": 10}}}},
+        {"id": "claude-sonnet-5.5", "policy": {"state": "enabled"},
+         "billing": {"token_prices": {"default": {"input_price": 200}}}},
+    ]}
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
+
+    opciones = copilot.cargar_opciones_de_modelo(copilot.Sesion("gho_x"), "gpt-4.1")
+
+    assert opciones == ["auto", "claude-haiku-5.5", "gpt-4.1"]
+
+
+def test_cargar_opciones_no_incluye_familias_excluidas(monkeypatch):
+    datos = {"data": [
+        {"id": "claude-haiku-5.5", "policy": {"state": "enabled"},
+         "billing": {"token_prices": {"default": {"input_price": 10}}}},
+        {"id": "kimi-k3-mini", "policy": {"state": "enabled"},
+         "billing": {"token_prices": {"default": {"input_price": 5}}}},
+    ]}
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
+
+    opciones = copilot.cargar_opciones_de_modelo(copilot.Sesion("gho_x"), "mistral-medium-3")
+
+    assert opciones == ["auto", "claude-haiku-5.5"]
+
+
+def test_opciones_de_modelo_nunca_incluyen_familias_excluidas_aunque_lleguen_en_la_lista():
+    opciones = copilot.opciones_de_modelo(["auto", "gpt-5.4", "kimi-k3-mini", "Mistral-Large-3"], "claude-haiku-5.5")
+    assert opciones == ["auto", "gpt-5.4", "claude-haiku-5.5"]

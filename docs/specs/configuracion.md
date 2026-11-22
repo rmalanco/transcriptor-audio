@@ -57,3 +57,13 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   recibe el idioma `fr` y `salida.vtt` está en formato VTT.
 
 Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
+
+### Modelo de IA elegido en la ventana
+- Given que se elige un modelo en el selector de la ventana, when se elige, then el modelo se recuerda en
+  `~/.local/share/transcriptor-audio/preferencias.json` con la clave `modelo_ia` y `config/settings.yaml` no cambia.
+- Given una preferencia guardada en `preferencias.json`, when se abre la ventana, then el selector usa ese modelo en vez
+  de `ia.modelo`.
+- Given que `preferencias.json` no existe o no se puede leer, when se abre la ventana, then se usa `ia.modelo`, sin
+  error.
+
+Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)

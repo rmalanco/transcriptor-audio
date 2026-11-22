@@ -43,15 +43,6 @@ def test_transcriptor_inicializacion():
     assert transcriptor.dispositivo == "cpu"
 
 
-def test_guardar_modelo_ia_sin_seccion_ia(tmp_path):
-    from src.configuracion import guardar_modelo_ia
-    ruta = tmp_path / "settings.yaml"
-    ruta.write_text('modelo:\n  nombre: "small"\n', encoding="utf-8")
-    assert not guardar_modelo_ia("gpt-4.1", str(ruta))
-    assert ruta.read_text(encoding="utf-8") == 'modelo:\n  nombre: "small"\n'
-
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

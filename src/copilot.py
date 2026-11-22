@@ -290,8 +290,8 @@ def familia_excluida(id_modelo: str) -> Optional[str]:
 
 def opciones_de_modelo(modelos: list[str], configurado: str) -> list[str]:
     """Opciones del selector de modelo de IA: los modelos ofrecidos y, al final, el configurado si no está en la
-    lista. Un configurado de familia excluida no se añade: no se sugiere ponerlo en `ia.modelo`."""
-    opciones = list(modelos)
+    lista. Nunca se ofrece un modelo de una familia excluida: ni de la lista ni el configurado."""
+    opciones = [m for m in modelos if not familia_excluida(m)]
     if configurado and configurado not in opciones and not familia_excluida(configurado):
         opciones.append(configurado)
     return opciones
@@ -321,6 +321,12 @@ def modelos_economicos(sesion: Sesion) -> list[str]:
             nombres.add(nombre)
             elegidos.append((precio, modelo["id"]))
     return [id_modelo for _, id_modelo in sorted(elegidos)]
+
+
+def cargar_opciones_de_modelo(sesion: Sesion, actual: str) -> list[str]:
+    """Opciones del selector: `auto`, los modelos económicos y el configurado. Hace una sola consulta a /models
+    y no abre ninguna sesión auto."""
+    return opciones_de_modelo([MODELO_AUTO] + modelos_economicos(sesion), actual)
 
 
 # ------------------------------------------------------------------ Modo "auto"

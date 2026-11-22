@@ -164,17 +164,6 @@ def test_claves_desconocidas_se_ignoran_sin_error(tmp_path):
     assert config["transcripcion"]["idioma"] == "es"
 
 
-def test_guardar_modelo_ia_reescribe_solo_la_linea_del_modelo(tmp_path):
-    from src.configuracion import cargar_configuracion, guardar_modelo_ia
-    ruta = tmp_path / "settings.yaml"
-    ruta.write_text('modelo:\n  nombre: "small"\nia:\n  modelo: "auto"   # comentario\n  temperatura: 0.2\n',
-                    encoding="utf-8")
-    assert guardar_modelo_ia("claude-haiku-5.5", str(ruta))
-    assert ruta.read_text(encoding="utf-8") == ('modelo:\n  nombre: "small"\nia:\n'
-                                                '  modelo: "claude-haiku-5.5"   # comentario\n  temperatura: 0.2\n')
-    assert cargar_configuracion(str(ruta))["ia"]["modelo"] == "claude-haiku-5.5"
-
-
 def test_el_yaml_del_proyecto_es_valido_y_no_tiene_claves_muertas():
     config = cargar_configuracion()
     crudo = yaml.safe_load(RUTA_POR_DEFECTO.read_text(encoding="utf-8"))
@@ -228,3 +217,74 @@ def test_tipos_y_valores_de_las_demas_claves_se_comprueban(tmp_path, yaml_texto,
         cargar_configuracion(str(ruta))
 
     assert str(error.value) == f"En la configuración {ruta}, {mensaje}"
+
+
+def test_sin_preferencias_no_hay_modelo_preferido(tmp_path, monkeypatch):
+    from src import configuracion
+
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", tmp_path / "no_existe.json")
+
+    assert configuracion.leer_modelo_preferido() is None
+
+
+def test_guardar_y_leer_el_modelo_preferido(tmp_path, monkeypatch):
+    from src import configuracion
+
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", tmp_path / "preferencias.json")
+
+    configuracion.guardar_modelo_preferido("claude-sonnet-5.5")
+
+    assert configuracion.leer_modelo_preferido() == "claude-sonnet-5.5"
+
+
+@pytest.mark.parametrize("contenido", [
+    "esto no es json",
+    "[]",
+    '{"modelo_ia": 5}',
+    '{"modelo_ia": ""}',
+])
+def test_preferencias_corruptas_no_lanzan(tmp_path, monkeypatch, contenido):
+    from src import configuracion
+
+    ruta = tmp_path / "preferencias.json"
+    ruta.write_text(contenido, encoding="utf-8")
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
+
+    assert configuracion.leer_modelo_preferido() is None
+
+
+def test_guardar_el_modelo_conserva_otras_preferencias(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = tmp_path / "preferencias.json"
+    ruta.write_text(json.dumps({"otra_clave": "valor"}), encoding="utf-8")
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
+
+    configuracion.guardar_modelo_preferido("claude-haiku-5.5")
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"otra_clave": "valor", "modelo_ia": "claude-haiku-5.5"}
+
+
+def test_guardar_el_modelo_crea_la_carpeta(tmp_path, monkeypatch):
+    from src import configuracion
+
+    ruta = tmp_path / "carpeta_nueva" / "preferencias.json"
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
+
+    configuracion.guardar_modelo_preferido("gpt-4.1")
+
+    assert ruta.is_file()
+
+
+def test_el_modelo_preferido_gana_al_del_yaml():
+    from src.configuracion import modelo_ia_efectivo
+
+    assert modelo_ia_efectivo({"ia": {"modelo": "gpt-4.1"}}, "claude-sonnet-5.5") == "claude-sonnet-5.5"
+
+
+def test_sin_preferido_se_usa_el_del_yaml():
+    from src.configuracion import modelo_ia_efectivo
+
+    assert modelo_ia_efectivo({"ia": {"modelo": "gpt-4.1"}}, None) == "gpt-4.1"

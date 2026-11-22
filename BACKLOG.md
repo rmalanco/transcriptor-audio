@@ -21,8 +21,8 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 7. ✅ [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
 8. ✅ [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
 9. ✅ [🟡] En la CLI, validar la combinación de formato y salida antes de transcribir y usar el mismo serializador que la exportación a archivo — hallazgo A-10 — carril S
-10. [🟡] Consultar el catálogo de Copilot una sola vez y bajo demanda, sin abrir una sesión `auto` al arrancar, y documentar ese tráfico y el orden de búsqueda del token — hallazgo A-13 — carril S
-11. [🟡] Guardar el modelo de IA elegido fuera del repo, junto al token, en vez de reescribir `config/settings.yaml` — hallazgo A-19 — carril S
+10. ✅ [🟡] Consultar el catálogo de Copilot una sola vez y bajo demanda, sin abrir una sesión `auto` al arrancar, y documentar ese tráfico y el orden de búsqueda del token — hallazgo A-13 — carril S
+11. ✅ [🟡] Guardar el modelo de IA elegido fuera del repo, junto al token, en vez de reescribir `config/settings.yaml` — hallazgo A-19 — carril S
 12. ✅ [🟡] Eliminar `transcribir_archivo_largo`, `_on_drop`, `duracion_archivo`, `pydantic` y `tqdm`, y tratar los metadatos de `ffprobe` como opcionales — hallazgo A-20 — carril S
 13. ✅ [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
 14. [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S

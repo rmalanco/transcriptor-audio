@@ -75,7 +75,9 @@ Tras transcribir, las pestañas **Resumen** y **Minuta** generan esos documentos
 **GitHub Copilot** (sección `ia:` de `config/settings.yaml`). Se guardan automáticamente junto al audio como
 `<archivo>_resumen.md` y `<archivo>_minuta.md`.
 
-La transcripción se envía a GitHub Copilot; el audio nunca sale de tu equipo.
+La transcripción se envía a GitHub Copilot; el audio nunca sale de tu equipo. Al arrancar, la app no se conecta a
+Copilot ni lee el token: solo lo hace al pulsar «↻» junto al selector de modelo (una consulta al catálogo), al
+iniciar sesión y al generar un resumen o una minuta.
 
 La integración replica la de [opencode](https://opencode.ai): inicio de sesión con el *device flow* de OAuth
 de GitHub y llamadas a la API de Copilot (`api.githubcopilot.com`, compatible con OpenAI). Detalles técnicos,
@@ -83,7 +85,9 @@ hallazgos y fuentes en [docs/integracion-copilot.md](docs/integracion-copilot.md
 
 - **Iniciar sesión:** al pulsar «Generar» por primera vez se abre un diálogo con un código; se introduce en
   github.com/login/device y la sesión se detecta sola. Desde la terminal: `python -m src.main --copilot-login`.
-- **Modelos disponibles** para tu cuenta: `python -m src.main --copilot-modelos`. El elegido va en `ia.modelo`.
+- **Modelos disponibles** para tu cuenta: `python -m src.main --copilot-modelos`. El modelo que eliges en el selector
+  se recuerda en `~/.local/share/transcriptor-audio/preferencias.json`, no en `settings.yaml`; `ia.modelo` es solo el
+  valor por defecto.
   Los modelos "premium" consumen peticiones premium de la licencia; `gpt-4.1` está incluido sin coste extra.
   Cada documento cuenta como una petición del usuario; los pasos internos (partes, reintentos, revisión) se
   marcan como automáticos (`x-initiator: agent`), igual que en opencode.
@@ -91,9 +95,9 @@ hallazgos y fuentes en [docs/integracion-copilot.md](docs/integracion-copilot.md
   descuenta un 10 % de las peticiones premium. La app usa el primero que admite `/chat/completions` (los que
   solo funcionan por `/responses`, como los `*-codex`, se saltan). El modelo usado aparece en la pestaña y se
   guarda en el historial como `auto → <modelo>`. La sesión dura 1 h y se renueva sola.
-- **Token:** se guarda en `~/.local/share/transcriptor-audio/copilot.json` (permisos 600). También se usa la
-  variable `COPILOT_GITHUB_TOKEN` o la sesión de Copilot de opencode si ya existe. Cerrar sesión:
-  `python -m src.main --copilot-logout`.
+- **Token:** se guarda en `~/.local/share/transcriptor-audio/copilot.json` (permisos 600). Orden de búsqueda: variable
+  `COPILOT_GITHUB_TOKEN`, sesión propia de la app (`copilot.json`) y sesión de Copilot de opencode
+  (`~/.local/share/opencode/auth.json`). Cerrar sesión: `python -m src.main --copilot-logout`.
 - **GitHub Enterprise** con dominio propio (`empresa.ghe.com`): indícalo en `ia.copilot_enterprise_url`.
 
 ## Historial

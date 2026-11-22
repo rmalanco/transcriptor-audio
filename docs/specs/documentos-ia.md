@@ -185,3 +185,16 @@ Origen: carril S, 2026-11-22: los 429 y 5xx respetan `Retry-After`, con un tope 
 - Given que se cancela la generación durante una pasada posterior, when la cancelación se produce, then no se entrega ningún documento.
 
 Origen: carril S, 2026-11-22: si falla la pasada de completar secciones o la revisión de fidelidad, el documento se entrega con una nota en vez de perderse (A-11)
+
+### Lista de modelos bajo demanda
+- Given que se abre la ventana, when se abre, then no se conecta a GitHub Copilot ni se lee el token, y el selector ofrece
+  `auto` y el modelo configurado (salvo que sea de una familia no autorizada).
+- Given una sesión de Copilot iniciada, when se pulsa «↻», then se consulta una vez la lista de modelos de Copilot sin
+  abrir una sesión `auto`, el selector muestra `auto`, los modelos económicos y el configurado, y nunca uno de una
+  familia no autorizada.
+- Given que no hay sesión de Copilot, when se pulsa «↻», then se abre el inicio de sesión y, si termina bien, la lista
+  se vuelve a cargar.
+- Given que la consulta de «↻» falla, when termina, then la barra de estado dice «No se pudieron cargar los modelos de
+  IA», el motivo queda en la pestaña Registro y «↻» vuelve a estar habilitado.
+
+Origen: carril S, 2026-11-22: la ventana no consulta Copilot al arrancar y «↻» carga la lista de modelos una sola vez, sin sesión `auto` (A-13)
