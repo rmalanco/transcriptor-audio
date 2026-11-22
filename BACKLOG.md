@@ -16,7 +16,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 2. ✅ [🟡] Declarar `pytest` y las dependencias de desarrollo con versiones fijadas, y cubrir con tests el flujo transcribir → guardar → historial y la CLI — hallazgos A-16, A-29 — carril M
 3. ✅ [🟡] Al cargar otro archivo, invalidar el resultado, las pestañas de IA y el vínculo al historial del anterior, y avisar si la entrada del historial se eliminó mientras se generaba un documento (review de la historia 01) — hallazgo A-02 — carril S
 4. ✅ [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
-5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
+5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — diseño aprobado el 2026-11-22: docs/disenos/05-flujos-fuera-de-la-ventana.md, se implementa con las historias #7, #8, #9, #10, #11, #12 y #13 — carril L
 6. ✅ [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
 7. ✅ [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
 8. ✅ [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
@@ -49,6 +49,13 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 4. Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S
 5. Como usuario, quiero un panel de configuración con todo lo que se puede configurar, para ajustar la app sin editar `config/settings.yaml` a mano. — carril L
 6. Como usuario, quiero iniciar y cerrar la sesión de GitHub Copilot desde el panel de configuración, para activar la IA sin esperar a generar un documento ni usar la terminal. Requires: #5 — carril M
+7. Como quien mantiene el código, quiero que `faster_whisper` se cargue solo al construir un modelo de Whisper, para que abrir la ventana o la CLI sin transcribir no pague la carga de la librería de transcripción. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia A — carril M
+8. Como quien mantiene el código, quiero sacar de la ventana las opciones, el transcriptor y la ruta de la transcripción, para poder probarlos y usarlos sin interfaz gráfica. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia B1 — Requires: #7 — carril M
+9. Como quien mantiene el código, quiero que «transcribir y persistir» viva fuera de la ventana, para que la ventana solo lo llame y pinte el resultado. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia B2 — Requires: #8 — carril M
+10. Como quien mantiene el código, quiero sacar de la ventana el texto, la ruta y la fecha de los documentos, para probarlos sin interfaz gráfica. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia C1 — Requires: #7 — carril M
+11. Como quien mantiene el código, quiero que la generación de fondo viva fuera de la ventana, para que la cancelación y la vista no dependan de Tk. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia C2 — Requires: #10 — carril M
+12. Como quien mantiene el código, quiero que un gestor de documentos lleve la generación vigente y el asistente, para tener un solo sitio que sabe qué generación está activa. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia D1 — Requires: #11 — carril M
+13. Como quien mantiene el código, quiero que el gestor decida y guarde lo que llega de cada generación, para que el único punto de decisión sea un objeto sin interfaz. — Diseño: docs/disenos/05-flujos-fuera-de-la-ventana.md §Historia D2 — Requires: #12 — carril M
 
 ## Pospuesto
 
