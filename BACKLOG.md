@@ -36,12 +36,16 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 22. [🟡] Que la ventana no cambie en silencio por «Auto-detectar» un idioma de `transcripcion.idioma` que Whisper admite pero que no está en su selector (por ejemplo `nl`): hoy el mismo YAML da resultados distintos en la ventana y en la CLI — hallazgo nuevo de la historia 05 — carril S
 23. [🟡] Que la revisión de fidelidad contraste el documento con la transcripción original y no con las notas, para que un dato que se coló al extraer las notas no pase como revisado: revisar por partes no detecta datos inventados y una sola petición supera `max_caracteres_bloque`, así que necesita diseño — hallazgo A-05 (salida «revisar contra el original»), historia 06 — carril L
 24. [🟡] Aceptar la revisión de fidelidad solo si conserva las tareas y los acuerdos del documento, no solo sus secciones, para que una revisión que borra tareas no sustituya a la minuta — hallazgo A-05 (segunda mitad del escenario) — carril S
+25. [🟡] Avisar en el documento cuando Copilot cortó una respuesta (por longitud, por el filtro de contenido o porque el stream terminó sin cierre), también en las notas de una parte, para no dar por completo un documento truncado; antes hay que confirmar con una respuesta real qué `finish_reason` envía Copilot y cuándo — hallazgo A-11 (escenario B, posible), historia 07 — carril S
+26. [🟡] Avisar antes de redactar si las notas de todas las partes superan el límite de entrada del modelo (`max_prompt_tokens`, que sale del catálogo del punto 10), para no pagar las notas y fallar en la redacción; antes hay que confirmar con una respuesta real el límite que devuelve Copilot — hallazgo A-11 (escenario C, posible), historia 07 — carril M
+27. [🟡] Respetar `Retry-After` en los 429 de Copilot en vez de la espera fija de 2, 4 y 8 s — hallazgo A-11 (dirección del arreglo), historia 07 — carril S
+28. [🟡] Entregar el documento ya redactado con una nota de la aplicación, en vez de un error, si falla la pasada de completar secciones o la revisión de fidelidad, para no pagar otra vez la redacción — hallazgo A-11 (relacionado: `_generar` no protege esas dos pasadas), historia 07 — carril S
 
 ## Backlog
 
 1. ✅ Como usuario, quiero cancelar la generación de un resumen o una minuta, para no tener que cerrar la app cuando el modelo tarda. — hallazgo A-04 — carril M
 2. ✅ Como usuario con una cuenta de empresa, quiero que mi transcripción nunca se envíe a un modelo de una familia no autorizada, tampoco en modo `auto` ni con un modelo escrito a mano, para cumplir la política de mi empresa. — hallazgo A-12 — carril M
-3. Como usuario, quiero que la app me avise cuando un documento quedó incompleto y que conserve las partes ya procesadas si una falla, para no pagar de nuevo toda la generación. — hallazgo A-11 (en parte posible) — carril M
+3. ✅ Como usuario, quiero que la app me avise cuando un documento quedó incompleto y que conserve las partes ya procesadas si una falla, para no pagar de nuevo toda la generación. — hallazgo A-11 (en parte posible) — carril M
 4. Como usuario, quiero un botón para cerrar el programa, para salir sin depender del control de la ventana. — carril S
 5. Como usuario, quiero un panel de configuración con todo lo que se puede configurar, para ajustar la app sin editar `config/settings.yaml` a mano. — carril L
 6. Como usuario, quiero iniciar y cerrar la sesión de GitHub Copilot desde el panel de configuración, para activar la IA sin esperar a generar un documento ni usar la terminal. Requires: #5 — carril M

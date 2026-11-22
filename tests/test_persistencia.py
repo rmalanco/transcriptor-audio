@@ -357,3 +357,18 @@ def test_documento_con_nota_de_la_aplicacion_se_guarda_y_exporta_intacto(histori
     assert Path(ruta).read_text(encoding="utf-8") == minuta + "\n"
     assert historial.obtener(id_).titulo == "Revisión del presupuesto"
     assert p.ruta_exportada == ruta and p.motivo_exportacion is None and p.motivo_historial is None
+
+
+def test_documento_incompleto_con_nota_se_guarda_y_exporta(historial, tmp_path):
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    ruta = str(tmp_path / "reunion_minuta.md")
+    minuta = ("# Minuta: Revisión del presupuesto\n\n**Fecha:** 29 de septiembre de 2026\n\n"
+              "## Objetivo\nRevisar el presupuesto trimestral.\n\n"
+              "\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no "
+              "devolvió ni al pedírselas de nuevo: Tareas y pendientes, Próximos pasos. No lo des por completo: vuelve "
+              "a generarlo o complétalo con la transcripción.")
+    p = persistir_documento(historial, id_, "minuta", minuta, "gpt-5.4", ruta)
+    assert historial.obtener(id_).minuta == minuta
+    assert Path(ruta).read_text(encoding="utf-8") == minuta + "\n"
+    assert historial.obtener(id_).titulo == "Revisión del presupuesto"
+    assert p.ruta_exportada == ruta and p.motivo_exportacion is None and p.motivo_historial is None

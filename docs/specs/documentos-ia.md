@@ -115,6 +115,44 @@ Origen: docs/historias/hechas/2026-11-22-04-cancelar-generacion.md
 
 Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
 
+### Aviso de secciones que faltan
+- Given una minuta o un resumen al que le siguen faltando secciones obligatorias tras pedírselas de nuevo a Copilot, when
+  termina la generación, then el documento que se muestra, se guarda en el historial y se exporta termina, tras una
+  línea horizontal, con «> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no
+  devolvió ni al pedírselas de nuevo: <secciones>. No lo des por completo: vuelve a generarlo o complétalo con la
+  transcripción.», donde <secciones> son los títulos que faltan, sin «#» y separados por comas (por ejemplo «Tareas y
+  pendientes, Próximos pasos»). La nota no se envía a Copilot.
+- Given un documento que al final tiene todas sus secciones obligatorias, when termina la generación, then no lleva esa
+  nota.
+
+Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
+
+### Notas de la aplicación juntas
+- Given un documento redactado a partir de notas de varias partes al que además le falta una sección, when termina la
+  generación, then las dos notas van bajo una sola línea horizontal, primero la de secciones que faltan y después la de
+  las partes («> Nota de la aplicación: la transcripción se procesó en N partes…»), separadas por una línea en blanco; el
+  título y la fecha no cambian.
+
+Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
+
+### Fallo de una parte
+- Given una transcripción que se procesa en 8 partes y la parte 7 falla (por ejemplo, Copilot responde 429 en todos sus
+  intentos), when se genera el documento, then no se envía la redacción, la pestaña muestra «No se pudo generar: falló
+  la parte 7 de 8: <motivo>. Se conservan las notas de las N partes que terminaron; al volver a generar solo se pedirán
+  las que faltan.» (el diálogo de error muestra el mismo texto), donde <motivo> es el motivo del fallo. Con una parte
+  conservada la frase dice «Se conserva la nota de la parte que terminó; al volver a generar solo se pedirán las que
+  faltan.»; con ninguna, «No se conserva ninguna nota: al volver a generar se pedirán todas las partes.».
+- Given ese fallo, when se vuelve a generar el mismo documento o el otro (resumen o minuta) con el mismo modelo y sin
+  cerrar la app, then Copilot recibe solo las peticiones de notas de las partes que no terminaron y después la
+  redacción.
+- Given una transcripción de varias partes y un modelo de una familia no autorizada, vacío, o un modo `auto` sin modelo
+  válido, when se pide el documento, then el error es el mismo que con una sola parte (los de «Modelos de familias no
+  autorizadas» y «Modelo sin configurar»), sin mencionar partes ni notas, y no se envía nada.
+- Las notas conservadas viven en memoria y se pierden al cancelar la generación, al cambiar de modelo, tras tener que
+  iniciar sesión de nuevo o al cerrar la app.
+
+Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
+
 ### Revisión de fidelidad contra las notas
 - Given la revisión de fidelidad activada y una transcripción procesada en N partes, when se genera el documento, then
   durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y la nota añade «La

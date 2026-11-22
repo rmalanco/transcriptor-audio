@@ -20,6 +20,7 @@ log = logging.getLogger("transcriptor.ia")
 
 NOMBRE_PROVEEDOR = "GitHub Copilot"
 MODELO_POR_DEFECTO = "gpt-4.1"
+LIMITE_NOTAS_EN_CACHE = 64  # partes; equivale a unas 8 transcripciones de 8 partes
 
 PROMPT_SISTEMA = """Eres un asistente experto en redactar documentos en español a partir de transcripciones \
 automáticas de audio. Las transcripciones pueden contener errores de reconocimiento, muletillas y \
@@ -200,15 +201,43 @@ def normalizar_tabla_tareas(minuta: str) -> str:
     return "\n".join(lineas)
 
 
-def nota_de_notas(partes: int, revisado: bool) -> str:
-    """Bloque que la app añade al final de un documento redactado a partir de notas (2 o más partes).
-    Lo añade la app, no el modelo: ningún prompt lo contiene y el post-proceso no lo toca."""
-    nota = (f"\n---\n\n> Nota de la aplicación: la transcripción se procesó en {partes} partes y este documento se "
+def _cita_de_partes(partes: int, revisado: bool) -> str:
+    cita = (f"> Nota de la aplicación: la transcripción se procesó en {partes} partes y este documento se "
             "redactó a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
             "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
     if revisado:
-        nota += " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción."
-    return nota
+        cita += " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción."
+    return cita
+
+
+def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool) -> str:
+    """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
+    (primero la de secciones que faltan, después la de las partes). Vacío si no hay nada que avisar."""
+    citas = []
+    if faltan:
+        nombres = ", ".join(s.lstrip("# ") for s in faltan)
+        citas.append("> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no "
+                     "devolvió ni al pedírselas de nuevo: " + nombres + ". No lo des por completo: vuelve a generarlo "
+                     "o complétalo con la transcripción.")
+    if partes >= 2:
+        citas.append(_cita_de_partes(partes, revisado))
+    if not citas:
+        return ""
+    return "\n---\n\n" + "\n\n".join(citas)
+
+
+def nota_de_notas(partes: int, revisado: bool) -> str:
+    """Bloque que la app añade al final de un documento redactado a partir de notas (2 o más partes).
+    Lo añade la app, no el modelo: ningún prompt lo contiene y el post-proceso no lo toca."""
+    return notas_de_la_aplicacion([], partes, revisado)
+
+
+def _frase_de_partes_conservadas(n: int) -> str:
+    if n == 0:
+        return "No se conserva ninguna nota: al volver a generar se pedirán todas las partes."
+    if n == 1:
+        return "Se conserva la nota de la parte que terminó; al volver a generar solo se pedirán las que faltan."
+    return f"Se conservan las notas de las {n} partes que terminaron; al volver a generar solo se pedirán las que faltan."
 
 
 def _esperar(segundos: float, cancelar: Optional[threading.Event]) -> None:
@@ -247,7 +276,9 @@ class AsistenteIA:
         self.timeout = timeout
         self.revision_fidelidad = revision_fidelidad
         self.peticiones_paralelas = max(1, peticiones_paralelas)
+        # Notas por parte (clave de `_clave_nota` → notas); el cerrojo las protege: las partes van en paralelo
         self._cache_notas: dict[str, str] = {}
+        self._cerrojo_cache = threading.Lock()
         # Solo la primera petición de cada documento la inicia el usuario; las demás (partes,
         # reintentos, revisión) son pasos automáticos ("agent"), como hace opencode
         self._pendiente_iniciador_usuario = True
@@ -279,13 +310,11 @@ class AsistenteIA:
             self._pendiente_iniciador_usuario = False
         return copilot.cabeceras(self.api_key, iniciador)
 
-    def _modelo_y_cabeceras(self) -> tuple[str, dict]:
-        cabeceras = self._cabeceras()
-        if self.es_auto:
-            sesion_auto = self._resolver_auto()
-            modelo, cabeceras = sesion_auto.modelo, cabeceras | {"Copilot-Session-Token": sesion_auto.session_token}
-        else:
-            modelo = self.modelo
+    def _modelo_para_peticion(self) -> tuple[str, Optional[copilot.SesionAuto]]:
+        """Resuelve y valida el modelo de la próxima petición. En modo auto abre (o reutiliza) la sesión.
+        Sus errores salen tal cual: no se ha enviado nada todavía."""
+        sesion_auto = self._resolver_auto() if self.es_auto else None
+        modelo = sesion_auto.modelo if sesion_auto else self.modelo
         if not isinstance(modelo, str) or not modelo.strip():
             raise ErrorAsistenteIA("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
                                    "`ia.modelo` de config/settings.yaml.")
@@ -293,6 +322,13 @@ class AsistenteIA:
         if familia:  # antes de enviar nada: ni la transcripción ni ninguna parte sale hacia ese modelo
             raise ErrorAsistenteIA(f"El modelo «{modelo}» es de la familia «{familia}», que no está autorizada por la "
                                    "empresa. Elige otro modelo en el selector o en `ia.modelo` de config/settings.yaml.")
+        return modelo, sesion_auto
+
+    def _modelo_y_cabeceras(self) -> tuple[str, dict]:
+        cabeceras = self._cabeceras()
+        modelo, sesion_auto = self._modelo_para_peticion()
+        if sesion_auto:
+            cabeceras = cabeceras | {"Copilot-Session-Token": sesion_auto.session_token}
         return modelo, cabeceras
 
     def _completar(self, prompt, cancelar: Optional[threading.Event] = None) -> str:
@@ -415,44 +451,77 @@ class AsistenteIA:
                 uso = opcion.get("usage") or uso
         return partes, fin, uso
 
+    def _clave_nota(self, n: int, total: int, bloque: str) -> str:
+        """Identifica las notas de una parte: el modelo, su posición y el total (el prompt los nombra) y su texto."""
+        return hashlib.sha256("\x00".join([str(self.modelo), str(n), str(total), bloque]).encode()).hexdigest()
+
     def _notas_por_bloque(self, bloques: list[str], on_progreso, cancelar) -> str:
-        """Extrae notas de cada bloque en paralelo. Se guardan en memoria: el resumen y la minuta de una
-        misma transcripción parten de las mismas notas, así que la segunda no repite este paso."""
-        clave = hashlib.sha256("\x00".join(bloques).encode()).hexdigest()
-        if clave in self._cache_notas:
-            log.info("Reutilizando las notas de %d partes ya analizadas", len(bloques))
-            return self._cache_notas[clave]
-
+        """Extrae las notas de cada parte en paralelo. Cada parte guarda sus notas en cuanto termina: si una falla,
+        las que terminaron se conservan y, al volver a generar, solo se piden las que faltan."""
         total = len(bloques)
-        listas = 0
-        cerrojo = threading.Lock()
-        if on_progreso:
-            on_progreso(f"Analizando {total} partes en paralelo…")
+        claves = [self._clave_nota(n, total, b) for n, b in enumerate(bloques, 1)]
+        notas: dict[int, str] = {}
+        with self._cerrojo_cache:
+            for n, clave in enumerate(claves, 1):
+                if clave in self._cache_notas:
+                    notas[n] = self._cache_notas[clave]
+        pendientes = [n for n in range(1, total + 1) if n not in notas]
+        if not pendientes:
+            log.info("Reutilizando las notas de %d partes ya analizadas", total)
+        elif notas:
+            log.info("Reutilizando las notas de %d de %d partes", len(notas), total)
+        if pendientes and on_progreso:
+            on_progreso(f"Analizando {len(pendientes)} partes en paralelo…")
 
-        def analizar(i: int, bloque: str) -> str:
-            nonlocal listas
-            notas = self._completar(PROMPT_NOTAS_BLOQUE.format(n=i, total=total, texto=bloque), cancelar)
-            with cerrojo:
-                listas += 1
-                if on_progreso:
-                    on_progreso(f"Analizadas {listas} de {total} partes…")
-            return notas
+        if pendientes:  # el modelo se valida una vez, antes de lanzar ninguna parte: sus errores no llevan partes
+            if cancelar and cancelar.is_set():
+                raise InterruptedError  # una generación cancelada no abre una sesión auto
+            self._modelo_para_peticion()
 
-        hilos = min(self.peticiones_paralelas, total)
-        with ThreadPoolExecutor(max_workers=hilos, thread_name_prefix="ia-parte") as ejecutor:
-            futuros = [ejecutor.submit(analizar, i, b) for i, b in enumerate(bloques, 1)]
+        abortar = threading.Event()  # si una parte falla, las que aún no empezaron no se envían
+        claves_en_curso = set(claves)
+
+        def analizar(n: int) -> None:
+            if abortar.is_set():
+                return
             try:
-                notas = [f.result() for f in futuros]
+                texto = self._completar(PROMPT_NOTAS_BLOQUE.format(n=n, total=total, texto=bloques[n - 1]), cancelar)
             except BaseException:
-                for f in futuros:
-                    f.cancel()  # las partes que aún no empezaron ya no se envían
+                abortar.set()
                 raise
+            with self._cerrojo_cache:
+                # Al menos una generación entera cabe en la caché, y nunca se expulsan notas de la generación en curso
+                limite = max(LIMITE_NOTAS_EN_CACHE, total)
+                while len(self._cache_notas) >= limite:
+                    expulsable = next((k for k in self._cache_notas if k not in claves_en_curso), None)
+                    if expulsable is None:
+                        break
+                    del self._cache_notas[expulsable]
+                self._cache_notas[claves[n - 1]] = texto
+                notas[n] = texto
+                if on_progreso:
+                    on_progreso(f"Analizadas {len(notas)} de {total} partes…")
 
-        resultado = "\n\n".join(f"Notas de la parte {i}:\n{n}" for i, n in enumerate(notas, 1))
-        if len(self._cache_notas) >= 8:  # solo interesan las transcripciones recientes
-            self._cache_notas.pop(next(iter(self._cache_notas)))
-        self._cache_notas[clave] = resultado
-        return resultado
+        fallo = None
+        if pendientes:
+            with ThreadPoolExecutor(max_workers=min(self.peticiones_paralelas, len(pendientes)),
+                                    thread_name_prefix="ia-parte") as ejecutor:
+                futuros = {n: ejecutor.submit(analizar, n) for n in pendientes}
+                for n in pendientes:
+                    try:
+                        futuros[n].result()
+                    except BaseException as e:
+                        for f in futuros.values():
+                            f.cancel()  # las partes que aún no empezaron ya no se envían
+                        if isinstance(e, ErrorAsistenteIA) and not isinstance(e, ErrorSinSesionCopilot):
+                            fallo = (n, e)
+                            break
+                        raise
+        if fallo:  # el bloque anterior ya ha esperado a las partes en curso: todas las que terminaron están contadas
+            n, e = fallo
+            raise ErrorAsistenteIA(f"falló la parte {n} de {total}: {str(e).rstrip('.')}. "
+                                   f"{_frase_de_partes_conservadas(len(notas))}") from e
+        return "\n\n".join(f"Notas de la parte {n}:\n{notas[n]}" for n in range(1, total + 1))
 
     def _generar(
         self,
@@ -461,8 +530,10 @@ class AsistenteIA:
         on_progreso: Optional[Callable[[str], None]] = None,
         cancelar: Optional[threading.Event] = None,
         secciones: Optional[list[str]] = None,
-    ) -> tuple[str, int]:
-        """Devuelve el documento y el número de partes en que se dividió la transcripción."""
+        postproceso: Optional[Callable[[str], str]] = None,
+    ) -> tuple[str, int, list[str]]:
+        """Devuelve el documento (ya post-procesado), el número de partes en que se dividió la transcripción y las
+        secciones obligatorias que siguen faltando en ese documento final."""
         texto = texto.strip()
         if not texto:
             raise ErrorAsistenteIA("La transcripción está vacía")
@@ -505,24 +576,28 @@ class AsistenteIA:
             # Solo se acepta si conserva todas las secciones que tenía
             if len(secciones_faltantes(revisado, secciones or [])) <= len(secciones_faltantes(documento, secciones or [])):
                 documento = revisado
-        return documento, len(bloques)
+        if postproceso:
+            documento = postproceso(documento)
+        return documento, len(bloques), secciones_faltantes(documento, secciones or [])
 
-    def _con_nota(self, documento: str, partes: int) -> str:
-        """Con 2 o más partes, añade al final la nota de la aplicación. Va después de todas las pasadas del modelo
-        y del post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
-        if partes < 2:
-            return documento
-        return documento.rstrip() + "\n" + nota_de_notas(partes, self.revision_fidelidad)
+    def _con_nota(self, documento: str, partes: int, faltan: list[str]) -> str:
+        """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del
+        post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
+        nota = notas_de_la_aplicacion(faltan, partes, self.revision_fidelidad)
+        return documento.rstrip() + "\n" + nota if nota else documento
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:
-        documento, partes = self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN)
-        return self._con_nota(documento, partes)
+        documento, partes, faltan = self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN)
+        return self._con_nota(documento, partes, faltan)
 
     def generar_minuta(self, texto: str, on_progreso=None, cancelar=None, fecha: Optional[str] = None) -> str:
         # La fecha la aporta la app (el modelo tiende a confundirla con fechas límite de tareas)
         plantilla = PROMPT_MINUTA.replace("{fecha}", fecha or "No especificada")
-        minuta, partes = self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA)
-        minuta = normalizar_tabla_tareas(minuta)
-        minuta = re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
-        return self._con_nota(minuta, partes)
+
+        def postproceso(minuta: str) -> str:
+            minuta = normalizar_tabla_tareas(minuta)
+            return re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
+
+        minuta, partes, faltan = self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA, postproceso)
+        return self._con_nota(minuta, partes, faltan)
 

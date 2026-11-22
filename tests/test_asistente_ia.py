@@ -642,3 +642,370 @@ def test_sin_revision_la_nota_no_menciona_la_revision(monkeypatch):
     minuta = asistente.generar_minuta(texto)
     assert "> Nota de la aplicación: la transcripción se procesó en 2 partes" in minuta
     assert "La revisión de fidelidad" not in minuta
+
+
+def test_notas_de_la_aplicacion_sin_nada_que_avisar_es_vacio():
+    from src.asistente_ia import notas_de_la_aplicacion
+    assert notas_de_la_aplicacion([], 1, True) == ""
+
+
+def test_nota_de_secciones_que_faltan_las_nombra():
+    from src.asistente_ia import notas_de_la_aplicacion
+    assert notas_de_la_aplicacion(["## Tareas y pendientes", "## Próximos pasos"], 1, False) == (
+        "\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no devolvió "
+        "ni al pedírselas de nuevo: Tareas y pendientes, Próximos pasos. No lo des por completo: vuelve a generarlo "
+        "o complétalo con la transcripción.")
+
+
+def test_dos_notas_van_bajo_una_sola_linea_horizontal():
+    from src.asistente_ia import notas_de_la_aplicacion
+    bloque = notas_de_la_aplicacion(["## Tareas y pendientes"], 2, False)
+    assert [linea for linea in bloque.splitlines() if linea.strip() == "---"] == ["---"]
+    seccion, partes = bloque.split("\n\n> Nota de la aplicación: la transcripción")
+    assert seccion.startswith("\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias")
+    assert seccion.endswith("Tareas y pendientes. No lo des por completo: vuelve a generarlo o complétalo con la "
+                            "transcripción.")
+    assert partes.startswith(" se procesó en 2 partes y este documento se redactó a partir de notas")
+    assert partes.endswith("Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+
+
+def test_minuta_a_la_que_le_falta_una_seccion_tras_el_reintento_lleva_la_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: sin_tareas)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.", fecha="29 de septiembre de 2026")
+    assert len(cuerpos) == 2  # la redacción y el reintento; ninguna nota en los cuerpos
+    assert minuta.startswith("# Minuta: Revisión del presupuesto\n")
+    assert "**Fecha:** 29 de septiembre de 2026" in minuta
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias que "
+                           "Copilot no devolvió ni al pedírselas de nuevo: Tareas y pendientes. No lo des por completo: "
+                           "vuelve a generarlo o complétalo con la transcripción.")
+
+
+def test_la_nota_de_secciones_no_se_envia_a_copilot(monkeypatch):
+    import json
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: sin_tareas)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert "Nota de la aplicación" in minuta
+    assert len(cuerpos) == 3  # redacción, reintento y revisión: todas las pasadas del modelo
+    assert not any("Nota de la aplicación" in json.dumps(cuerpo, ensure_ascii=False) for cuerpo in cuerpos)
+
+
+def test_documento_completo_tras_el_reintento_no_lleva_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    respuestas = iter([sin_tareas, MINUTA_MODELO])  # la redacción omite la sección y el reintento la trae
+    _simular_chat(monkeypatch, lambda cuerpo: next(respuestas))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert "Nota de la aplicación" not in minuta
+    assert minuta.endswith("- Próxima reunión, si se menciona.")
+
+
+def test_resumen_al_que_le_falta_una_seccion_tambien_lleva_la_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_conclusiones = RESUMEN_MODELO.split("### Conclusiones")[0].rstrip()
+    _simular_chat(monkeypatch, lambda cuerpo: sin_conclusiones)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    resumen = asistente.generar_resumen("Texto corto de la reunión.")
+    assert resumen.startswith("## Resumen\nSe revisó el presupuesto trimestral.")
+    assert resumen.endswith("\n\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias que "
+                            "Copilot no devolvió ni al pedírselas de nuevo: Conclusiones. No lo des por completo: "
+                            "vuelve a generarlo o complétalo con la transcripción.")
+
+
+def test_minuta_de_varias_partes_y_seccion_que_falta_lleva_las_dos_notas(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else sin_tareas)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto)
+    assert minuta.endswith(
+        "\n\n---\n\n> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no devolvió "
+        "ni al pedírselas de nuevo: Tareas y pendientes. No lo des por completo: vuelve a generarlo o complétalo con la "
+        "transcripción.\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó "
+        "a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, cifras "
+        "y condiciones con la transcripción antes de darlo por bueno.")
+    assert minuta.count("\n---\n") == 1
+
+
+class _ErrorHTTP(_Stream):
+    """Respuesta de error de Copilot con un cuerpo de texto."""
+    def __init__(self, status_code, texto):
+        super().__init__(status_code)
+        self.text = texto
+
+
+def _simular_chat_con_estados(monkeypatch, respuesta):
+    """Como `_simular_chat`, pero `respuesta(cuerpo)` puede devolver un código HTTP de error en vez de texto."""
+    cuerpos = []
+    def stream(metodo, url, json, headers, timeout):
+        cuerpos.append(json)
+        valor = respuesta(json)
+        return _ErrorHTTP(valor, "límite de peticiones") if isinstance(valor, int) else _StreamConTexto(valor)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    return cuerpos
+
+
+def _numero_de_parte(cuerpo):
+    import re
+    coincidencia = re.search(r"Esta es la parte (\d+) de", cuerpo["messages"][-1]["content"])
+    return int(coincidencia.group(1)) if coincidencia else None
+
+
+TEXTO_OCHO_PARTES = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(360))
+
+
+def test_fallo_de_una_parte_dice_cual_y_cuantas_se_conservan(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)  # sin esperas entre reintentos
+    assert len(dividir_texto(TEXTO_OCHO_PARTES, 1800)) == 8
+    cuerpos = _simular_chat_con_estados(monkeypatch, lambda c: 429 if _numero_de_parte(c) == 7
+                                        else "- Nota" if _numero_de_parte(c) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    mensaje = str(error.value)
+    assert mensaje.startswith("falló la parte 7 de 8: GitHub Copilot respondió 429: límite de peticiones. ")
+    assert "Se conservan las notas de las 6 partes que terminaron; al volver a generar solo se pedirán las que faltan." \
+        in mensaje
+    assert not any("Redacta la minuta" in c["messages"][-1]["content"] for c in cuerpos)  # no hay redacción
+
+
+def test_reintentar_tras_el_fallo_solo_pide_las_partes_que_faltan(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    caida = {"activa": True}
+    def respuesta(cuerpo):
+        parte = _numero_de_parte(cuerpo)
+        if parte == 7 and caida["activa"]:
+            return 429
+        return f"- Nota de la parte {parte}" if parte else MINUTA_MODELO
+    cuerpos = _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    bloques = dividir_texto(TEXTO_OCHO_PARTES, 1800)
+    with pytest.raises(ErrorAsistenteIA):
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    caida["activa"] = False
+    cuerpos.clear()
+    minuta = asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert len(cuerpos) == 3  # notas de la parte 7, notas de la parte 8 y la redacción
+    assert [_numero_de_parte(c) for c in cuerpos[:2]] == [7, 8]
+    assert _numero_de_parte(cuerpos[2]) is None
+    assert not any(bloque in c["messages"][-1]["content"] for c in cuerpos for bloque in bloques[:6])
+    redaccion = cuerpos[2]["messages"][-1]["content"]
+    posiciones = [redaccion.index(f"Notas de la parte {n}:") for n in range(1, 9)]
+    assert posiciones == sorted(posiciones)
+    assert "- Nota de la parte 7" in redaccion and minuta.startswith("# Minuta")
+
+
+def test_las_notas_conservadas_sirven_tambien_para_el_otro_documento(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    caida = {"activa": True}
+    def respuesta(cuerpo):
+        parte = _numero_de_parte(cuerpo)
+        if parte == 7 and caida["activa"]:
+            return 429
+        if parte:
+            return f"- Nota de la parte {parte}"
+        return RESUMEN_MODELO if "Redacta un resumen" in cuerpo["messages"][-1]["content"] else MINUTA_MODELO
+    cuerpos = _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA):
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    caida["activa"] = False
+    cuerpos.clear()
+    resumen = asistente.generar_resumen(TEXTO_OCHO_PARTES)
+    assert [_numero_de_parte(c) for c in cuerpos[:2]] == [7, 8]  # solo las partes que faltaban
+    assert len(cuerpos) == 3 and "Redacta un resumen" in cuerpos[2]["messages"][-1]["content"]
+    assert resumen.startswith("## Resumen")
+
+
+def test_cancelar_durante_las_notas_no_se_convierte_en_fallo_de_parte(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout: peticiones.append(url)
+                        or _StreamQueCancelaAlTerminar(cancelar, "- Nota de una parte"))
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(InterruptedError):  # no ErrorAsistenteIA: la cancelación no es un fallo de parte
+        asistente.generar_minuta(TEXTO_OCHO_PARTES, cancelar=cancelar)
+    assert len(peticiones) == 1
+
+
+def test_modelo_excluido_con_varias_partes_da_su_error_exacto_sin_hablar_de_partes(monkeypatch):
+    enviados = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="kimi-k3-mini", max_caracteres_bloque=300, revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1  # la transcripción se procesaría en varias partes
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_LARGO)
+    assert enviados == []
+    assert str(error.value) == ("El modelo «kimi-k3-mini» es de la familia «kimi», que no está autorizada por la empresa. "
+                                "Elige otro modelo en el selector o en `ia.modelo` de config/settings.yaml.")
+
+
+@pytest.mark.parametrize("modelo", [None, ""])
+def test_modelo_vacio_con_varias_partes_da_su_error_exacto(monkeypatch, modelo):
+    enviados = []
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo=modelo, max_caracteres_bloque=300, revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_resumen(TEXTO_LARGO)
+    assert enviados == []
+    assert str(error.value) == ("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
+                                "`ia.modelo` de config/settings.yaml.")
+
+
+def test_auto_sin_modelo_autorizado_con_varias_partes_no_habla_de_partes(monkeypatch):
+    sesion = {"available_models": ["mistral-medium-3", "gpt-5.3-codex"], "selected_model": "mistral-medium-3",
+              "session_token": "st", "expires_at": 9999999999}
+    _simular_auto(monkeypatch, [sesion, sesion],
+                  {"mistral-medium-3": ["/chat/completions"], "gpt-5.3-codex": ["/responses"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    with pytest.raises(ErrorAsistenteIA) as una_parte:
+        AsistenteIA(api_key="gho_x", modelo="auto", revision_fidelidad=False).generar_resumen("hola")
+    with pytest.raises(ErrorAsistenteIA) as varias_partes:
+        AsistenteIA(api_key="gho_x", modelo="auto", max_caracteres_bloque=300,
+                    revision_fidelidad=False).generar_resumen(TEXTO_LARGO)
+    assert enviados == []
+    assert type(varias_partes.value) is type(una_parte.value)
+    assert str(varias_partes.value) == str(una_parte.value)
+    assert "falló la parte" not in str(varias_partes.value) and "notas" not in str(varias_partes.value)
+
+
+def test_con_mas_partes_que_el_limite_de_la_cache_se_conservan_todas_las_que_terminaron(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    monkeypatch.setattr(asistente_ia, "LIMITE_NOTAS_EN_CACHE", 4)  # menos que las 8 partes de la generación
+    caida = {"activa": True}
+    def respuesta(cuerpo):
+        parte = _numero_de_parte(cuerpo)
+        if parte == 7 and caida["activa"]:
+            return 429
+        return f"- Nota de la parte {parte}" if parte else MINUTA_MODELO
+    cuerpos = _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert "Se conservan las notas de las 6 partes que terminaron" in str(error.value)
+    caida["activa"] = False
+    cuerpos.clear()
+    asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert [_numero_de_parte(c) for c in cuerpos] == [7, 8, None]  # las 6 conservadas no se vuelven a pedir
+
+
+def test_fallo_con_tres_partes_en_paralelo_conserva_las_que_estaban_en_curso(monkeypatch):
+    import threading
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    fase = {"paralela": False, "caida": True}
+    llegadas = threading.Barrier(2)  # en la segunda generación, las partes 7 y 8 están dentro de su petición a la vez
+    fallo_de_la_7 = threading.Event()  # la 7 ha agotado sus reintentos: la 8 puede terminar
+    intentos_7, primeras_entradas, cerrojo, enviadas = [0], set(), threading.Lock(), []
+
+    def stream(metodo, url, json, headers, timeout):
+        parte = _numero_de_parte(json)
+        with cerrojo:
+            enviadas.append(parte)
+            primera_vez = parte not in primeras_entradas
+            primeras_entradas.add(parte)
+        if fase["paralela"] and parte in (7, 8) and primera_vez:
+            llegadas.wait(timeout=5)
+        if parte == 7 and fase["caida"]:
+            with cerrojo:
+                intentos_7[0] += 1
+                if intentos_7[0] == 4:
+                    fallo_de_la_7.set()
+            return _ErrorHTTP(429, "límite de peticiones")
+        if parte == 8 and fase["paralela"]:
+            fallo_de_la_7.wait(timeout=5)
+        return _StreamConTexto(f"- Nota de la parte {parte}" if parte else MINUTA_MODELO)
+
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA):  # primera generación, una parte a la vez: 1 a 6 terminan, la 7 falla
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert 8 not in enviadas  # con un solo hilo, la 8 queda sin empezar y no se envía
+
+    fase["paralela"] = True  # segunda generación, tres hilos: solo quedan pendientes la 7 y la 8
+    fallo_de_la_7.clear()
+    intentos_7[0] = 0
+    primeras_entradas.clear()
+    asistente.peticiones_paralelas = 3
+    enviadas.clear()
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert str(error.value) == ("falló la parte 7 de 8: GitHub Copilot respondió 429: límite de peticiones. "
+                                "Se conservan las notas de las 7 partes que terminaron; al volver a generar solo se "
+                                "pedirán las que faltan.")  # 1 a 6 de antes, más la 8, que estaba en curso
+    assert set(enviadas) == {7, 8}  # la 7 reintenta cuatro veces; la 8 se envía una
+    assert not [t for t in threading.enumerate() if t.name.startswith("ia-parte")]  # no quedan hilos vivos
+
+    fase["caida"], fase["paralela"] = False, False  # tercera generación: el recuento coincide con la caché
+    enviadas.clear()
+    minuta = asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert enviadas == [7, None]  # solo la parte 7 y la redacción: las 1 a 6 y la 8 estaban en la caché
+    assert minuta.startswith("# Minuta")
+
+
+def test_401_en_una_parte_no_se_envuelve(monkeypatch):
+    from src.asistente_ia import ErrorSinSesionCopilot
+    _prohibir_red(monkeypatch)
+    _simular_chat_con_estados(monkeypatch, lambda c: 401 if _numero_de_parte(c) == 2 else
+                              (f"- Nota de la parte {_numero_de_parte(c)}" if _numero_de_parte(c) else MINUTA_MODELO))
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorSinSesionCopilot) as error:
+        asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert type(error.value) is ErrorSinSesionCopilot
+    assert "falló la parte" not in str(error.value)
+
+
+def test_una_sola_parte_conservada_usa_el_singular(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    _simular_chat_con_estados(monkeypatch, lambda c: 429 if _numero_de_parte(c) == 2 else "- Nota de la parte 1")
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(texto)
+    assert str(error.value).endswith(". Se conserva la nota de la parte que terminó; al volver a generar solo se "
+                                     "pedirán las que faltan.")
+
+
+def test_ninguna_parte_conservada_lo_dice(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    _simular_chat_con_estados(monkeypatch, lambda c: 429)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, peticiones_paralelas=1, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(texto)
+    assert str(error.value).endswith(". No se conserva ninguna nota: al volver a generar se pedirán todas las partes.")
+
+
+def test_revision_que_restituye_la_seccion_no_lleva_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    respuestas = iter([sin_tareas, sin_tareas, MINUTA_MODELO])  # redacción y reintento sin la sección; la revisión la trae
+    _simular_chat(monkeypatch, lambda cuerpo: next(respuestas))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert "Tareas y pendientes" in minuta
+    assert "Nota de la aplicación" not in minuta
