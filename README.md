@@ -73,7 +73,7 @@ python -m src.main --listar-modelos
 
 Tras transcribir, las pestañas **Resumen** y **Minuta** generan esos documentos con los modelos de
 **GitHub Copilot** (sección `ia:` de `config/settings.yaml`). Se guardan automáticamente junto al audio como
-`<archivo>_resumen.md` y `<archivo>_minuta.md`.
+`<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (por ejemplo `reunion.m4a_minuta.md`).
 
 La transcripción se envía a GitHub Copilot; el audio nunca sale de tu equipo. Al arrancar, la app no se conecta a
 Copilot ni lee el token: solo lo hace al pulsar «↻» junto al selector de modelo (una consulta al catálogo), al
@@ -163,7 +163,7 @@ Nada de lo siguiente se sube al repositorio. El historial y los archivos exporta
 |---|---|
 | Historial (transcripciones, resúmenes, minutas) | `data/historial.db` (en `.gitignore`) |
 | Transcripciones exportadas | junto al archivo de audio (`.txt`, `.srt`, `.vtt`, `.json`; en `.gitignore`) |
-| Resumen y minuta exportados | junto al archivo de audio (`*_resumen.md`, `*_minuta.md`; en `.gitignore`) |
+| Resumen y minuta exportados | junto al archivo de audio (`<archivo>.<ext>_resumen.md`, `<archivo>.<ext>_minuta.md`; en `.gitignore`) |
 | Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (permisos 600, fuera del repo) |
 | Modelos de Whisper | `~/.cache/faster-whisper` (fuera del repo) |
 

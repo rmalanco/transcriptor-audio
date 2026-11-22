@@ -171,6 +171,13 @@ def serializar_transcripcion(resultado, formato: str, incluir_timestamps: bool =
     raise ValueError(f"Formato no soportado: {formato}")
 
 
+def ruta_junto_al_audio(audio: str, sufijo: str) -> str:
+    """Ruta de un documento que la app escribe junto al audio. Conserva la extensión del original (`reunion.m4a` ->
+    `reunion.m4a_minuta.md`) para que `reunion.m4a` y `reunion.mp4` no compartan documentos."""
+    ruta = Path(audio)
+    return str(ruta.parent / (ruta.name + sufijo))
+
+
 def guardar_transcripcion(
     resultado,
     ruta_salida: str,

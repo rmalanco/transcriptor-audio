@@ -90,3 +90,18 @@ def test_serializar_y_guardar_escriben_lo_mismo(formato, tmp_path):
     utils.guardar_transcripcion(resultado, str(ruta), formato=formato, incluir_timestamps=True)
 
     assert ruta.read_text(encoding="utf-8") == serializar_transcripcion(resultado, formato, True)
+
+
+def test_ruta_junto_al_audio_conserva_la_extension_del_original(tmp_path):
+    audio = str(tmp_path / "reunion.m4a")
+
+    assert utils.ruta_junto_al_audio(audio, "_transcripcion.txt") == str(tmp_path / "reunion.m4a_transcripcion.txt")
+    assert utils.ruta_junto_al_audio(audio, "_resumen.md") == str(tmp_path / "reunion.m4a_resumen.md")
+    assert utils.ruta_junto_al_audio(audio, "_minuta.md") == str(tmp_path / "reunion.m4a_minuta.md")
+
+
+def test_dos_audios_con_el_mismo_nombre_no_comparten_documentos(tmp_path):
+    m4a, mp4 = str(tmp_path / "reunion.m4a"), str(tmp_path / "reunion.mp4")
+
+    for sufijo in ("_transcripcion.txt", "_resumen.md", "_minuta.md"):
+        assert utils.ruta_junto_al_audio(m4a, sufijo) != utils.ruta_junto_al_audio(mp4, sufijo)

@@ -8,11 +8,11 @@
 - **Solo GitHub Copilot como IA.** En la auditoría del 2026-11-22 un revisor propuso admitir otros proveedores o un
   modelo local para mitigar la dependencia de una API no documentada (A-14). Se rechazó: el riesgo se acepta y la
   regla se mantiene. No lo vuelvas a proponer.
-- **La exclusión de las familias `kimi` y `mistral` es un requisito real de la empresa del usuario** (A-12), no una
-  preferencia. No propongas quitarla ni moverla a una opción que el usuario pueda desactivar. Ya se aplica también
-  en modo `auto` y con un modelo escrito a mano (`copilot.familia_excluida`, historia 03). Sigue abierta una decisión
-  del usuario: si cubre también a Codestral, Devstral y otros de Mistral AI sin «mistral» en el nombre (`BACKLOG.md`,
-  Salud del código #21).
+- **La exclusión de las familias de `FAMILIAS_EXCLUIDAS` es un requisito real de la empresa del usuario** (A-12), no una
+  preferencia: `kimi` y todas las de Mistral AI (`mistral`, `codestral`, `devstral`, `ministral`, `pixtral`, `magistral`).
+  No propongas quitarla ni moverla a una opción que el usuario pueda desactivar. Ya se aplica también en modo `auto` y
+  con un modelo escrito a mano (`copilot.familia_excluida`, historia 03). La lista la decidió el usuario el 2026-11-22
+  (`BACKLOG.md`, Salud del código #21).
 - **Los contratos se llaman `EGM.md`**, no `README.md`, para no tocar el README escrito a mano.
 - **`docs/` se versiona.** La regla que lo ignoraba se quitó del `.gitignore` el 2026-11-22.
 

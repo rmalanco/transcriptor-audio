@@ -279,7 +279,9 @@ def listar_modelos(sesion: Sesion) -> list[dict]:
 # Precio de entrada (tarifa normal, unidades de Copilot por 1M tokens) a partir del cual un modelo ya no se ofrece
 # en la UI. Referencia: gpt-4.1 = 0, claude-haiku-5.5 = 10, gemini-3.8-flash = 75, claude-sonnet-5.5 = 200.
 PRECIO_MAX_ECONOMICO = 50
-FAMILIAS_EXCLUIDAS = ("kimi", "mistral")  # no autorizadas por la empresa aunque Copilot las ofrezca
+# No autorizadas por la empresa aunque Copilot las ofrezca. Mistral AI se excluye entera: sus modelos con nombre propio
+# (codestral, devstral, ministral, pixtral, magistral) no contienen «mistral».
+FAMILIAS_EXCLUIDAS = ("kimi", "mistral", "codestral", "devstral", "ministral", "pixtral", "magistral")
 
 
 def familia_excluida(id_modelo: str) -> Optional[str]:

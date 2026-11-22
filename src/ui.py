@@ -32,7 +32,7 @@ from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import (validar_archivo, obtener_info_archivo, guardar_transcripcion, filtros_seleccion_archivo,
-                       formatear_duracion)
+                       formatear_duracion, ruta_junto_al_audio)
 
 
 IDIOMAS_DISPONIBLES = {
@@ -866,7 +866,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         texto = "\n".join(seg.texto for seg in self.resultado_actual.segmentos)
         # Si el audio se abrió desde el historial y ya no existe, el documento solo se guarda en el historial
         base = Path(self.archivo_actual)
-        ruta_salida = str(base.with_name(base.stem + DOCUMENTOS_IA[clave]["sufijo"])) if base.exists() else None
+        ruta_salida = (ruta_junto_al_audio(self.archivo_actual, DOCUMENTOS_IA[clave]["sufijo"])
+                       if base.exists() else None)
 
         tab = self.tabs_ia[clave]
         asistente = self._asistente
@@ -1099,7 +1100,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         archivo = filedialog.asksaveasfilename(
             defaultextension=".md",
             filetypes=[("Markdown", "*.md"), ("Texto", "*.txt")],
-            initialfile=Path(self.archivo_actual).stem + DOCUMENTOS_IA[clave]["sufijo"],
+            initialfile=Path(ruta_junto_al_audio(self.archivo_actual, DOCUMENTOS_IA[clave]["sufijo"])).name,
         )
         if archivo:
             try:
@@ -1235,9 +1236,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     # ------------------------------------------------------------ Resultado
 
     def _generar_ruta_salida(self, archivo: Optional[str] = None, formato: Optional[str] = None) -> str:
-        base = Path(archivo or self.archivo_actual)
         formato = formato or self.var_formato.get()
-        return str(base.parent / f"{base.stem}_transcripcion.{formato}")
+        return ruta_junto_al_audio(archivo or self.archivo_actual, f"_transcripcion.{formato}")
 
     def _copiar_texto(self):
         if not self.resultado_actual:

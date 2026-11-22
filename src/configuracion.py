@@ -91,10 +91,10 @@ def _tabla() -> dict[tuple[str, str], _Clave]:
         ("salida", "palabra_por_palabra"): _Clave(False, booleano, _es_booleano),
         ("ia", "modelo"): _Clave("gpt-4.1", "un texto", _es_texto),
         ("ia", "copilot_enterprise_url"): _Clave("", "un texto", _es_texto),
-        ("ia", "temperatura"): _Clave(0.3, no_negativo, _es_numero_no_negativo),
+        ("ia", "temperatura"): _Clave(0.2, no_negativo, _es_numero_no_negativo),
         ("ia", "max_caracteres_bloque"): _Clave(60000, entero, _es_entero_positivo),
         ("ia", "peticiones_paralelas"): _Clave(3, entero, _es_entero_positivo),
-        ("ia", "revision_fidelidad"): _Clave(True, booleano, _es_booleano),
+        ("ia", "revision_fidelidad"): _Clave(False, booleano, _es_booleano),
         ("historial", "ruta"): _Clave("data/historial.db", "un texto no vacío", _es_texto_no_vacio),
     }
 

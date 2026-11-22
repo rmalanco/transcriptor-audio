@@ -95,7 +95,7 @@ Dependencias entre módulos (quién importa a quién):
   sesión) y `ErrorModeloCopilot` (el modo `auto` no ofrece ningún modelo utilizable).
 - Constantes: `RUTA_TOKEN` (`~/.local/share/transcriptor-audio/copilot.json`), `RUTA_AUTH_OPENCODE`
   (`~/.local/share/opencode/auth.json`), `VARIABLE_ENTORNO = "COPILOT_GITHUB_TOKEN"`, `CLIENT_ID`, `API_VERSION`,
-  `USER_AGENT`, `ESPERA_EXTRA`, `PRECIO_MAX_ECONOMICO = 50`, `FAMILIAS_EXCLUIDAS = ("kimi", "mistral")`,
+  `USER_AGENT`, `ESPERA_EXTRA`, `PRECIO_MAX_ECONOMICO = 50`, `FAMILIAS_EXCLUIDAS = ("kimi", "mistral", "codestral", "devstral", "ministral", "pixtral", "magistral")`,
   `MODELO_AUTO = "auto"`, `MARGEN_RENOVACION_AUTO` (300 s).
 
 ### Historial — `historial.py`
@@ -237,7 +237,7 @@ Dependencias entre módulos (quién importa a quién):
   contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`).
 - Las notas de cada parte se guardan en memoria en cuanto esa parte termina, hasta 64 partes (o todas las de la generación en curso si son más). Al generar otra vez con el mismo modelo, solo se piden las que faltan (`asistente_ia.py:AsistenteIA._notas_por_bloque`). Si una parte falla, no se lanzan las que aún no han empezado, el error dice cuál es y cuántas notas se conservan, y el modelo se valida antes de enviar nada.
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
-  faltan menos que antes. La revisión de fidelidad solo se acepta si no deja más secciones sin cubrir que el borrador.
+  faltan menos que antes. La revisión de fidelidad solo se acepta si no deja más secciones sin cubrir que el borrador y, en la minuta, si no deja menos filas en la tabla de tareas ni menos viñetas en Acuerdos (`asistente_ia.py:AsistenteIA._generar`, con `contar_filas_tareas` y `contar_vinetas_acuerdos`).
 - La fecha de la minuta la pone la aplicación: `asistente_ia.py:AsistenteIA.generar_minuta` reescribe la línea
   `**Fecha:**` con la fecha recibida o con `No especificada`. La ventana la saca de la fecha de modificación del audio;
   si el audio ya no existe, de `creado_en` de la entrada del historial; si no, es `No especificada`
@@ -286,10 +286,10 @@ Dependencias entre módulos (quién importa a quién):
   reescribe. La ruta se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
   (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
-- Junto al audio: `<nombre>_transcripcion.<formato>` (la ruta sale de `ui.py:AppTranscriptor._generar_ruta_salida` y la
-  escribe `persistencia.py:persistir_transcripcion`), y `<nombre>_resumen.md` y `<nombre>_minuta.md` (la ruta sale de
-  `ui.py:AppTranscriptor._generar_documento_ia` y la escribe `persistencia.py:persistir_documento`). Se sobrescriben
-  sin preguntar (`BACKLOG.md`, Salud del código #18).
+- Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `ui.py:AppTranscriptor._generar_ruta_salida` y la
+  escribe `persistencia.py:persistir_transcripcion`), y `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (la ruta sale de
+  `ui.py:AppTranscriptor._generar_documento_ia` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe
+  sin preguntar; dos grabaciones con el mismo nombre no comparten archivos (`BACKLOG.md`, Salud del código #18).
 - La CLI escribe en `stdout` o en el archivo de `-o`; los dos usan `utils.py:serializar_transcripcion`, y `--verbose` escribe en stderr. Con `srt` o `vtt` sin `-o`, termina con código 1 antes de cargar Whisper.
 
 ### Base de datos

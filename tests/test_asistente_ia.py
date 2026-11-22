@@ -192,6 +192,81 @@ def test_revision_que_pierde_secciones_se_descarta(monkeypatch):
     assert asistente.generar_resumen("texto") == completo
 
 
+def _minuta(tareas=("Enviar el informe",), acuerdos=("Se aprueba el presupuesto",), frase="Revisar el plan"):
+    """Minuta completa con las secciones obligatorias; `tareas` y `acuerdos` son el contenido variable."""
+    filas = "".join(f"| {t} | Ana | Sin fecha |\n" for t in tareas)
+    vinetas = "".join(f"- {a}\n" for a in acuerdos)
+    return ("# Minuta: Reunión de prueba\n\n**Fecha:** 22 de noviembre de 2026\n**Participantes:** Ana\n\n"
+            "## Objetivo\nRevisar el proyecto.\n\n"
+            f"## Temas tratados\n1. **Plan:** {frase}.\n\n"
+            f"## Acuerdos\n{vinetas}\n"
+            "## Tareas y pendientes\n| Tarea | Responsable | Fecha límite |\n|-------|-------------|--------------|\n"
+            f"{filas}\n"
+            "## Próximos pasos\n- Nada más.\n")
+
+
+def test_contar_filas_de_tareas():
+    from src.asistente_ia import contar_filas_tareas
+    assert contar_filas_tareas(_minuta(tareas=("A", "B", "C"))) == 3
+    assert contar_filas_tareas(_minuta(tareas=())) == 0  # solo cabecera y separador
+    assert contar_filas_tareas("## Acuerdos\n- algo\n") == 0  # sin tabla de tareas
+
+
+def test_contar_vinetas_de_acuerdos():
+    from src.asistente_ia import contar_vinetas_acuerdos
+    minuta = _minuta(acuerdos=("uno", "dos")) + "\n- Viñeta fuera de acuerdos\n"
+    assert contar_vinetas_acuerdos(minuta) == 2
+    assert contar_vinetas_acuerdos(_minuta(acuerdos=())) == 0
+
+
+def test_revision_de_minuta_que_borra_una_tarea_se_descarta(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor", "Revisar el contrato"))
+    revision = _minuta(tareas=("Enviar el informe", "Pagar el proveedor"))
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "Revisar el contrato" in minuta  # la tarea que la revisión borró sigue en el documento final
+
+
+def test_revision_de_minuta_que_borra_un_acuerdo_se_descarta(monkeypatch):
+    redaccion = _minuta(acuerdos=("Se aprueba el presupuesto", "Se contrata a Ana"))
+    revision = _minuta(acuerdos=("Se aprueba el presupuesto",))
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "- Se contrata a Ana" in minuta
+
+
+def test_revision_de_minuta_que_conserva_tareas_y_acuerdos_se_acepta(monkeypatch):
+    redaccion = _minuta(frase="la entrega está sujeta a validación")
+    revision = _minuta(frase="la entrega llega si me llegan los datos")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "la entrega llega si me llegan los datos" in minuta
+
+
+def test_revision_de_resumen_no_aplica_la_regla_de_tareas(monkeypatch):
+    redaccion = "## Resumen\nt\n### Puntos clave\n- a\n- b\n### Conclusiones\n- c"
+    revision = "## Resumen\nt\n### Puntos clave\n- a\n### Conclusiones\n- c"
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    resumen = asistente.generar_resumen("texto")
+
+    assert "- b" not in resumen  # la revisión sin el punto «b» se acepta
+
+
 class _RespuestaFalsa:
     """Respuesta en streaming (SSE) de un modelo con razonamiento: razonamiento, contenido en trozos y uso al final."""
     status_code = 200

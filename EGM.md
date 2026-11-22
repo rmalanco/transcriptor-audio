@@ -50,7 +50,7 @@ reglas para agentes, en [AGENTS.md](./AGENTS.md). Este archivo es el contrato de
   `~/.local/share/opencode/auth.json` y de la variable `COPILOT_GITHUB_TOKEN`.
 - Caché de modelos en `~/.cache/faster-whisper`.
 - Base SQLite `data/historial.db` (tabla `transcripciones`).
-- Archivos junto al audio: `<nombre>_transcripcion.<formato>`, `<nombre>_resumen.md`, `<nombre>_minuta.md`.
+- Archivos junto al audio: `<archivo>.<ext>_transcripcion.<formato>`, `<archivo>.<ext>_resumen.md`, `<archivo>.<ext>_minuta.md`.
 - Preferencias del usuario (el modelo de IA elegido en la interfaz) en `~/.local/share/transcriptor-audio/preferencias.json`;
   `config/settings.yaml` solo se lee, la app no lo reescribe.
 - Procesos externos: `ffprobe` (opcional), `xdg-open` / `open` / `os.startfile` y el navegador (`webbrowser.open`).

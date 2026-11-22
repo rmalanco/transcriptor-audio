@@ -13,12 +13,13 @@ ni en modo `auto`.
   la minuta, then la minuta queda en la entrada del historial con el modelo usado y, si el título no se editó a mano,
   con el título que da la minuta.
 - Given el caso anterior, when termina la generación, then la pestaña Minuta muestra el documento con «Copiar» y
-  «Guardar como…» habilitados, su línea de estado avisa que no se pudo exportar `<nombre>_minuta.md` y el motivo, y
+  «Guardar como…» habilitados, su línea de estado avisa que no se pudo exportar `<archivo>.<ext>_minuta.md` y el motivo, y
   no se pide otra generación. No aparece ningún diálogo; el aviso también queda en la pestaña Registro.
 - Given una transcripción en el historial y un audio en una carpeta donde no se puede escribir, when Copilot devuelve
-  el resumen, then se aplica lo mismo con `<nombre>_resumen.md`.
+  el resumen, then se aplica lo mismo con `<archivo>.<ext>_resumen.md`.
 
 Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
+Origen: carril S, 2026-11-22: los archivos junto al audio llevan el nombre completo del original (`reunion.m4a_minuta.md`) (decisión del usuario, punto #18)
 
 ### Estado de un documento generado
 - Given un documento generado, when termina la generación, then la línea de estado de la pestaña dice por separado qué
@@ -50,7 +51,7 @@ Origen: carril S, 2026-11-22: los errores de «Guardar como…» se muestran en 
 Origen: carril S, 2026-11-22: al cargar otro archivo, las pestañas de IA quedan sin restos del documento anterior (A-02)
 
 ### Modelos de familias no autorizadas
-- Given `ia.modelo` escrito a mano con un modelo de una familia excluida (`kimi` o `mistral`, reconocida porque el nombre
+- Given `ia.modelo` escrito a mano con un modelo de una familia excluida (`kimi`, `mistral`, `codestral`, `devstral`, `ministral`, `pixtral` o `magistral`, reconocida porque el nombre
   del modelo contiene el de la familia, sin distinguir mayúsculas; por ejemplo `Mistral-Large-3` o `kimi-k3-mini`), when
   se pide un resumen o una minuta de una transcripción larga, then no se envía ninguna petición a Copilot, aparece el
   error «El modelo «<modelo>» es de la familia «<familia>», que no está autorizada por la empresa. Elige otro modelo en
@@ -69,6 +70,7 @@ Origen: carril S, 2026-11-22: al cargar otro archivo, las pestañas de IA quedan
 
 Origen: docs/historias/hechas/2026-11-22-03-familias-no-autorizadas.md
 Origen: carril S, 2026-11-22: el selector de modelo de la ventana no ofrece modelos de familias no autorizadas (A-12)
+Origen: carril S, 2026-11-22: la exclusión de Mistral AI cubre todos sus modelos, también los que no llevan «mistral» en el nombre (decisión del usuario, punto #21)
 
 ### Modelo sin configurar
 - Given `ia.modelo` vacío, when se pide un resumen o una minuta, then no se envía nada a Copilot y aparece el error «No
@@ -163,6 +165,12 @@ Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
   then la línea de estado dice «Revisando fidelidad con la transcripción…».
 
 Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
+
+### Revisión de fidelidad que borra tareas o acuerdos
+- Given la revisión de fidelidad activada, when la revisión de una minuta deja la tabla de tareas con menos filas o la sección de acuerdos con menos viñetas, then se descarta y se conserva la minuta anterior a la revisión.
+- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta mientras conserve las secciones.
+
+Origen: carril S, 2026-11-22: una revisión de minuta que deja menos tareas o acuerdos se descarta y se conserva la anterior (decisión del usuario, punto #24)
 
 ### Sesión rechazada por Copilot
 - Given que Copilot rechaza el token (401) al generar o al abrir la sesión del modo `auto`, when el token es el de la sesión guardada por la app o el de opencode, then se abre el inicio de sesión, sin borrar el token de opencode ni un token propio distinto del rechazado.

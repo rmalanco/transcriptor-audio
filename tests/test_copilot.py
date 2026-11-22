@@ -246,6 +246,14 @@ def test_familia_excluida_reconoce_kimi_y_mistral_sin_distinguir_mayusculas():
     assert copilot.familia_excluida("claude-haiku-5.5") is None
 
 
+@pytest.mark.parametrize("modelo, excluido", [
+    ("codestral-2501", True), ("Devstral-Medium", True), ("ministral-8b", True), ("pixtral-large", True),
+    ("magistral-medium", True), ("gpt-5.4", False), ("claude-haiku-5.5", False),
+])
+def test_familia_excluida_reconoce_todos_los_modelos_de_mistral_ai(modelo, excluido):
+    assert (copilot.familia_excluida(modelo) is not None) == excluido
+
+
 def test_familia_excluida_tolera_valores_que_no_son_cadena():
     assert copilot.familia_excluida(None) is None
     assert copilot.familia_excluida("") is None

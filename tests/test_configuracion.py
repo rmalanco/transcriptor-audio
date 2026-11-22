@@ -63,8 +63,8 @@ def test_archivo_vacio_usa_todos_los_valores_por_defecto(tmp_path):
     }
     assert config["salida"] == {"formato": "txt", "incluir_timestamps": True, "palabra_por_palabra": False}
     assert config["ia"] == {
-        "modelo": "gpt-4.1", "copilot_enterprise_url": "", "temperatura": 0.3,
-        "max_caracteres_bloque": 60000, "peticiones_paralelas": 3, "revision_fidelidad": True,
+        "modelo": "gpt-4.1", "copilot_enterprise_url": "", "temperatura": 0.2,
+        "max_caracteres_bloque": 60000, "peticiones_paralelas": 3, "revision_fidelidad": False,
     }
     assert config["historial"] == {"ruta": "data/historial.db"}
 
@@ -76,8 +76,8 @@ def test_seccion_ia_vacia_usa_sus_valores_por_defecto(tmp_path):
     config = cargar_configuracion(str(ruta))
 
     assert config["ia"] == {
-        "modelo": "gpt-4.1", "copilot_enterprise_url": "", "temperatura": 0.3,
-        "max_caracteres_bloque": 60000, "peticiones_paralelas": 3, "revision_fidelidad": True,
+        "modelo": "gpt-4.1", "copilot_enterprise_url": "", "temperatura": 0.2,
+        "max_caracteres_bloque": 60000, "peticiones_paralelas": 3, "revision_fidelidad": False,
     }
 
 
@@ -288,3 +288,14 @@ def test_sin_preferido_se_usa_el_del_yaml():
     from src.configuracion import modelo_ia_efectivo
 
     assert modelo_ia_efectivo({"ia": {"modelo": "gpt-4.1"}}, None) == "gpt-4.1"
+
+
+def test_los_valores_por_defecto_de_la_ia_coinciden_con_el_yaml_del_proyecto(tmp_path):
+    vacio = tmp_path / "vacio.yaml"
+    vacio.write_text("", encoding="utf-8")
+
+    por_defecto = cargar_configuracion(str(vacio))["ia"]
+    del_proyecto = cargar_configuracion()["ia"]
+
+    assert por_defecto["temperatura"] == del_proyecto["temperatura"]
+    assert por_defecto["revision_fidelidad"] == del_proyecto["revision_fidelidad"]

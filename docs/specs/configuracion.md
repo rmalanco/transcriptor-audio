@@ -40,6 +40,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   `reunion.m4a -o salida.txt`, then termina con código 0, Whisper recibe el idioma `es` y `salida.txt` sale en formato
   `txt` con marcas de tiempo (`[00:00:00,000 --> 00:00:02,000] Hola equipo.`).
 - Given un archivo de configuración vacío, when se carga, then todas las claves toman su valor por defecto.
+- Given un YAML sin `ia.temperatura` ni `ia.revision_fidelidad`, when se carga la configuración, then `ia.temperatura` vale 0.2 y la revisión de fidelidad está desactivada, los mismos valores que el `config/settings.yaml` del proyecto.
 - Given una clave que falta, when se carga la configuración en la CLI o en la ventana, then toma el mismo valor por
   defecto en las dos.
 - Given un YAML con claves que la app no usa (por ejemplo `audio.sample_rate`), when se carga, then esas claves se
@@ -48,6 +49,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   has iniciado sesión…» y termina con código 1 sin trazo de Python.
 
 Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
+Origen: carril S, 2026-11-22: valores por defecto de la IA, temperatura 0.2 y revisión de fidelidad desactivada, como el YAML del proyecto (decisión del usuario; no tenía punto en el backlog)
 
 ### Las opciones de la CLI ganan al YAML
 - Given una configuración con `transcripcion.idioma: "en"` y `salida.formato: "srt"`, when se ejecuta la CLI con

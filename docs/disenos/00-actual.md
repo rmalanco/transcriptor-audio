@@ -49,7 +49,7 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
    interfaz mediante `on_segmento`.
 4. Todavía en el hilo de fondo, `persistencia.persistir_transcripcion` guarda primero en el historial
    (`Historial.crear` inserta la fila en `transcripciones`) y después escribe
-   `<nombre>_transcripcion.<formato>` junto al audio con `utils.guardar_transcripcion`.
+   `<archivo>.<ext>_transcripcion.<formato>` junto al audio con `utils.guardar_transcripcion`.
 5. Un fallo del historial o de la exportación no descarta el resultado: vuelve como aviso y la ventana lo muestra
    en un diálogo de advertencia y en la pestaña Registro.
 
@@ -72,7 +72,7 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
    en el historial: `Historial.guardar_documento` guarda el documento y el modelo usado y, con la minuta, también
    actualiza el título si no se editó a mano. Solo se guarda si el historial se abrió y la entrada de la transcripción
    sigue existiendo; si no, el documento no se descarta y el aviso dice por qué.
-6. Después el resultado se escribe en `<nombre>_resumen.md` o `<nombre>_minuta.md` junto al audio, si el audio
+6. Después el resultado se escribe en `<archivo>.<ext>_resumen.md` o `<archivo>.<ext>_minuta.md` junto al audio, si el audio
    existe. Un fallo de guardado no descarta el documento: se avisa en la línea de estado de la pestaña y en Registro.
 
 ### Iniciar sesión en Copilot
@@ -148,7 +148,7 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
 | Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (`token` y `enterprise_url`) | Se crea con modo `0o600` (`copilot.guardar_token`); en claro; el modo solo se fija al crear el archivo. Lo borran `--copilot-logout` y un 401 del token propio |
 | Preferencias del usuario | `~/.local/share/transcriptor-audio/preferencias.json` (`modelo_ia`) | Permisos por defecto; solo guarda un nombre de modelo |
 | Historial | `data/historial.db` (SQLite; `historial.ruta`, relativa a la raíz del proyecto) | Permisos por defecto, sin cifrar. Guarda el texto completo, los segmentos con marcas de tiempo, el resumen, la minuta, los títulos, la ruta absoluta del audio y los modelos usados |
-| Resultados junto al audio | `<nombre>_transcripcion.<formato>`, `<nombre>_resumen.md`, `<nombre>_minuta.md` en la carpeta del audio | Permisos por defecto. Sobrescriben sin preguntar (ver riesgos) |
+| Resultados junto al audio | `<archivo>.<ext>_transcripcion.<formato>`, `<archivo>.<ext>_resumen.md`, `<archivo>.<ext>_minuta.md` en la carpeta del audio | Permisos por defecto. Regenerar la misma grabación las sobrescribe sin preguntar |
 | Caché de modelos de Whisper | `~/.cache/faster-whisper` | Solo modelos, ningún dato del usuario |
 | Log | Solo la consola (`stderr`); la app no escribe ningún archivo de log | Con `TRANSCRIPTOR_LOG=DEBUG` la consola muestra cada segmento transcrito |
 
@@ -218,18 +218,14 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
   volver a generar, pero solo mientras viva la misma instancia de `AsistenteIA` con el mismo modelo (hasta 64 partes): se
   pierden al cancelar, al cambiar de modelo, al volver a iniciar sesión y al cerrar la app. Sin punto en el backlog.
 - **La revisión de fidelidad con varias partes se hace contra las notas, no contra la transcripción.** Un dato que se
-  coló al extraer las notas no se detecta, y el documento lo avisa con una nota de la aplicación. Una revisión que
-  conserva las secciones pero borra tareas o acuerdos sustituye al documento (el control solo mira las secciones).
-  `ia.revision_fidelidad` viene desactivada en el YAML. Backlog, Salud del código #23 y #24.
+  coló al extraer las notas no se detecta, y el documento lo avisa con una nota de la aplicación.
+  `ia.revision_fidelidad` viene desactivada en el YAML. Backlog, Salud del código #23.
 - **Un documento truncado puede parecer completo.** Si Copilot corta la respuesta por longitud, solo queda un aviso en el
   log; el documento no lo dice. Tampoco se avisa antes de redactar si las notas de todas las partes superan el límite de
   entrada del modelo. Backlog, Salud del código #25 y #26.
-- **Un mismo nombre en la misma carpeta se sobrescribe.** `reunion.m4a` y `reunion.mp4` comparten
-  `reunion_transcripcion.<formato>`, `reunion_resumen.md` y `reunion_minuta.md`, y el guardado automático los
-  sobrescribe sin preguntar. Backlog, Salud del código #18.
-- **La exclusión de familias es por nombre.** `FAMILIAS_EXCLUIDAS` (`kimi`, `mistral`) se reconoce porque el id del
-  modelo contiene el nombre; un modelo de Mistral AI sin «mistral» en el id (Codestral, Devstral…) no se excluye.
-  Decisión del usuario pendiente: Backlog, Salud del código #21.
+- **La exclusión de familias es por nombre.** `FAMILIAS_EXCLUIDAS` (`kimi`, `mistral`, `codestral`, `devstral`, `ministral`,
+  `pixtral`, `magistral`) se reconoce porque el id del modelo contiene el nombre; un modelo nuevo de Mistral AI cuyo
+  nombre no contenga ninguno de esos textos no se excluye, y la lista se amplía a mano en `copilot.py`.
 - **La lógica de la ventana no tiene tests automáticos.** Ningún test instancia `AppTranscriptor`: el punto de decisión
   `_recibir_documento_ia`, la cancelación y el cierre de la ventana no están cubiertos. Sí lo están `AsistenteIA` (con
   su señal de cancelación) y `persistencia.py` (incluido no guardar una generación cancelada).
@@ -253,7 +249,8 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
   contrastaron con salidas reales.
 - **Tests no documentados.** `tests/` queda fuera de los contratos por diseño del flujo.
 - **El YAML y el código usan valores por defecto distintos para la IA.** `settings.yaml` trae `claude-haiku-5.5`,
-  `temperatura: 0.2` y `revision_fidelidad: false`; sin esas claves, `configuracion.py` (y los parámetros de
-  `AsistenteIA`) usan `gpt-4.1`, `0.3` y `True`. Los valores por defecto de las claves viven solo en `configuracion.py`.
+  `temperatura: 0.2` y `revision_fidelidad: false`; sin esas claves, `configuracion.py` usa `gpt-4.1`, `0.2` y `False`
+  (los mismos valores que el YAML), y los parámetros de `AsistenteIA` siguen en `0.3` y `True`. Los valores por defecto de
+  las claves viven solo en `configuracion.py`.
 - **`condition_on_previous_text`.** El YAML y `configuracion.py` lo ponen en `false`; el valor por defecto del parámetro
   de `transcribir` es `True`, que ni la interfaz ni la CLI usan porque siempre pasan el de la configuración.

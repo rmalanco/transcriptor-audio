@@ -132,6 +132,31 @@ def secciones_faltantes(documento: str, secciones: list[str]) -> list[str]:
     return [s for s in secciones if not any(linea.startswith(s.lower()) for linea in lineas)]
 
 
+def _lineas_de_seccion(documento: str, titulo: str) -> list[str]:
+    """Líneas de la sección que empieza por `titulo`, sin el encabezado, hasta el siguiente encabezado de nivel 1 o 2."""
+    lineas, dentro = [], False
+    for linea in documento.splitlines():
+        if linea.strip().lower().startswith(titulo.lower()):
+            dentro = True
+        elif dentro and re.match(r"#{1,2} ", linea.strip()):
+            break
+        elif dentro:
+            lineas.append(linea)
+    return lineas
+
+
+def contar_filas_tareas(minuta: str) -> int:
+    """Filas de datos de la tabla de tareas: sin la cabecera ni el separador |---|."""
+    filas = [l.strip() for l in _lineas_de_seccion(minuta, "## Tareas y pendientes") if l.strip().startswith("|")]
+    filas = [f for f in filas if not set(f.replace("|", "").strip()) <= set("-: ")]  # quita el separador
+    return max(0, len(filas) - 1)  # quita la cabecera
+
+
+def contar_vinetas_acuerdos(minuta: str) -> int:
+    """Viñetas de la sección de acuerdos."""
+    return sum(1 for l in _lineas_de_seccion(minuta, "## Acuerdos") if re.match(r"\s*[-*] ", l))
+
+
 class ErrorAsistenteIA(Exception):
     pass
 
@@ -608,6 +633,7 @@ class AsistenteIA:
         cancelar: Optional[threading.Event] = None,
         secciones: Optional[list[str]] = None,
         postproceso: Optional[Callable[[str], str]] = None,
+        conservar_tareas_y_acuerdos: bool = False,
     ) -> _Documento:
         """Devuelve el documento (ya post-procesado), el número de partes en que se dividió la transcripción, las
         secciones obligatorias que siguen faltando y los fallos de las pasadas posteriores a la redacción."""
@@ -670,8 +696,13 @@ class AsistenteIA:
                 log.warning("No se pudo completar la revisión de fidelidad; se entrega sin revisar: %s", e)
                 error_revision = _motivo(e)
             else:
-                # Solo se acepta si conserva todas las secciones que tenía
-                if len(secciones_faltantes(revisado, secciones or [])) <= len(secciones_faltantes(documento, secciones or [])):
+                # Solo se acepta si conserva todas las secciones que tenía y, en la minuta, sus tareas y acuerdos
+                conserva_secciones = (len(secciones_faltantes(revisado, secciones or []))
+                                      <= len(secciones_faltantes(documento, secciones or [])))
+                pierde_tareas_o_acuerdos = conservar_tareas_y_acuerdos and (
+                    contar_filas_tareas(revisado) < contar_filas_tareas(documento)
+                    or contar_vinetas_acuerdos(revisado) < contar_vinetas_acuerdos(documento))
+                if conserva_secciones and not pierde_tareas_o_acuerdos:
                     documento = revisado
         if postproceso:
             documento = postproceso(documento)
@@ -698,5 +729,6 @@ class AsistenteIA:
             minuta = normalizar_tabla_tareas(minuta)
             return re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
 
-        return self._con_nota(self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA, postproceso))
+        return self._con_nota(self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA, postproceso,
+                                            conservar_tareas_y_acuerdos=True))
 

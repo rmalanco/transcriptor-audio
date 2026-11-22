@@ -11,12 +11,18 @@ cuando algo falla, cuándo puede abrir la carpeta del archivo y qué pasa al car
   then la transcripción aparece en el historial con su texto y sus segmentos, y se ve en la pestaña Texto con «Copiar»,
   «Guardar como…» y los botones de generar resumen y minuta habilitados.
 - Given el caso anterior, when termina la transcripción, then aparece un diálogo de advertencia que indica
-  `<nombre>_transcripcion.<formato>` y el motivo, y la misma línea queda en la pestaña Registro.
+  `<archivo>.<ext>_transcripcion.<formato>` y el motivo, y la misma línea queda en la pestaña Registro.
 - Given un historial que falla al guardar y un audio en una carpeta donde sí se puede escribir, when termina la
-  transcripción, then el archivo `<nombre>_transcripcion.<formato>` se exporta junto al audio, la transcripción se ve
+  transcripción, then el archivo `<archivo>.<ext>_transcripcion.<formato>` se exporta junto al audio, la transcripción se ve
   en pantalla y aparece un diálogo de advertencia con el motivo del fallo del historial.
 
 Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
+Origen: carril S, 2026-11-22: los archivos junto al audio llevan el nombre completo del original (`reunion.m4a_transcripcion.<formato>`) (decisión del usuario, punto #18)
+
+### Grabaciones con el mismo nombre
+- Given `reunion.m4a` y `reunion.mp4` en la misma carpeta, when se transcriben y se generan sus documentos, then cada grabación tiene sus propios archivos (`reunion.m4a_…` y `reunion.mp4_…`) y ninguno sobrescribe al otro.
+
+Origen: carril S, 2026-11-22: dos grabaciones con el mismo nombre en la misma carpeta ya no comparten archivos (decisión del usuario, punto #18)
 
 ### Abrir carpeta
 - Given una transcripción en pantalla cuyo archivo se exportó, when termina la transcripción, then «Abrir carpeta»
