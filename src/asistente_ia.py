@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import httpx
@@ -139,6 +140,37 @@ class ErrorSinSesionCopilot(ErrorAsistenteIA):
     """No hay sesión de GitHub Copilot o fue rechazada: hay que iniciar sesión."""
 
 
+class ErrorModeloIA(ErrorAsistenteIA):
+    """El modelo no se puede usar (vacío, de una familia no autorizada o sin ninguno válido en auto): no se envía nada,
+    así que tampoco hay documento que entregar."""
+
+
+@dataclass
+class _Documento:
+    """Resultado de `_generar`: el texto y lo necesario para sus notas de la aplicación."""
+    texto: str
+    partes: int
+    faltan: list[str]
+    error_secciones: Optional[str] = None  # motivo si no se pudieron pedir de nuevo las secciones que faltaban
+    error_revision: Optional[str] = None  # motivo si la revisión de fidelidad no se pudo completar
+
+
+def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
+    """Si una pasada posterior a la redacción falla con esto, se entrega lo ya redactado con una nota. No lo es la falta
+    de sesión (hay que iniciar sesión) ni un modelo no autorizado o vacío (no se envía nada a ningún modelo)."""
+    return not isinstance(error, (ErrorSinSesionCopilot, ErrorModeloIA))
+
+
+MAX_MOTIVO_NOTA = 120  # caracteres: el motivo se incrusta en una nota que se guarda y se exporta
+
+
+def _motivo(error: Exception) -> str:
+    """Motivo de una nota de la aplicación: de una sola línea (el cuerpo de una respuesta puede traer saltos que
+    romperían la cita Markdown) y recortado si es largo."""
+    texto = " ".join(str(error).split()).rstrip(".")
+    return texto if len(texto) <= MAX_MOTIVO_NOTA else texto[:MAX_MOTIVO_NOTA] + "…"
+
+
 def dividir_texto(texto: str, max_caracteres: int) -> list[str]:
     """Divide el texto en bloques parejos de hasta `max_caracteres`, cortando por líneas u oraciones.
 
@@ -210,15 +242,27 @@ def _cita_de_partes(partes: int, revisado: bool) -> str:
     return cita
 
 
-def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool) -> str:
+def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
+                           error_secciones: Optional[str] = None, error_revision: Optional[str] = None) -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
-    (primero la de secciones que faltan, después la de las partes). Vacío si no hay nada que avisar."""
+    (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
+    `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
     citas = []
+    if error_secciones:
+        citas.append(f"> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban "
+                     f"({error_secciones}).")
     if faltan:
         nombres = ", ".join(s.lstrip("# ") for s in faltan)
-        citas.append("> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no "
-                     "devolvió ni al pedírselas de nuevo: " + nombres + ". No lo des por completo: vuelve a generarlo "
-                     "o complétalo con la transcripción.")
+        if error_secciones:  # ya no se pidieron: no se puede decir que Copilot no las devolvió
+            citas.append("> Nota de la aplicación: a este documento le faltan secciones obligatorias: " + nombres + ". "
+                         "No lo des por completo: vuelve a generarlo o complétalo con la transcripción.")
+        else:
+            citas.append("> Nota de la aplicación: a este documento le faltan secciones obligatorias que Copilot no "
+                         "devolvió ni al pedírselas de nuevo: " + nombres + ". No lo des por completo: vuelve a generarlo "
+                         "o complétalo con la transcripción.")
+    if error_revision:
+        citas.append(f"> Nota de la aplicación: la revisión de fidelidad no se pudo completar ({error_revision}); "
+                     "este documento no está revisado.")
     if partes >= 2:
         citas.append(_cita_de_partes(partes, revisado))
     if not citas:
@@ -238,6 +282,19 @@ def _frase_de_partes_conservadas(n: int) -> str:
     if n == 1:
         return "Se conserva la nota de la parte que terminó; al volver a generar solo se pedirán las que faltan."
     return f"Se conservan las notas de las {n} partes que terminaron; al volver a generar solo se pedirán las que faltan."
+
+
+TOPE_RETRY_AFTER = 60  # segundos: un Retry-After mayor no se espera, la generación falla con el aviso
+
+
+def _retry_after(respuesta) -> Optional[float]:
+    """Segundos que pide la cabecera Retry-After (solo se entiende el número de segundos, no una fecha).
+    None si falta, no es un número o es negativo: entonces se usa la espera fija."""
+    try:
+        segundos = float(respuesta.headers.get("Retry-After"))
+    except (TypeError, ValueError):
+        return None
+    return segundos if math.isfinite(segundos) and segundos >= 0 else None
 
 
 def _esperar(segundos: float, cancelar: Optional[threading.Event]) -> None:
@@ -268,6 +325,7 @@ class AsistenteIA:
             raise ErrorSinSesionCopilot("No has iniciado sesión en GitHub Copilot.")
         if sesion:
             log.info("Usando la sesión de GitHub Copilot de %s", sesion.origen)
+        self._origen_token = sesion.origen if sesion else ""
         self.url = copilot.url_api(enterprise_url) + "/chat/completions"
         self.enterprise_url = enterprise_url
         self.modelo = modelo
@@ -295,11 +353,25 @@ class AsistenteIA:
             return f"auto → {self._sesion_auto.modelo}"
         return self.modelo
 
+    def _error_de_token_rechazado(self) -> ErrorAsistenteIA:
+        """Copilot rechazó el token (401). Si viene de la variable de entorno, iniciar sesión no lo arregla (la variable
+        sigue ganando al leerlo): se dice así y el archivo propio no se toca. Si no, se invalida el token guardado y se
+        pide iniciar sesión."""
+        if self._origen_token == copilot.VARIABLE_ENTORNO:
+            return ErrorAsistenteIA("GitHub Copilot rechazó el token de la variable de entorno COPILOT_GITHUB_TOKEN. "
+                                    "Corrígela o quítala para usar la sesión guardada con el inicio de sesión de la app.")
+        copilot.invalidar_token(self.api_key)
+        return ErrorSinSesionCopilot("La sesión de GitHub Copilot caducó o fue revocada (401). Vuelve a iniciar sesión.")
+
     def _resolver_auto(self) -> copilot.SesionAuto:
         with self._cerrojo_auto:
             if self._sesion_auto is None or not self._sesion_auto.vigente():
                 try:
                     self._sesion_auto = copilot.abrir_sesion_auto(copilot.Sesion(self.api_key, self.enterprise_url))
+                except copilot.ErrorSesionCopilot as e:  # el token rechazado: igual que el 401 de /chat/completions
+                    raise self._error_de_token_rechazado() from e
+                except copilot.ErrorModeloCopilot as e:
+                    raise ErrorModeloIA(str(e)) from e
                 except copilot.ErrorCopilot as e:
                     raise ErrorAsistenteIA(str(e)) from e
             return self._sesion_auto
@@ -316,12 +388,12 @@ class AsistenteIA:
         sesion_auto = self._resolver_auto() if self.es_auto else None
         modelo = sesion_auto.modelo if sesion_auto else self.modelo
         if not isinstance(modelo, str) or not modelo.strip():
-            raise ErrorAsistenteIA("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
-                                   "`ia.modelo` de config/settings.yaml.")
+            raise ErrorModeloIA("No hay ningún modelo de IA configurado. Elige uno en el selector o en "
+                                "`ia.modelo` de config/settings.yaml.")
         familia = copilot.familia_excluida(modelo)
         if familia:  # antes de enviar nada: ni la transcripción ni ninguna parte sale hacia ese modelo
-            raise ErrorAsistenteIA(f"El modelo «{modelo}» es de la familia «{familia}», que no está autorizada por la "
-                                   "empresa. Elige otro modelo en el selector o en `ia.modelo` de config/settings.yaml.")
+            raise ErrorModeloIA(f"El modelo «{modelo}» es de la familia «{familia}», que no está autorizada por la "
+                                "empresa. Elige otro modelo en el selector o en `ia.modelo` de config/settings.yaml.")
         return modelo, sesion_auto
 
     def _modelo_y_cabeceras(self) -> tuple[str, dict]:
@@ -377,11 +449,18 @@ class AsistenteIA:
 
             # Límite de peticiones o error temporal del servidor: reintentar con espera creciente
             if respuesta.status_code == 429 or respuesta.status_code >= 500:
+                espera = _retry_after(respuesta)
+                if espera is not None and espera > TOPE_RETRY_AFTER:  # esperar tanto bloquearía la generación
+                    raise ErrorAsistenteIA(f"{self.nombre_proveedor} respondió {respuesta.status_code}: "
+                                           f"{respuesta.text[:300].rstrip('.')}. Copilot pide esperar {espera:g} s "
+                                           "antes de reintentar.")
+                if espera is None:
+                    espera = 2 ** (intento + 1)
                 log.warning("%s respondió %d en %.1f s; reintentando en %d s: %s", self.nombre_proveedor,
-                            respuesta.status_code, segundos, 2 ** (intento + 1), respuesta.text[:200])
+                            respuesta.status_code, segundos, espera, respuesta.text[:200])
                 if intento == 3:
                     raise ErrorAsistenteIA(f"{self.nombre_proveedor} respondió {respuesta.status_code}: {respuesta.text[:300]}")
-                _esperar(2 ** (intento + 1), cancelar)
+                _esperar(espera, cancelar)
                 continue
             if respuesta.status_code >= 400:
                 log.error("%s respondió %d en %.1f s: %s", self.nombre_proveedor, respuesta.status_code,
@@ -400,9 +479,7 @@ class AsistenteIA:
                 cuerpo["model"] = modelo
                 continue
             if respuesta.status_code == 401:
-                copilot.invalidar_token(self.api_key)
-                raise ErrorSinSesionCopilot("La sesión de GitHub Copilot caducó o fue revocada (401). "
-                                            "Vuelve a iniciar sesión.")
+                raise self._error_de_token_rechazado()
             if respuesta.status_code == 400 and "model_not_supported" in respuesta.text:
                 raise ErrorAsistenteIA(f"Tu plan de GitHub Copilot no permite usar el modelo «{self.modelo}». Elige otro "
                                        "en `ia.modelo` de config/settings.yaml (gpt-4.1 está en todos los planes).")
@@ -513,7 +590,7 @@ class AsistenteIA:
                     except BaseException as e:
                         for f in futuros.values():
                             f.cancel()  # las partes que aún no empezaron ya no se envían
-                        if isinstance(e, ErrorAsistenteIA) and not isinstance(e, ErrorSinSesionCopilot):
+                        if isinstance(e, ErrorAsistenteIA) and not isinstance(e, (ErrorSinSesionCopilot, ErrorModeloIA)):
                             fallo = (n, e)
                             break
                         raise
@@ -531,9 +608,9 @@ class AsistenteIA:
         cancelar: Optional[threading.Event] = None,
         secciones: Optional[list[str]] = None,
         postproceso: Optional[Callable[[str], str]] = None,
-    ) -> tuple[str, int, list[str]]:
-        """Devuelve el documento (ya post-procesado), el número de partes en que se dividió la transcripción y las
-        secciones obligatorias que siguen faltando en ese documento final."""
+    ) -> _Documento:
+        """Devuelve el documento (ya post-procesado), el número de partes en que se dividió la transcripción, las
+        secciones obligatorias que siguen faltando y los fallos de las pasadas posteriores a la redacción."""
         texto = texto.strip()
         if not texto:
             raise ErrorAsistenteIA("La transcripción está vacía")
@@ -552,43 +629,66 @@ class AsistenteIA:
         prompt = plantilla.format(texto=texto)
         documento = self._completar(prompt, cancelar)
 
+        error_secciones = None
         faltan = secciones_faltantes(documento, secciones or [])
         if faltan:
             log.warning("Al documento le faltan secciones %s; se pide completarlo", faltan)
-            # Un reintento indicando qué falta; si aun así falla, se devuelve lo obtenido
+            # Un reintento indicando qué falta; si aun así falla, se entrega lo obtenido, con una nota
             if on_progreso:
                 on_progreso("Completando secciones faltantes…")
-            reintento = self._completar([
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": documento},
-                {"role": "user", "content": "Faltan estas secciones obligatorias: " + ", ".join(faltan)
-                 + ". Devuelve el documento completo con todas las secciones, aplicando las mismas reglas."},
-            ], cancelar)
-            if len(secciones_faltantes(reintento, secciones)) < len(faltan):
-                documento = reintento
+            try:
+                reintento = self._completar([
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": documento},
+                    {"role": "user", "content": "Faltan estas secciones obligatorias: " + ", ".join(faltan)
+                     + ". Devuelve el documento completo con todas las secciones, aplicando las mismas reglas."},
+                ], cancelar)
+            except ErrorAsistenteIA as e:
+                if cancelar and cancelar.is_set():
+                    raise InterruptedError from e  # cancelada: el borrador no se entrega
+                if not _fallo_recuperable(e):
+                    raise
+                log.warning("No se pudieron pedir de nuevo las secciones que faltaban; se entrega el borrador: %s", e)
+                error_secciones = _motivo(e)
+            else:
+                if len(secciones_faltantes(reintento, secciones)) < len(faltan):
+                    documento = reintento
 
+        error_revision = None
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
             if on_progreso:
                 fuente = "la transcripción" if len(bloques) == 1 else f"las notas de las {len(bloques)} partes"
                 on_progreso(f"Revisando fidelidad con {fuente}…")
-            revisado = self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar)
-            # Solo se acepta si conserva todas las secciones que tenía
-            if len(secciones_faltantes(revisado, secciones or [])) <= len(secciones_faltantes(documento, secciones or [])):
-                documento = revisado
+            try:
+                revisado = self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar)
+            except ErrorAsistenteIA as e:
+                if cancelar and cancelar.is_set():
+                    raise InterruptedError from e  # cancelada: el documento sin revisar no se entrega
+                if not _fallo_recuperable(e):
+                    raise
+                log.warning("No se pudo completar la revisión de fidelidad; se entrega sin revisar: %s", e)
+                error_revision = _motivo(e)
+            else:
+                # Solo se acepta si conserva todas las secciones que tenía
+                if len(secciones_faltantes(revisado, secciones or [])) <= len(secciones_faltantes(documento, secciones or [])):
+                    documento = revisado
         if postproceso:
             documento = postproceso(documento)
-        return documento, len(bloques), secciones_faltantes(documento, secciones or [])
+        faltan_al_final = secciones_faltantes(documento, secciones or [])
+        # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
+        return _Documento(documento, len(bloques), faltan_al_final,
+                          error_secciones if faltan_al_final else None, error_revision)
 
-    def _con_nota(self, documento: str, partes: int, faltan: list[str]) -> str:
+    def _con_nota(self, d: _Documento) -> str:
         """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del
         post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
-        nota = notas_de_la_aplicacion(faltan, partes, self.revision_fidelidad)
-        return documento.rstrip() + "\n" + nota if nota else documento
+        revisado = self.revision_fidelidad and not d.error_revision  # sin revisión, no se dice que se revisó
+        nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision)
+        return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:
-        documento, partes, faltan = self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN)
-        return self._con_nota(documento, partes, faltan)
+        return self._con_nota(self._generar(PROMPT_RESUMEN, texto, on_progreso, cancelar, SECCIONES_RESUMEN))
 
     def generar_minuta(self, texto: str, on_progreso=None, cancelar=None, fecha: Optional[str] = None) -> str:
         # La fecha la aporta la app (el modelo tiende a confundirla con fechas límite de tareas)
@@ -598,6 +698,5 @@ class AsistenteIA:
             minuta = normalizar_tabla_tareas(minuta)
             return re.sub(r"^\*\*Fecha:\*\*.*$", f"**Fecha:** {fecha or 'No especificada'}", minuta, count=1, flags=re.M)
 
-        minuta, partes, faltan = self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA, postproceso)
-        return self._con_nota(minuta, partes, faltan)
+        return self._con_nota(self._generar(plantilla, texto, on_progreso, cancelar, SECCIONES_MINUTA, postproceso))
 

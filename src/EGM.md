@@ -152,7 +152,14 @@ Dependencias entre módulos (quién importa a quién):
 - `copilot.py:abrir_sesion_auto` elige el primer modelo ofrecido que admite `/chat/completions` y no es de una familia
   de `FAMILIAS_EXCLUIDAS`, y lanza `ErrorCopilot` si no queda ninguno. `copilot.py:SesionAuto.vigente` da la sesión por caducada 300 s antes de `expires_at`.
 - `asistente_ia.py:AsistenteIA._completar` hace hasta 4 intentos con espera exponencial ante errores de red, 429 y
-  5xx. Un 401 fuera del modo auto invalida el token guardado y lanza `ErrorSinSesionCopilot`.
+  5xx. Ante un 429 o 5xx con `Retry-After` en segundos espera ese tiempo, hasta 60 s; por encima no reintenta y falla
+  (`asistente_ia.py:_retry_after`, `TOPE_RETRY_AFTER`). Un 401, dentro o fuera del modo auto, pasa por
+  `AsistenteIA._error_de_token_rechazado`: si el token viene de `COPILOT_GITHUB_TOKEN` lanza `ErrorAsistenteIA` sin abrir
+  el login; si no, invalida el token guardado y lanza `ErrorSinSesionCopilot`. Un 401 al abrir la sesión `auto` lanza
+  `copilot.ErrorSesionCopilot` y sigue ese mismo camino.
+- Las respuestas de GitHub con formato o tipos inesperados (`copilot.py:_datos_de`, `copilot.py:_lista_de_objetos`)
+  lanzan `ErrorCopilot` con «GitHub devolvió una respuesta inesperada al <acción>.», para que el diálogo de login y la
+  CLI no se queden colgados ni muestren un trazo.
 - `copilot.py:invalidar_token` borra `RUTA_TOKEN` solo si el token guardado es el rechazado; nunca toca el archivo de
   opencode.
 
@@ -160,7 +167,7 @@ Dependencias entre módulos (quién importa a quién):
 
 - Una transcripción vacía lanza `ErrorAsistenteIA` (`asistente_ia.py:AsistenteIA._generar`).
 - Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad compara
-  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`).
+  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`).
 - Las notas de cada parte se guardan en memoria en cuanto esa parte termina, hasta 64 partes (o todas las de la generación en curso si son más). Al generar otra vez con el mismo modelo, solo se piden las que faltan (`asistente_ia.py:AsistenteIA._notas_por_bloque`). Si una parte falla, no se lanzan las que aún no han empezado, el error dice cuál es y cuántas notas se conservan, y el modelo se valida antes de enviar nada.
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
   faltan menos que antes.

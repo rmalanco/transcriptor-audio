@@ -38,6 +38,14 @@ class ErrorCopilot(Exception):
     pass
 
 
+class ErrorSesionCopilot(ErrorCopilot):
+    """GitHub rechazó el token (401): hace falta iniciar sesión de nuevo."""
+
+
+class ErrorModeloCopilot(ErrorCopilot):
+    """El modo auto no ofrece ningún modelo utilizable (vacío, o ninguno autorizado y compatible con /chat/completions)."""
+
+
 @dataclass
 class Sesion:
     token: str
@@ -53,6 +61,39 @@ class CodigoDispositivo:
     interval: int
     expires_in: int
     enterprise_url: Optional[str] = None
+
+
+def _respuesta_inesperada(que: str) -> ErrorCopilot:
+    return ErrorCopilot(f"GitHub devolvió una respuesta inesperada al {que}.")
+
+
+def _datos_de(respuesta, que: str, **tipos: type) -> dict:
+    """Extrae el JSON de una respuesta de GitHub y comprueba que es un objeto en el que cada clave de `tipos` existe
+    con ese tipo (p. ej. `data=list`). Si no, lanza ErrorCopilot en vez de un ValueError, KeyError o TypeError suelto:
+    en el device flow, otro error deja el diálogo colgado."""
+    try:
+        datos = respuesta.json()
+    except ValueError as e:
+        raise _respuesta_inesperada(que) from e
+    if not isinstance(datos, dict) or any(not isinstance(datos.get(clave), tipo) for clave, tipo in tipos.items()):
+        raise _respuesta_inesperada(que)
+    return datos
+
+
+def _lista_de_objetos(respuesta, que: str, clave: str) -> list[dict]:
+    """Lista `clave` de una respuesta de GitHub cuyos elementos son todos objetos (p. ej. el catálogo de modelos)."""
+    valor = _datos_de(respuesta, que, **{clave: list})[clave]
+    if not all(isinstance(elemento, dict) for elemento in valor):
+        raise _respuesta_inesperada(que)
+    return valor
+
+
+def _entero(valor, defecto: int) -> int:
+    """Número entero de un campo de GitHub; `defecto` si el valor no es un número (como cuando falta)."""
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return defecto
 
 
 def normalizar_dominio(url: Optional[str]) -> Optional[str]:
@@ -150,12 +191,13 @@ def iniciar_login(enterprise_url: Optional[str] = None) -> CodigoDispositivo:
         raise ErrorCopilot(f"No se pudo conectar con GitHub: {e}") from e
     if respuesta.status_code >= 400:
         raise ErrorCopilot(f"GitHub rechazó el inicio de sesión ({respuesta.status_code}): {respuesta.text[:200]}")
-    datos = respuesta.json()
+    datos = _datos_de(respuesta, "pedir el código de dispositivo", device_code=str, user_code=str,
+                      verification_uri=str)
     log.info("Código de dispositivo recibido: introdúcelo en %s", datos["verification_uri"])
     return CodigoDispositivo(
         device_code=datos["device_code"], user_code=datos["user_code"],
-        verification_uri=datos["verification_uri"], interval=int(datos.get("interval", 5)),
-        expires_in=int(datos.get("expires_in", 900)), enterprise_url=dominio,
+        verification_uri=datos["verification_uri"], interval=_entero(datos.get("interval", 5), 5),
+        expires_in=_entero(datos.get("expires_in", 900), 900), enterprise_url=dominio,
     )
 
 
@@ -185,13 +227,15 @@ def esperar_login(
             continue
         if respuesta.status_code >= 400:
             raise ErrorCopilot(f"GitHub respondió {respuesta.status_code}: {respuesta.text[:200]}")
-        datos = respuesta.json()
+        datos = _datos_de(respuesta, "consultar la autorización")
         if datos.get("access_token"):
             guardar_token(datos["access_token"], codigo.enterprise_url)
             return datos["access_token"]
         error = datos.get("error")
+        if not error:  # ni token ni error: no se sabe qué hacer, y esperar no lo resolvería
+            raise ErrorCopilot("GitHub devolvió una respuesta inesperada al consultar la autorización.")
         if error == "slow_down":
-            intervalo = int(datos.get("interval") or intervalo + 5)
+            intervalo = _entero(datos.get("interval") or intervalo + 5, intervalo + 5)
         elif error == "expired_token":
             break
         elif error == "access_denied":
@@ -219,7 +263,7 @@ def listar_modelos(sesion: Sesion) -> list[dict]:
     if respuesta.status_code >= 400:
         raise ErrorCopilot(f"GitHub Copilot respondió {respuesta.status_code}: {respuesta.text[:200]}")
     modelos = []
-    for modelo in respuesta.json().get("data", []):
+    for modelo in _lista_de_objetos(respuesta, "pedir la lista de modelos", "data"):
         endpoints = modelo.get("supported_endpoints")
         habilitado = (modelo.get("policy") or {}).get("state") == "enabled" or modelo.get("model_picker_enabled")
         if not habilitado:
@@ -312,27 +356,34 @@ def abrir_sesion_auto(sesion: Sesion) -> SesionAuto:
     except httpx.HTTPError as e:
         raise ErrorCopilot(f"No se pudo conectar con GitHub Copilot: {e}") from e
     if respuesta.status_code == 401:
-        raise ErrorCopilot("La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión.")
+        raise ErrorSesionCopilot("La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión.")
     if respuesta.status_code >= 400:
         raise ErrorCopilot(f"GitHub Copilot no permitió el modo auto ({respuesta.status_code}): {respuesta.text[:200]}")
-    datos = respuesta.json()
+    datos = _datos_de(respuesta, "abrir la sesión de modo auto", session_token=str, available_models=list)
+    if not all(isinstance(m, str) for m in [datos.get("selected_model"), *datos["available_models"]] if m is not None):
+        raise _respuesta_inesperada("abrir la sesión de modo auto")
     # El propuesto primero, sin repetir y en el orden del servidor
-    disponibles = [m for m in dict.fromkeys([datos.get("selected_model"), *datos.get("available_models", [])]) if m]
-    if not datos.get("session_token") or not disponibles:
-        raise ErrorCopilot("El modo auto de GitHub Copilot no ofreció ningún modelo.")
+    disponibles = [m for m in dict.fromkeys([datos.get("selected_model"), *datos["available_models"]]) if m]
+    if not datos["session_token"] or not disponibles:
+        raise ErrorModeloCopilot("El modo auto de GitHub Copilot no ofreció ningún modelo.")
+    try:
+        caduca = float(datos.get("expires_at") or time.time() + 3600)
+    except (TypeError, ValueError) as e:
+        raise _respuesta_inesperada("abrir la sesión de modo auto") from e
 
     try:
-        catalogo = httpx.get(f"{base}/models", headers=cabeceras(sesion.token), timeout=30).json().get("data", [])
-        endpoints = {m["id"]: m.get("supported_endpoints") for m in catalogo}
-    except (httpx.HTTPError, ValueError) as e:
+        catalogo = _lista_de_objetos(httpx.get(f"{base}/models", headers=cabeceras(sesion.token), timeout=30),
+                                     "pedir el catálogo de modelos", "data")
+        endpoints = {m["id"]: m.get("supported_endpoints") for m in catalogo if isinstance(m.get("id"), str)}
+    except (httpx.HTTPError, ErrorCopilot) as e:
         log.warning("No se pudo leer el catálogo de modelos; se usa el que propone Copilot: %r", e)
         endpoints = {}
     # Sin metadatos de endpoints = modelo anterior a /responses, que funciona por /chat/completions
     compatibles = [m for m in disponibles if not familia_excluida(m)
                    and (not endpoints.get(m) or "/chat/completions" in endpoints[m])]
     if not compatibles:
-        raise ErrorCopilot("El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions "
-                           f"({', '.join(disponibles)}). Elige un modelo concreto en `ia.modelo`.")
+        raise ErrorModeloCopilot("El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions "
+                                 f"({', '.join(disponibles)}). Elige un modelo concreto en `ia.modelo`.")
     log.info("Modo auto de GitHub Copilot: usando %s (disponibles: %s)", compatibles[0], ", ".join(disponibles))
-    return SesionAuto(compatibles[0], datos["session_token"], float(datos.get("expires_at") or time.time() + 3600),
+    return SesionAuto(compatibles[0], datos["session_token"], caduca,
                       disponibles, datos.get("discounted_costs") or {})

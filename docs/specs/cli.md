@@ -32,5 +32,7 @@ Origen: carril S, 2026-11-22: rechazos de la CLI cubiertos con tests (A-16)
 - Given que la app no tiene una sesión propia guardada, when se ejecuta `--copilot-logout`, then escribe «No había sesión guardada por esta app» y termina con código 0.
 - Given que la app no tiene una sesión propia guardada, when se ejecuta `--copilot-modelos`, then escribe en la salida de error «No has iniciado sesión. Ejecuta: python -m src.main --copilot-login» y termina con código 1.
 - Given una sesión de Copilot cuyo catálogo incluye modelos de familias no autorizadas, when se ejecuta `--copilot-modelos`, then no lista esos modelos y escribe al final «Se omite 1 modelo de una familia no autorizada por la empresa.» si omite uno, o «Se omiten <n> modelos de familias no autorizadas por la empresa.» si omite varios.
+- Given que GitHub devuelve una respuesta con un formato inesperado durante `--copilot-login` o al listar los modelos con `--copilot-modelos`, when se ejecuta la orden, then escribe en la salida de error «Error: GitHub devolvió una respuesta inesperada al <acción>.», donde <acción> es «pedir el código de dispositivo», «consultar la autorización» o «pedir la lista de modelos», y termina con código 1, sin trazo de Python.
 
 Origen: carril S, 2026-11-22: órdenes de sesión de la CLI cubiertas con tests y `--copilot-modelos` sin familias excluidas (A-12, A-16)
+Origen: carril S, 2026-11-22: una respuesta de GitHub con formato inesperado da un error de la CLI en vez de un trazo de Python (A-17)

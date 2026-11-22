@@ -2,12 +2,13 @@
 
 import pytest
 from src import asistente_ia, copilot
-from src.asistente_ia import AsistenteIA, ErrorAsistenteIA, dividir_texto
+from src.asistente_ia import AsistenteIA, ErrorAsistenteIA, ErrorModeloIA, dividir_texto
 
 
 class _Respuesta:
-    def __init__(self, datos):
-        self.datos, self.status_code, self.text = datos, 200, ""
+    def __init__(self, datos, status_code=200, headers=None):
+        self.datos, self.status_code, self.text = datos, status_code, ""
+        self.headers = headers or {}
 
     def json(self):
         return self.datos
@@ -15,8 +16,9 @@ class _Respuesta:
 
 class _Stream:
     """Respuesta de chat simulada; con `status_code` distinto de 200 simula un error (el contenido no importa)."""
-    def __init__(self, status_code=200):
+    def __init__(self, status_code=200, headers=None):
         self.status_code, self.text = status_code, ""
+        self.headers = headers or {}
     def __enter__(self):
         return self
     def __exit__(self, *a):
@@ -466,6 +468,211 @@ def test_auto_con_catalogo_caido_tambien_salta_las_familias_excluidas(monkeypatc
     assert enviados == ["gpt-5.4"]
 
 
+def test_401_al_abrir_la_sesion_auto_es_falta_de_sesion(monkeypatch):
+    from src.asistente_ia import ErrorSinSesionCopilot
+    copilot.guardar_token("gho_revocado")
+    monkeypatch.setattr(asistente_ia.copilot.httpx, "post", lambda *a, **kw: _Respuesta({}, 401))
+    peticiones_de_chat = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream",
+                        lambda *a, **kw: peticiones_de_chat.append(1) or _Stream())
+    with pytest.raises(ErrorSinSesionCopilot):
+        AsistenteIA(modelo="auto")._completar("hola")
+    assert peticiones_de_chat == []
+    assert copilot.leer_token() is None  # el token rechazado se invalida, como en /chat/completions
+
+
+def test_401_en_chat_con_token_de_la_variable_de_entorno_lo_dice_y_no_pide_login(monkeypatch):
+    copilot.guardar_token("gho_propio")
+    monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_env")
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: _Stream(401))
+    with pytest.raises(ErrorAsistenteIA) as error:
+        AsistenteIA()._completar("hola")
+    assert type(error.value) is ErrorAsistenteIA  # no es ErrorSinSesionCopilot: iniciar sesión no lo arregla
+    assert str(error.value) == ("GitHub Copilot rechazó el token de la variable de entorno COPILOT_GITHUB_TOKEN. "
+                                "Corrígela o quítala para usar la sesión guardada con el inicio de sesión de la app.")
+    assert "gho_propio" in copilot.RUTA_TOKEN.read_text(encoding="utf-8")  # el archivo propio no se borra
+
+
+def test_401_al_abrir_auto_con_token_de_la_variable_de_entorno_lo_dice_y_no_pide_login(monkeypatch):
+    copilot.guardar_token("gho_propio")
+    monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_env")
+    monkeypatch.setattr(asistente_ia.copilot.httpx, "post", lambda *a, **kw: _Respuesta({}, 401))
+    peticiones_de_chat = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: peticiones_de_chat.append(1) or _Stream())
+    with pytest.raises(ErrorAsistenteIA) as error:
+        AsistenteIA(modelo="auto")._completar("hola")
+    assert type(error.value) is ErrorAsistenteIA
+    assert str(error.value) == ("GitHub Copilot rechazó el token de la variable de entorno COPILOT_GITHUB_TOKEN. "
+                                "Corrígela o quítala para usar la sesión guardada con el inicio de sesión de la app.")
+    assert peticiones_de_chat == []
+    assert "gho_propio" in copilot.RUTA_TOKEN.read_text(encoding="utf-8")
+
+
+def test_429_con_retry_after_espera_lo_que_pide_copilot(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(429, headers={"Retry-After": "7"}), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [7]  # en vez de la espera fija de 2 s
+
+
+def test_429_sin_retry_after_usa_la_espera_fija(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(429), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [2]
+
+
+@pytest.mark.parametrize("valor", ["abc", "Wed, 21 Oct 2026 07:28:00 GMT", "-5", "nan"])
+def test_429_con_retry_after_que_no_es_un_numero_usa_la_espera_fija(monkeypatch, valor):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(429, headers={"Retry-After": valor}), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [2]
+
+
+def test_429_con_retry_after_por_encima_del_tope_no_espera_y_lo_dice(monkeypatch):
+    esperas, peticiones = [], []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: peticiones.append(1)
+                        or _ErrorHTTP(429, "límite de peticiones", {"Retry-After": "600"}))
+    with pytest.raises(ErrorAsistenteIA) as error:
+        AsistenteIA(api_key="x")._completar("hola")
+    assert esperas == [] and len(peticiones) == 1  # ni espera ni reintenta
+    assert str(error.value) == ("GitHub Copilot respondió 429: límite de peticiones. "
+                                "Copilot pide esperar 600 s antes de reintentar.")
+
+
+def test_fallo_al_completar_secciones_entrega_el_borrador_con_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    borrador = "## Resumen\nt\n### Puntos clave\n- a"  # le falta "### Conclusiones"
+    # La petición de completar lleva system + usuario + asistente + usuario = 4 mensajes: esa es la que falla
+    _simular_chat_con_estados(monkeypatch, lambda cuerpo: 429 if len(cuerpo["messages"]) == 4 else borrador)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    resumen = asistente.generar_resumen("Texto corto de la reunión.")
+    assert resumen == (borrador + "\n\n---\n\n"
+                       "> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban "
+                       "(GitHub Copilot respondió 429: límite de peticiones).\n\n"
+                       "> Nota de la aplicación: a este documento le faltan secciones obligatorias: Conclusiones. "
+                       "No lo des por completo: vuelve a generarlo o complétalo con la transcripción.")
+
+
+def test_fallo_en_la_revision_entrega_el_documento_sin_revisar_con_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    # La revisión es la petición cuyo último mensaje lleva «DOCUMENTO:»; la redacción no
+    _simular_chat_con_estados(monkeypatch, lambda cuerpo: 429 if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]
+                              else RESUMEN_MODELO)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    resumen = asistente.generar_resumen("Texto corto de la reunión.")
+    assert resumen == (RESUMEN_MODELO + "\n\n---\n\n"
+                       "> Nota de la aplicación: la revisión de fidelidad no se pudo completar (GitHub Copilot respondió "
+                       "429: límite de peticiones); este documento no está revisado.")
+
+
+def test_fallo_en_la_revision_con_varias_partes_no_dice_que_se_reviso(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    _simular_chat_con_estados(monkeypatch, lambda cuerpo: 429 if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]
+                              else "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(texto, fecha="29 de septiembre de 2026")
+    assert minuta.endswith(
+        "\n\n---\n\n> Nota de la aplicación: la revisión de fidelidad no se pudo completar (GitHub Copilot respondió "
+        "429: límite de peticiones); este documento no está revisado.\n\n"
+        "> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó a partir de notas "
+        "extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, cifras y condiciones con la "
+        "transcripción antes de darlo por bueno.")
+    assert "La revisión de fidelidad se hizo" not in minuta
+
+
+def test_cancelar_durante_la_revision_no_entrega_documento(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    _prohibir_red(monkeypatch)
+    def stream(metodo, url, json, headers, timeout):
+        if "DOCUMENTO:" in json["messages"][-1]["content"]:
+            cancelar.set()  # el usuario cancela mientras se revisa
+        return _StreamConTexto(RESUMEN_MODELO)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)
+
+
+def test_401_durante_la_revision_no_entrega_documento(monkeypatch):
+    from src.asistente_ia import ErrorSinSesionCopilot
+    _prohibir_red(monkeypatch)
+    _simular_chat_con_estados(monkeypatch, lambda cuerpo: 401 if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]
+                              else RESUMEN_MODELO)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    with pytest.raises(ErrorSinSesionCopilot):
+        asistente.generar_resumen("texto corto")
+
+
+def test_las_notas_nuevas_no_se_envian_a_copilot(monkeypatch):
+    import json
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    # Fallan la petición de completar (4 mensajes) y la revisión: salen las dos notas nuevas
+    cuerpos = _simular_chat_con_estados(monkeypatch, lambda cuerpo: 429 if len(cuerpo["messages"]) == 4
+                                        or "DOCUMENTO:" in cuerpo["messages"][-1]["content"]
+                                        else "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else sin_tareas)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(texto)
+    assert "la revisión de fidelidad no se pudo completar" in minuta
+    assert "no se pudieron pedir de nuevo a Copilot" in minuta
+    assert not any("Nota de la aplicación" in json.dumps(cuerpo, ensure_ascii=False) for cuerpo in cuerpos)
+
+
+def test_modelo_no_autorizado_al_renovar_la_sesion_en_la_revision_no_entrega_documento(monkeypatch):
+    import time
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st1", "expires_at": time.time() + 60},  # no vigente: se renueva en la revisión
+                   {"available_models": ["kimi-k3"], "selected_model": "kimi-k3",
+                    "session_token": "st2", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-5.4": ["/chat/completions"]})
+    _simular_chat(monkeypatch, lambda cuerpo: RESUMEN_MODELO)
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", revision_fidelidad=True)
+    with pytest.raises(ErrorModeloIA) as error:
+        asistente.generar_resumen("texto corto")
+    assert str(error.value).startswith("El modo auto no ofrece ningún modelo autorizado")
+
+
+def test_modelo_no_autorizado_a_mitad_de_las_partes_no_se_envuelve(monkeypatch):
+    _prohibir_red(monkeypatch)
+    import time
+    # La validación del modelo abre la primera sesión (gpt-5.4); cada parte reabre la sesión (no vigente) y la segunda
+    # solo ofrece un modelo de familia excluida: el error aparece a mitad de las partes
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st1", "expires_at": time.time() + 60},
+                   {"available_models": ["kimi-k3"], "selected_model": "kimi-k3",
+                    "session_token": "st2", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-5.4": ["/chat/completions"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", max_caracteres_bloque=300, peticiones_paralelas=1,
+                            revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1  # se procesaría en varias partes
+    with pytest.raises(ErrorModeloIA) as error:
+        asistente.generar_resumen(TEXTO_LARGO)
+    assert "falló la parte" not in str(error.value)
+    assert enviados == []  # ninguna parte llegó a enviarse
+
+
 def test_nota_de_notas_dice_el_numero_de_partes():
     from src.asistente_ia import nota_de_notas
     assert nota_de_notas(2, False) == (
@@ -736,9 +943,9 @@ def test_minuta_de_varias_partes_y_seccion_que_falta_lleva_las_dos_notas(monkeyp
 
 
 class _ErrorHTTP(_Stream):
-    """Respuesta de error de Copilot con un cuerpo de texto."""
-    def __init__(self, status_code, texto):
-        super().__init__(status_code)
+    """Respuesta de error de Copilot con un cuerpo de texto y, si se pasan, cabeceras (p. ej. Retry-After)."""
+    def __init__(self, status_code, texto, headers=None):
+        super().__init__(status_code, headers)
         self.text = texto
 
 
@@ -1009,3 +1216,171 @@ def test_revision_que_restituye_la_seccion_no_lleva_nota(monkeypatch):
     minuta = asistente.generar_minuta("Texto corto de la reunión.")
     assert "Tareas y pendientes" in minuta
     assert "Nota de la aplicación" not in minuta
+
+
+def test_cancelar_cuando_falla_la_pasada_de_secciones_no_entrega_documento(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    borrador = "## Resumen\nt\n### Puntos clave\n- a"  # le falta "### Conclusiones"
+    def respuesta(cuerpo):
+        if len(cuerpo["messages"]) == 4:  # la petición de completar secciones
+            cancelar.set()  # el usuario cancela justo cuando esa petición falla
+            return 400
+        return borrador
+    _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("Texto corto de la reunión.", cancelar=cancelar)
+
+
+def test_cancelar_cuando_falla_la_revision_no_entrega_documento(monkeypatch):
+    import threading
+    cancelar = threading.Event()
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    def respuesta(cuerpo):
+        if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]:  # la revisión de fidelidad
+            cancelar.set()  # el usuario cancela justo cuando esa petición falla
+            return 400
+        return RESUMEN_MODELO
+    _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)
+
+
+def _nota_con_error_de_secciones(monkeypatch, cuerpo_de_error):
+    """Genera un resumen cuya pasada de completar secciones falla con un 400 cuyo cuerpo es `cuerpo_de_error`.
+    Devuelve (borrador, resumen)."""
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    borrador = "## Resumen\nt\n### Puntos clave\n- a"  # le falta "### Conclusiones"
+    def stream(metodo, url, json, headers, timeout):
+        if len(json["messages"]) == 4:  # la petición de completar secciones
+            return _ErrorHTTP(400, cuerpo_de_error)
+        return _StreamConTexto(borrador)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    return borrador, asistente.generar_resumen("Texto corto de la reunión.")
+
+
+def test_motivo_de_la_nota_es_de_una_sola_linea(monkeypatch):
+    import re
+    borrador, resumen = _nota_con_error_de_secciones(
+        monkeypatch, "<h1>Error interno</h1>\n## Resumen\nAlgo inesperado\n<h2>Detalle</h2>")
+    nota = resumen[len(borrador):]
+    assert "<h1>Error interno</h1>" in nota  # el texto del error se conserva, aplanado
+    assert not re.search(r"^## Resumen", nota, re.M)  # no empieza ningún título dentro de la nota
+    assert all(linea == "---" or linea.startswith("> Nota de la aplicación")
+               for linea in nota.split("\n") if linea.strip())
+
+
+def test_motivo_de_la_nota_largo_se_recorta(monkeypatch):
+    import re
+    borrador, resumen = _nota_con_error_de_secciones(monkeypatch, "a" * 500)
+    motivo = re.search(r"faltaban \((.*)\)\.", resumen[len(borrador):]).group(1)
+    assert motivo.startswith("GitHub Copilot respondió 400: aaa")
+    assert motivo.endswith("…") and len(motivo) <= 121  # 120 caracteres y «…»
+
+
+def test_seccion_recuperada_por_la_revision_no_deja_nota_de_secciones(monkeypatch):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    borrador = "## Resumen\nt\n### Puntos clave\n- a"  # le falta "### Conclusiones"
+    def respuesta(cuerpo):
+        if len(cuerpo["messages"]) == 4:  # la petición de completar secciones falla...
+            return 400
+        if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]:  # ...pero la revisión devuelve el documento completo
+            return RESUMEN_MODELO
+        return borrador
+    _simular_chat_con_estados(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    assert asistente.generar_resumen("Texto corto de la reunión.") == RESUMEN_MODELO  # sin ninguna nota
+
+
+def test_cancelar_durante_la_espera_de_retry_after_no_reintenta(monkeypatch):
+    import threading
+    import time
+    cancelar = threading.Event()
+    peticiones = []
+    _prohibir_red(monkeypatch)
+    def stream(metodo, url, json, headers, timeout):
+        peticiones.append(url)
+        threading.Timer(0.1, cancelar.set).start()  # se cancela mientras espera el Retry-After (30 s)
+        return _Stream(status_code=429, headers={"Retry-After": "30"})
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    inicio = time.monotonic()
+    with pytest.raises(InterruptedError):
+        asistente.generar_resumen("texto corto", cancelar=cancelar)
+    assert time.monotonic() - inicio < 1  # no espera los 30 s
+    assert len(peticiones) == 1
+
+
+def test_retry_after_cero_reintenta_sin_esperar(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(429, headers={"Retry-After": "0"}), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [0]  # reintenta de inmediato
+
+
+def test_retry_after_igual_al_tope_espera_el_tope(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(429, headers={"Retry-After": "60"}), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [60]  # el límite exacto se acepta
+
+
+def test_5xx_con_retry_after_tambien_lo_respeta(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: esperas.append(segundos))
+    respuestas = iter([_Stream(503, headers={"Retry-After": "4"}), _Stream()])
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: next(respuestas))
+    assert AsistenteIA(api_key="x")._completar("hola") == "OK"
+    assert esperas == [4]
+
+
+def test_401_con_token_de_opencode_no_borra_el_token_propio(monkeypatch):
+    import json
+    from src.asistente_ia import ErrorSinSesionCopilot
+    copilot.guardar_token("gho_propio")  # archivo propio presente...
+    copilot.RUTA_AUTH_OPENCODE.parent.mkdir(parents=True)
+    copilot.RUTA_AUTH_OPENCODE.write_text(json.dumps({"github-copilot": {"refresh": "gho_oc"}}))
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda *a, **kw: _Stream(401))
+    # ...pero el token rechazado es el de opencode (token pasado explícitamente)
+    with pytest.raises(ErrorSinSesionCopilot):
+        AsistenteIA(api_key="gho_oc")._completar("hola")
+    assert copilot.leer_token().token == "gho_propio"  # el archivo propio no se toca
+    assert "gho_oc" in copilot.RUTA_AUTH_OPENCODE.read_text(encoding="utf-8")  # ni la sesión de opencode
+
+
+def test_modelo_no_autorizado_tras_terminar_una_parte_no_se_envuelve(monkeypatch):
+    _prohibir_red(monkeypatch)
+    import time
+    # Validación (gpt-5.4, caduca en 1 min), parte 1 (gpt-5.4, caduca en 1 min: la siguiente parte renueva) y
+    # parte 2: la sesión nueva solo ofrece kimi-k3
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st1", "expires_at": time.time() + 60},
+                   {"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4",
+                    "session_token": "st2", "expires_at": time.time() + 60},
+                   {"available_models": ["kimi-k3"], "selected_model": "kimi-k3",
+                    "session_token": "st3", "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-5.4": ["/chat/completions"]})
+    enviados = []
+    monkeypatch.setattr(asistente_ia.httpx, "stream", lambda metodo, url, json, headers, timeout:
+                        enviados.append(json["model"]) or _Stream())
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", max_caracteres_bloque=300, peticiones_paralelas=1,
+                            revision_fidelidad=False)
+    assert len(dividir_texto(TEXTO_LARGO, 300)) > 1  # se procesa en varias partes
+    with pytest.raises(ErrorModeloIA) as error:
+        asistente.generar_resumen(TEXTO_LARGO)
+    assert str(error.value) == ("El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions "
+                                "(kimi-k3). Elige un modelo concreto en `ia.modelo`.")
+    assert enviados == ["gpt-5.4"]  # solo la parte 1 llegó a enviarse

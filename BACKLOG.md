@@ -18,7 +18,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 4. ✅ [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
 5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
 6. ✅ [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
-7. [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
+7. ✅ [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
 8. ✅ [🟡] Hacer que la revisión de fidelidad compare contra la transcripción original, no contra las notas, o advertir de que el documento se redactó a partir de notas — hallazgo A-05 — carril M
 9. ✅ [🟡] En la CLI, validar la combinación de formato y salida antes de transcribir y usar el mismo serializador que la exportación a archivo — hallazgo A-10 — carril S
 10. [🟡] Consultar el catálogo de Copilot una sola vez y bajo demanda, sin abrir una sesión `auto` al arrancar, y documentar ese tráfico y el orden de búsqueda del token — hallazgo A-13 — carril S
@@ -26,7 +26,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 12. ✅ [🟡] Eliminar `transcribir_archivo_largo`, `_on_drop`, `duracion_archivo`, `pydantic` y `tqdm`, y tratar los metadatos de `ffprobe` como opcionales — hallazgo A-20 — carril S
 13. ✅ [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
 14. [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S
-15. [🟡] Convertir en `ErrorCopilot` las respuestas de GitHub con formato inesperado, para que el diálogo de login no se quede colgado — hallazgo A-17 (posible) — carril S
+15. ✅ [🟡] Convertir en `ErrorCopilot` las respuestas de GitHub con formato inesperado, para que el diálogo de login no se quede colgado — hallazgo A-17 (posible) — carril S
 16. ✅ [🟢] No habilitar «Transcribir» tras generar un documento de una entrada cuyo audio ya no existe — hallazgo A-26 — carril S
 17. ✅ [🟢] Mostrar en pantalla o en la pestaña Registro los errores de «Guardar como…» — hallazgo A-27 — carril S
 18. [🟡] No sobrescribir sin aviso la transcripción, el resumen o la minuta de otra grabación con el mismo nombre en la misma carpeta (`reunion.m4a` y `reunion.mp4`); decidir antes entre incluir la extensión de origen en el nombre o preguntar antes de sobrescribir — hallazgo A-25, separado del punto 1 — carril S o M según la decisión
@@ -38,8 +38,8 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 24. [🟡] Aceptar la revisión de fidelidad solo si conserva las tareas y los acuerdos del documento, no solo sus secciones, para que una revisión que borra tareas no sustituya a la minuta — hallazgo A-05 (segunda mitad del escenario) — carril S
 25. [🟡] Avisar en el documento cuando Copilot cortó una respuesta (por longitud, por el filtro de contenido o porque el stream terminó sin cierre), también en las notas de una parte, para no dar por completo un documento truncado; antes hay que confirmar con una respuesta real qué `finish_reason` envía Copilot y cuándo — hallazgo A-11 (escenario B, posible), historia 07 — carril S
 26. [🟡] Avisar antes de redactar si las notas de todas las partes superan el límite de entrada del modelo (`max_prompt_tokens`, que sale del catálogo del punto 10), para no pagar las notas y fallar en la redacción; antes hay que confirmar con una respuesta real el límite que devuelve Copilot — hallazgo A-11 (escenario C, posible), historia 07 — carril M
-27. [🟡] Respetar `Retry-After` en los 429 de Copilot en vez de la espera fija de 2, 4 y 8 s — hallazgo A-11 (dirección del arreglo), historia 07 — carril S
-28. [🟡] Entregar el documento ya redactado con una nota de la aplicación, en vez de un error, si falla la pasada de completar secciones o la revisión de fidelidad, para no pagar otra vez la redacción — hallazgo A-11 (relacionado: `_generar` no protege esas dos pasadas), historia 07 — carril S
+27. ✅ [🟡] Respetar `Retry-After` en los 429 de Copilot en vez de la espera fija de 2, 4 y 8 s — hallazgo A-11 (dirección del arreglo), historia 07 — carril S
+28. ✅ [🟡] Entregar el documento ya redactado con una nota de la aplicación, en vez de un error, si falla la pasada de completar secciones o la revisión de fidelidad, para no pagar otra vez la redacción — hallazgo A-11 (relacionado: `_generar` no protege esas dos pasadas), historia 07 — carril S
 
 ## Backlog
 

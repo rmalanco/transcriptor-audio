@@ -89,7 +89,7 @@ def main():
 Ejemplos:
   python -m src.main audio.mp3
   python -m src.main video.mp4 -o transcripcion.txt --modelo small
-  python -m src.main archivo.wav --idioma en --formato srt
+  python -m src.main archivo.wav --idioma en --formato srt -o archivo.srt
   python -m src.main --listar-modelos
   python -m src.main --copilot-login
   python -m src.main --copilot-modelos

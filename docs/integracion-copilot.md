@@ -74,7 +74,9 @@ opencode no lo implementa; se tomó de la extensión de VS Code y del PR #3902 d
 1. `POST /models/session` con `{"auto_mode": {"model_hints": ["auto"]}}` → `available_models`,
    `selected_model`, `session_token`, `expires_at` (1 h), `discounted_costs` (0.1 = 10 % de descuento).
 2. Las peticiones llevan `Copilot-Session-Token: <session_token>` y `model` = el modelo elegido.
-3. La sesión se renueva 5 min antes de caducar; ante un 401 se abre una nueva sin borrar el token de GitHub.
+3. La sesión se renueva 5 min antes de caducar. Un 401 al abrir la sesión o en una petición se trata como falta de sesión:
+   se invalida el token guardado si es el rechazado (el de opencode no se toca) y se pide iniciar sesión; si el token
+   viene de `COPILOT_GITHUB_TOKEN`, no se abre el login y el error lo dice.
 
 `selected_model` suele ser un modelo solo-`/responses` (`gpt-5.3-codex`), así que se usa el primero de la lista
 que admita `/chat/completions` y no sea de una familia de `FAMILIAS_EXCLUIDAS`. El orden del servidor cambia entre sesiones: en una prueba tocó `gpt-5.4`, en

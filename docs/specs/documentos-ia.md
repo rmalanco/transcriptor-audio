@@ -163,3 +163,25 @@ Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
   then la línea de estado dice «Revisando fidelidad con la transcripción…».
 
 Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
+
+### Sesión rechazada por Copilot
+- Given que Copilot rechaza el token (401) al generar o al abrir la sesión del modo `auto`, when el token es el de la sesión guardada por la app o el de opencode, then se abre el inicio de sesión, sin borrar el token de opencode ni un token propio distinto del rechazado.
+- Given que el token rechazado viene de la variable de entorno `COPILOT_GITHUB_TOKEN`, when Copilot lo rechaza (401) al generar o al abrir la sesión del modo `auto`, then no se abre el inicio de sesión y aparece el error «GitHub Copilot rechazó el token de la variable de entorno COPILOT_GITHUB_TOKEN. Corrígela o quítala para usar la sesión guardada con el inicio de sesión de la app.».
+
+Origen: carril S, 2026-11-22: un 401 de la sesión `auto` se trata como falta de sesión, y el token de la variable de entorno avisa en vez de abrir el login en bucle (A-06, A-07)
+
+### Copilot pide esperar
+- Given que Copilot responde 429 o 5xx con `Retry-After` de N segundos (de 0 a 60), when se reintenta la petición, then la generación espera N segundos antes de reintentar; si se cancela durante esa espera, se corta en el acto.
+- Given que Copilot responde 429 o 5xx sin `Retry-After`, o con un valor que no es un número no negativo, when se reintenta la petición, then se usan las esperas fijas de 2, 4 y 8 segundos.
+- Given que Copilot responde 429 o 5xx con `Retry-After` mayor de 60 segundos, when se recibe esa respuesta, then no se espera, no se reintenta y la generación falla con «GitHub Copilot respondió <código>: <cuerpo>. Copilot pide esperar <N> s antes de reintentar.», donde <cuerpo> es el texto de la respuesta, hasta 300 caracteres, sin el punto final y <N> son los segundos pedidos.
+
+Origen: carril S, 2026-11-22: los 429 y 5xx respetan `Retry-After`, con un tope de 60 s (A-11)
+
+### Documento entregado aunque falle una pasada posterior
+- Given que la redacción del documento terminó y falla la pasada de completar las secciones que faltaban, por un error que no es cancelación, falta de sesión ni modelo no autorizado, when termina la generación, then el documento se muestra, se guarda y se exporta con la nota «> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban (<motivo>).» tras una línea horizontal; si además siguen faltando secciones, la nota de secciones que faltan es «> Nota de la aplicación: a este documento le faltan secciones obligatorias: <secciones>. No lo des por completo: vuelve a generarlo o complétalo con la transcripción.» (sin la frase «que Copilot no devolvió ni al pedírselas de nuevo»).
+- Given que la redacción del documento terminó y falla la revisión de fidelidad, por el mismo tipo de error, when termina la generación, then el documento se muestra, se guarda y se exporta con la nota «> Nota de la aplicación: la revisión de fidelidad no se pudo completar (<motivo>); este documento no está revisado.», y si el documento es de varias partes, su nota de las partes no dice que se revisó.
+- Given una pasada posterior fallida, when el motivo se escribe en la nota, then va en una sola línea, recortado a 120 caracteres más «…» si es más largo.
+- Given que al final no falta ninguna sección, when termina la generación, then no hay nota de secciones, aunque la pasada de completar haya fallado.
+- Given que se cancela la generación durante una pasada posterior, when la cancelación se produce, then no se entrega ningún documento.
+
+Origen: carril S, 2026-11-22: si falla la pasada de completar secciones o la revisión de fidelidad, el documento se entrega con una nota en vez de perderse (A-11)

@@ -58,6 +58,61 @@ def test_token_propio_tiene_prioridad_y_variable_de_entorno_sobre_todo(monkeypat
     assert copilot.leer_token().token == "gho_env"
 
 
+def test_el_origen_del_token_se_informa(monkeypatch):
+    copilot.RUTA_AUTH_OPENCODE.parent.mkdir(parents=True)
+    copilot.RUTA_AUTH_OPENCODE.write_text(json.dumps({"github-copilot": {"refresh": "gho_oc"}}))
+    assert copilot.leer_token().origen == str(copilot.RUTA_AUTH_OPENCODE)  # solo sesión de opencode
+    copilot.guardar_token("gho_app")
+    assert copilot.leer_token().origen == str(copilot.RUTA_TOKEN)  # el archivo propio gana a opencode
+    monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_env")
+    assert copilot.leer_token().origen == copilot.VARIABLE_ENTORNO  # la variable gana a todo
+
+
+class _RespuestaSinJSON:
+    """Respuesta 200 que no es JSON (p. ej. una página de un portal cautivo)."""
+    status_code = 200
+    text = "<html>Inicia sesión en la red</html>"
+
+    def json(self):
+        raise json.JSONDecodeError("Expecting value", self.text, 0)
+
+
+def test_codigo_de_dispositivo_con_respuesta_que_no_es_json_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _RespuestaSinJSON())
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.iniciar_login()
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al pedir el código de dispositivo."
+
+
+def test_codigo_de_dispositivo_sin_las_claves_esperadas_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta({"user_code": "ABCD-1234"}))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.iniciar_login()
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al pedir el código de dispositivo."
+
+
+def test_sondeo_del_token_con_respuesta_inesperada_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta({"foo": 1}))  # ni token ni error
+    codigo = copilot.CodigoDispositivo("dc", "X", "https://github.com/login/device", 5, 900)
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.esperar_login(codigo, dormir=lambda s: pytest.fail("no debe reintentar ante una respuesta inesperada"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al consultar la autorización."
+
+
+def test_intervalo_de_sondeo_que_no_es_un_numero_usa_el_valor_por_defecto(monkeypatch):
+    # Como cuando falta el campo: 5 s al pedir el código y el intervalo actual + 5 s con slow_down
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(
+        {"device_code": "dc", "user_code": "ABCD", "verification_uri": "https://github.com/login/device",
+         "interval": "rapido"}))
+    assert copilot.iniciar_login().interval == 5
+    respuestas = iter([_Respuesta({"error": "slow_down", "interval": "lento"}), _Respuesta({"access_token": "gho_ok"})])
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: next(respuestas))
+    esperas = []
+    codigo = copilot.CodigoDispositivo("dc", "ABCD", "https://github.com/login/device", 5, 900)
+    assert copilot.esperar_login(codigo, dormir=esperas.append) == "gho_ok"
+    assert esperas == [5 + 5 + copilot.ESPERA_EXTRA]
+
+
 def test_device_flow_espera_autorizacion_y_guarda_token(monkeypatch):
     respuestas = iter([
         _Respuesta({"device_code": "dc", "user_code": "ABCD-1234", "verification_uri": "https://github.com/login/device",
@@ -110,6 +165,13 @@ def test_listar_modelos_filtra_los_de_chat_habilitados(monkeypatch):
     monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
     ids = [m["id"] for m in copilot.listar_modelos(copilot.Sesion("gho_x"))]
     assert ids == ["claude-haiku-4.5", "gpt-4.1"]
+
+
+def test_listar_modelos_con_respuesta_inesperada_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta({"foo": 1}))  # sin "data"
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.listar_modelos(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al pedir la lista de modelos."
 
 
 def test_sin_sesion_lanza_error_especifico():
@@ -207,6 +269,32 @@ def test_modelos_economicos_excluye_caros_sin_precio_prohibidos_y_duplicados(mon
     ]}
     monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
     assert copilot.modelos_economicos(copilot.Sesion("gho_x")) == ["gpt-4.1", "claude-haiku-5.5"]
+
+
+def test_sesion_auto_con_respuesta_inesperada_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta({"selected_model": "gpt-5.4"}))  # sin claves
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.abrir_sesion_auto(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al abrir la sesión de modo auto."
+
+
+def test_sesion_auto_con_caducidad_que_no_es_un_numero_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(
+        {"available_models": ["gpt-5.4"], "selected_model": "gpt-5.4", "session_token": "st", "expires_at": "pronto"}))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: _catalogo(("gpt-5.4", ["/chat/completions"])))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.abrir_sesion_auto(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al abrir la sesión de modo auto."
+
+
+def test_sesion_auto_con_modelos_que_no_son_texto_da_error_copilot(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(
+        {"available_models": [{"id": "gpt-5.4"}], "selected_model": "gpt-5.4", "session_token": "st",
+         "expires_at": 9999999999}))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: pytest.fail("no debe consultarse el catálogo"))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.abrir_sesion_auto(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al abrir la sesión de modo auto."
 
 
 def test_auto_salta_modelos_que_solo_admiten_responses(monkeypatch):
@@ -308,3 +396,39 @@ def test_opciones_de_modelo_incluyen_el_configurado_si_esta_autorizado():
 def test_opciones_de_modelo_no_incluyen_un_configurado_de_familia_excluida():
     opciones = copilot.opciones_de_modelo(["auto", "claude-haiku-5.5"], "kimi-k3")
     assert opciones == ["auto", "claude-haiku-5.5"]
+
+
+def test_codigo_de_dispositivo_con_caducidad_que_no_es_un_numero_no_revienta(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(
+        {"device_code": "dc", "user_code": "ABCD-1234", "verification_uri": "https://github.com/login/device",
+         "expires_in": "pronto"}))
+    codigo = copilot.iniciar_login()
+    assert codigo.expires_in == 900  # el mismo valor por defecto que cuando falta el campo
+
+
+@pytest.mark.parametrize("disponibles", [None, "gpt-5.4", {"a": 1}])
+def test_sesion_auto_con_modelos_nulos_da_error_copilot(monkeypatch, disponibles):
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(
+        {"available_models": disponibles, "selected_model": "gpt-5.4", "session_token": "st",
+         "expires_at": 9999999999}))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: pytest.fail("no debe consultarse el catálogo"))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.abrir_sesion_auto(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al abrir la sesión de modo auto."
+
+
+@pytest.mark.parametrize("data", [None, 5, ["x"]])
+def test_listar_modelos_con_data_inesperado_da_error_copilot(monkeypatch, data):
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta({"data": data}))
+    with pytest.raises(copilot.ErrorCopilot) as error:
+        copilot.listar_modelos(copilot.Sesion("gho_x"))
+    assert str(error.value) == "GitHub devolvió una respuesta inesperada al pedir la lista de modelos."
+
+
+@pytest.mark.parametrize("data", [None, 5, ["x"], [{"id": ["lista"]}], [{"id": None}]])
+def test_sesion_auto_con_catalogo_de_formato_inesperado_sigue_sin_endpoints(monkeypatch, data):
+    sesion = {"available_models": ["mistral-medium-3", "gpt-5.4"], "selected_model": "mistral-medium-3",
+              "session_token": "st", "expires_at": 9999999999}
+    monkeypatch.setattr(copilot.httpx, "post", lambda *a, **kw: _Respuesta(sesion))
+    monkeypatch.setattr(copilot.httpx, "get", lambda *a, **kw: _Respuesta({"data": data}))
+    assert copilot.abrir_sesion_auto(copilot.Sesion("gho_x")).modelo == "gpt-5.4"
