@@ -4,7 +4,7 @@
 
 Paquete único de la aplicación. Contiene la transcripción local con faster-whisper, la generación de resumen y
 minuta con GitHub Copilot, el historial en SQLite, la interfaz gráfica (CustomTkinter) y la CLI. No tiene
-subpaquetes: sus trece archivos `.py` se importan entre sí como `src.<módulo>`.
+subpaquetes: sus catorce archivos `.py` se importan entre sí como `src.<módulo>`.
 
 Dependencias entre módulos (quién importa a quién):
 
@@ -12,13 +12,14 @@ Dependencias entre módulos (quién importa a quién):
 |---|---|
 | `__init__.py` | nada (solo `__version__`) |
 | `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
-| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`; `ui_historial` al mostrar el historial por primera vez |
+| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
 | `ui_historial.py` | `historial`, y métodos de `AppTranscriptor` (incluidos privados) |
 | `asistente_ia.py` | `copilot`, `registro` |
 | `persistencia.py` | `utils`; `historial` y `transcriber` solo como tipos |
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
 | `transcriber.py` | `registro`, `utils` |
+| `flujo_transcripcion.py` | `transcriber` y `utils`; sin Tk ni `faster_whisper` al importarse |
 | `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
 ## Interface
@@ -286,7 +287,7 @@ Dependencias entre módulos (quién importa a quién):
   reescribe. La ruta se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
   (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
-- Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `ui.py:AppTranscriptor._generar_ruta_salida` y la
+- Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `flujo_transcripcion.py:ruta_transcripcion` y la
   escribe `persistencia.py:persistir_transcripcion`), y `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (la ruta sale de
   `ui.py:AppTranscriptor._generar_documento_ia` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe
   sin preguntar; dos grabaciones con el mismo nombre no comparten archivos (`BACKLOG.md`, Salud del código #18).

@@ -116,7 +116,7 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   que usa `self.after(0, …)` y no hace nada si la ventana se está cerrando (`_cerrando`). `_log` y `_actualizar_estado`
   ya pasan por ahí. El diálogo de login tiene su propio `_en_ui`.
 - **Hilo de la transcripción.** Uno solo a la vez (`_transcribiendo` mira si sigue vivo). Las opciones se leen en el
-  hilo principal antes de lanzarlo. Carga el modelo (`_obtener_transcriptor`), transcribe, y todavía en ese hilo llama
+  hilo principal antes de lanzarlo. Elige el transcriptor (`flujo_transcripcion.py:transcriptor_para`), carga el modelo, transcribe (`flujo_transcripcion.py:transcribir`), y todavía en ese hilo llama
   a `persistir_transcripcion`; después entrega el resultado con `_en_ui`. Se cancela con un `threading.Event`
   (`cancelar_flag`) que `TranscriptorAudio.transcribir` revisa tras cada segmento aceptado.
 - **Hilo de fondo por generación de IA.** Cada resumen o minuta crea un `_GeneracionIA` con su propia señal de

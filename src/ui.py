@@ -28,6 +28,7 @@ from src.registro import configurar_logging
 from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_preferido,
                                leer_modelo_preferido, modelo_ia_efectivo)
 from src.transcriber import TranscriptorAudio
+from src.flujo_transcripcion import OpcionesTranscripcion, ruta_transcripcion, transcribir, transcriptor_para
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
@@ -606,15 +607,15 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             return
 
         # Se leen las opciones en el hilo principal (Tkinter no es thread-safe)
-        opciones = {
-            "archivo": self.archivo_actual,
-            "modelo": self.var_modelo.get(),
-            "idioma": self._codigo_idioma(),
-            "dispositivo": self.var_dispositivo.get(),
-            "compute": self.var_compute.get(),
-            "formato": self.var_formato.get(),
-            "timestamps": self.var_timestamps.get(),
-        }
+        opciones = OpcionesTranscripcion.desde_configuracion(
+            self.configuracion, self.archivo_actual,
+            modelo=self.var_modelo.get(),
+            idioma=self._codigo_idioma(),
+            dispositivo=self.var_dispositivo.get(),
+            compute_type=self.var_compute.get(),
+            formato=self.var_formato.get(),
+            incluir_timestamps=self.var_timestamps.get(),
+        )
 
         self.cancelar_flag.clear()
         self._limpiar_resultado()
@@ -638,21 +639,14 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                        self.combo_dispositivo, self.combo_compute):
             widget.configure(state=estado)
 
-    def _obtener_transcriptor(self, modelo: str, dispositivo: str, compute: str) -> TranscriptorAudio:
-        """Reutiliza el modelo ya cargado si no cambiaron sus parámetros."""
-        t = self._transcriptor
-        if t is None or (t.modelo_nombre, t.dispositivo, t.compute_type) != (modelo, dispositivo, compute):
-            t = TranscriptorAudio(modelo_nombre=modelo, dispositivo=dispositivo, compute_type=compute)
-            _ = t.modelo  # fuerza la carga/descarga aquí para poder informar del estado
-            self._transcriptor = t
-        return t
-
-    def _procesar_transcripcion(self, opciones: dict):
-        cfg = self.configuracion["transcripcion"]
+    def _procesar_transcripcion(self, opciones: OpcionesTranscripcion):
         try:
-            self._actualizar_estado(f"Cargando modelo {opciones['modelo']}…")
-            self._log(f"Iniciando transcripción con modelo: {opciones['modelo']}")
-            transcriptor = self._obtener_transcriptor(opciones["modelo"], opciones["dispositivo"], opciones["compute"])
+            self._actualizar_estado(f"Cargando modelo {opciones.modelo}…")
+            self._log(f"Iniciando transcripción con modelo: {opciones.modelo}")
+            transcriptor = transcriptor_para(self._transcriptor, opciones.modelo, opciones.dispositivo,
+                                             opciones.compute_type)
+            _ = transcriptor.modelo  # fuerza la carga/descarga aquí para poder informar del estado
+            self._transcriptor = transcriptor
 
             if self.cancelar_flag.is_set():
                 raise InterruptedError
@@ -663,30 +657,16 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 progreso = min(segmento.fin / duracion_total, 1.0) if duracion_total else -1
                 self._en_ui(self._agregar_segmento, segmento, progreso)
 
-            resultado = transcriptor.transcribir(
-                opciones["archivo"],
-                idioma=opciones["idioma"],
-                task="transcribe",
-                beam_size=cfg["beam_size"],
-                best_of=cfg["best_of"],
-                temperature=cfg["temperature"],
-                condition_on_previous_text=cfg["condition_on_previous_text"],
-                compression_ratio_threshold=cfg["compression_ratio_threshold"],
-                logprob_threshold=cfg["logprob_threshold"],
-                no_speech_threshold=cfg["no_speech_threshold"],
-                word_timestamps=self.configuracion["salida"]["palabra_por_palabra"],
-                on_segmento=on_segmento,
-                cancelar=self.cancelar_flag,
-            )
+            resultado = transcribir(transcriptor, opciones, self.configuracion["transcripcion"],
+                                    on_segmento=on_segmento, cancelar=self.cancelar_flag)
 
             if self.cancelar_flag.is_set():
                 raise InterruptedError
 
             # Primero el historial y después el archivo junto al audio (regla 6); no lanza por fallos de guardado
-            ruta_salida = self._generar_ruta_salida(opciones["archivo"], opciones["formato"])
             persistencia = persistir_transcripcion(
-                self.historial, opciones["archivo"], resultado, opciones["modelo"],
-                ruta_salida, opciones["formato"], opciones["timestamps"],
+                self.historial, opciones.archivo, resultado, opciones.modelo,
+                ruta_transcripcion(opciones.archivo, opciones.formato), opciones.formato, opciones.incluir_timestamps,
             )
             self._en_ui(self._finalizar_ok, resultado, persistencia)
 
@@ -1235,10 +1215,6 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     # ------------------------------------------------------------ Resultado
 
-    def _generar_ruta_salida(self, archivo: Optional[str] = None, formato: Optional[str] = None) -> str:
-        formato = formato or self.var_formato.get()
-        return ruta_junto_al_audio(archivo or self.archivo_actual, f"_transcripcion.{formato}")
-
     def _copiar_texto(self):
         if not self.resultado_actual:
             return
@@ -1260,7 +1236,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 ("WebVTT", "*.vtt"),
                 ("JSON", "*.json")
             ],
-            initialfile=Path(self._generar_ruta_salida()).name
+            initialfile=Path(ruta_transcripcion(self.archivo_actual, self.var_formato.get())).name
         )
         if archivo:
             # El formato se deduce de la extensión elegida en el diálogo

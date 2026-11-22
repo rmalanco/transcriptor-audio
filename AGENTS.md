@@ -66,6 +66,7 @@ aunque se ejecute desde otra carpeta.
 | Archivo | Responsabilidad |
 |---|---|
 | `transcriber.py` | `TranscriptorAudio` (faster-whisper), filtro de alucinaciones |
+| `flujo_transcripcion.py` | Flujo de la transcripción sin interfaz: opciones, elección del transcriptor, ruta y llamada a Whisper |
 | `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`; preferencias del usuario en `preferencias.json` (modelo de IA elegido, `modelo_ia_efectivo`) |
 | `copilot.py` | Integración con GitHub Copilot: login (device flow), token, catálogo de modelos, modo `auto` |
 | `asistente_ia.py` | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, post-proceso de la minuta |
