@@ -26,6 +26,8 @@ from src.historial import Historial
 from src.registro import configurar_logging
 from src.transcriber import TranscriptorAudio, cargar_configuracion, guardar_modelo_ia
 from src.ui_copilot import DialogoLoginCopilot
+from src.persistencia import (Persistencia, persistir_documento, persistir_transcripcion,
+                              texto_destino_documento, texto_sin_guardado)
 from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
 
@@ -628,12 +630,13 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             if self.cancelar_flag.is_set():
                 raise InterruptedError
 
-            # Guardado automático junto al archivo original
+            # Primero el historial y después el archivo junto al audio (regla 6); no lanza por fallos de guardado
             ruta_salida = self._generar_ruta_salida(opciones["archivo"], opciones["formato"])
-            guardar_transcripcion(
-                resultado, ruta_salida, formato=opciones["formato"], incluir_timestamps=opciones["timestamps"]
+            persistencia = persistir_transcripcion(
+                self.historial, opciones["archivo"], resultado, opciones["modelo"],
+                ruta_salida, opciones["formato"], opciones["timestamps"],
             )
-            self._en_ui(self._finalizar_ok, resultado, ruta_salida, opciones["archivo"], opciones["modelo"])
+            self._en_ui(self._finalizar_ok, resultado, persistencia)
 
         except InterruptedError:
             self._en_ui(self._finalizar, "Transcripción cancelada", 0)
@@ -655,28 +658,49 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             self.progress.set(progreso)
             self.label_estado.configure(text=f"Transcribiendo… {progreso:.0%}")
 
-    def _finalizar_ok(self, resultado, ruta_salida: str, archivo: str, modelo_whisper: str):
+    def _finalizar_ok(self, resultado, persistencia: Persistencia):
         self.resultado_actual = resultado
-        self.ruta_guardada = ruta_salida
+        self.ruta_guardada = persistencia.ruta_exportada
         self._fecha_historial = None
-        if self.historial:
-            try:
-                self._mostrar_titulo(self.historial.crear(archivo, resultado, modelo_whisper=modelo_whisper))
-                self._log(f"Guardado en el historial (#{self.id_historial})")
-            except Exception as e:
-                self._log(f"No se pudo guardar en el historial: {e}")
+        avisos = []
+        try:
+            self._mostrar_titulo(persistencia.id_historial)
+        except Exception as e:
+            # Si el historial no se puede leer, el título se toma del nombre del audio
+            titulo = Path(self.archivo_actual).stem if self.archivo_actual else ""
+            self._mostrar_titulo(persistencia.id_historial, titulo=titulo)
+            avisos.append(f"No se pudo leer el título del historial: {e}")
+        if persistencia.id_historial is not None:
+            self._log(f"Guardado en el historial (#{persistencia.id_historial})")
+        if persistencia.motivo_historial:
+            avisos.append(f"No se pudo guardar en el historial: {persistencia.motivo_historial}")
+        if persistencia.motivo_exportacion:
+            avisos.append(f"No se pudo exportar {persistencia.motivo_exportacion}")
+        aviso_sin_guardar = texto_sin_guardado(persistencia)
+        if aviso_sin_guardar:
+            avisos.append(aviso_sin_guardar)
+        for aviso in avisos:
+            self._log(aviso)
         idioma = IDIOMAS_DISPONIBLES.get(resultado.idioma_detectado, resultado.idioma_detectado)
         self.label_resumen.configure(
             text=f"{idioma} ({resultado.probabilidad_idioma:.0%}) · {len(resultado.segmentos)} segmentos · "
                  f"{formatear_duracion(resultado.duracion_total)}"
         )
-        for btn in (self.btn_copiar, self.btn_guardar, self.btn_abrir_carpeta):
+        for btn in (self.btn_copiar, self.btn_guardar):
             btn.configure(state="normal")
+        self.btn_abrir_carpeta.configure(state="normal" if persistencia.ruta_exportada else "disabled")
         for tab in self.tabs_ia.values():
             tab["generar"].configure(state="normal")
-        self._log(f"Transcripción completada. Guardado automático en: {ruta_salida}")
-        self._finalizar(f"Completado · guardado como {Path(ruta_salida).name}", 1.0)
+        if persistencia.ruta_exportada:
+            self._log(f"Transcripción completada. Guardado automático en: {persistencia.ruta_exportada}")
+            mensaje = f"Completado · guardado como {Path(persistencia.ruta_exportada).name}"
+        else:
+            self._log("Transcripción completada. No se exportó el archivo")
+            mensaje = "Completado · no se exportó (ver avisos)"
+        self._finalizar(mensaje, 1.0)
         self._refrescar_historial()
+        if avisos:
+            messagebox.showwarning("Atención", "\n".join(avisos))
 
     def _finalizar(self, mensaje: str, progreso: float):
         if self._inicio_transcripcion is not None:
@@ -809,21 +833,19 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         try:
             inicio = time.monotonic()
             contenido = generar(texto, on_progreso=lambda m: self._en_ui(lambda: estado.configure(text=m)))
-            if ruta_salida:
-                Path(ruta_salida).write_text(contenido + "\n", encoding="utf-8")
-            if self.historial and id_historial is not None:
-                self.historial.guardar_documento(id_historial, clave, contenido, modelo=self._asistente.modelo_usado)
-            self._en_ui(self._finalizar_documento_ia, clave, contenido, ruta_salida, time.monotonic() - inicio)
+            modelo = self._asistente.modelo_usado
+            persistencia = persistir_documento(self.historial, id_historial, clave, contenido, modelo, ruta_salida)
+            self._en_ui(self._finalizar_documento_ia, clave, contenido, persistencia, time.monotonic() - inicio)
         except ErrorSinSesionCopilot as e:
             self._log(f"Error generando {clave}: {e}")
             self._asistente = None  # se recrea con el token nuevo tras iniciar sesión
-            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e))
+            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e) or type(e).__name__)
             self._en_ui(self._iniciar_sesion_copilot, lambda: self._generar_documento_ia(clave))
         except Exception as e:
             self._log(f"Error generando {clave}: {e}")
-            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e))
+            self._en_ui(self._finalizar_documento_ia, clave, None, None, 0, str(e) or type(e).__name__)
 
-    def _finalizar_documento_ia(self, clave, contenido, ruta_salida, segundos, error=None):
+    def _finalizar_documento_ia(self, clave, contenido, persistencia: Optional[Persistencia], segundos, error=None):
         tab = self.tabs_ia[clave]
         nombre = DOCUMENTOS_IA[clave]["pestana"]
         for t in self.tabs_ia.values():
@@ -843,17 +865,21 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         tab["generar"].configure(text="↻ Regenerar")
         tab["copiar"].configure(state="normal")
         tab["guardar"].configure(state="normal")
-        destino = f"guardado como {Path(ruta_salida).name}" if ruta_salida else "guardado en el historial"
+        destino = texto_destino_documento(persistencia)
         tab["estado"].configure(text=f"Listo en {segundos:.0f} s con {self._asistente.modelo_usado} · {destino}")
-        if ruta_salida:
-            self.ruta_guardada = ruta_salida
+        if persistencia.ruta_exportada:
+            self.ruta_guardada = persistencia.ruta_exportada
+            self.btn_abrir_carpeta.configure(state="normal")
         self.label_estado.configure(text=f"Listo: {nombre.lower()}")
         self._log(f"{nombre} {destino}")
         if clave == "minuta" and self.historial and self.id_historial is not None:
             # La minuta puede haber dado título a la entrada
-            entrada = self.historial.obtener(self.id_historial)
-            if entrada:
-                self._mostrar_titulo(entrada.id, entrada.titulo)
+            try:
+                entrada = self.historial.obtener(self.id_historial)
+                if entrada:
+                    self._mostrar_titulo(entrada.id, entrada.titulo)
+            except Exception as e:
+                self._log(f"No se pudo actualizar el título desde el historial: {e}")
         self._refrescar_historial()
 
     def _modelo_ia_configurado(self) -> str:

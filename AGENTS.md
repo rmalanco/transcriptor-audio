@@ -37,7 +37,7 @@ Hechos verificados y propuestas ya descartadas: [.context/transcriptor-facts.md]
 9. Los widgets solo se tocan desde el hilo principal; los hilos de fondo pasan por `_en_ui`.
 10. Solo se usa `/chat/completions`; no dar por compatible un modelo que solo admite `/responses`.
 
-Las reglas 6 y 7 nacen de hallazgos aceptados y el código aún no las cumple: ver `BACKLOG.md`.
+La regla 7 nace de un hallazgo aceptado y el código aún no la cumple: ver `BACKLOG.md`. La regla 6 se cumple desde el 2026-11-22 (`src/persistencia.py`).
 
 ## Mantener el estado al día
 
@@ -70,6 +70,7 @@ repo, porque `config/settings.yaml` se lee con ruta relativa.
 | `ui.py` | Ventana principal: transcribir, pestañas Texto/Resumen/Minuta, atajos |
 | `ui_copilot.py` | Diálogo modal de inicio de sesión en Copilot |
 | `ui_historial.py` / `historial.py` | Vista y base SQLite (`data/historial.db`) del historial |
+| `persistencia.py` | Guardar sin interfaz: primero el historial y después el archivo; devuelve avisos en vez de lanzar |
 | `registro.py` | Logging por consola y `latido` (aviso periódico en pasos largos) |
 | `utils.py` | Validación de archivos, metadatos con `ffprobe`, exportación a `txt`/`srt`/`vtt`/`json` |
 | `main.py` | CLI |

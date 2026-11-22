@@ -41,8 +41,11 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
 2. `AppTranscriptor._iniciar_transcripcion` lee las opciones en el hilo principal y lanza un hilo de fondo.
 3. En ese hilo, `TranscriptorAudio.transcribir` procesa el audio con faster-whisper y entrega cada segmento a la
    interfaz mediante `on_segmento`.
-4. `utils.guardar_transcripcion` escribe `<nombre>_transcripcion.<formato>` junto al audio.
-5. `Historial.crear` inserta la fila en `transcripciones`.
+4. Todavía en el hilo de fondo, `persistencia.persistir_transcripcion` guarda primero en el historial
+   (`Historial.crear` inserta la fila en `transcripciones`) y después escribe
+   `<nombre>_transcripcion.<formato>` junto al audio con `utils.guardar_transcripcion`.
+5. Un fallo del historial o de la exportación no descarta el resultado: vuelve como aviso y la ventana lo muestra
+   en un diálogo de advertencia y en la pestaña Registro.
 
 ### Generar el resumen o la minuta
 
@@ -52,9 +55,10 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
    `POST <url_api>/chat/completions` en streaming.
 3. Si el texto supera `max_caracteres_bloque`, primero se piden notas por bloque en paralelo y el documento se
    redacta a partir de esas notas.
-4. El resultado se escribe en `<nombre>_resumen.md` o `<nombre>_minuta.md` junto al audio, si el audio existe.
-5. `Historial.guardar_documento` guarda el documento y el modelo usado. Con la minuta, también actualiza el título
-   si no se editó a mano.
+4. `persistencia.persistir_documento` guarda primero en el historial: `Historial.guardar_documento` guarda el
+   documento y el modelo usado y, con la minuta, también actualiza el título si no se editó a mano.
+5. Después el resultado se escribe en `<nombre>_resumen.md` o `<nombre>_minuta.md` junto al audio, si el audio
+   existe. Un fallo de guardado no descarta el documento: se avisa en la línea de estado de la pestaña y en Registro.
 
 ### Iniciar sesión en Copilot
 
