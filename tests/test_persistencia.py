@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from src.historial import Historial
-from src.persistencia import (Persistencia, persistir_documento, persistir_transcripcion,
+from src.persistencia import (Persistencia, motivo_de_error, persistir_documento, persistir_transcripcion,
                              texto_destino_documento, texto_sin_guardado)
 from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
 
@@ -159,15 +159,16 @@ def test_documento_historial_fallido_exporta_y_avisa(historial, tmp_path):
     assert p.ruta_exportada == ruta and p.motivo_exportacion is None
 
 
-def test_documento_ambos_fallan_devuelve_los_dos_motivos(tmp_path):
+def test_documento_ambos_fallan_devuelve_los_dos_motivos(historial, tmp_path):
     class _HistorialLlenoAlGuardar(Historial):
         def guardar_documento(self, *args, **kwargs):
             raise sqlite3.OperationalError("database or disk is full")
 
     (tmp_path / "bloqueo").write_text("no es una carpeta")
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
     historial_lleno = _HistorialLlenoAlGuardar(str(tmp_path / "historial.db"))
     ruta = str(tmp_path / "bloqueo" / "reunion_minuta.md")
-    p = persistir_documento(historial_lleno, 1, "minuta", "# Minuta: X", "gpt-5.4", ruta)
+    p = persistir_documento(historial_lleno, id_, "minuta", "# Minuta: X", "gpt-5.4", ruta)
     assert "database or disk is full" in p.motivo_historial
     assert "reunion_minuta.md" in p.motivo_exportacion
     assert p.ruta_exportada is None
@@ -290,3 +291,33 @@ def test_destino_documento_sin_ruta_e_historial_fallido_avisa_sin_guardado():
 def test_destino_documento_nada_guardado_remite_a_guardar_como():
     p = Persistencia(motivo_historial="Historial no disponible", motivo_exportacion="reunion_minuta.md: error")
     assert "Guardar como…" in texto_destino_documento(p)
+
+
+def test_documento_de_entrada_eliminada_avisa_y_exporta(historial, tmp_path):
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    historial.eliminar(id_)                                  # el usuario la borra mientras Copilot genera
+    ruta = str(tmp_path / "reunion_minuta.md")
+    p = persistir_documento(historial, id_, "minuta", "# Minuta: Revisión", "gpt-5.4", ruta)
+    assert p.id_historial is None
+    assert p.motivo_historial == "La entrada ya no está en el historial"
+    assert Path(ruta).read_text(encoding="utf-8").startswith("# Minuta")
+    assert p.ruta_exportada == ruta
+
+
+def test_documento_de_entrada_eliminada_sin_exportacion_remite_a_guardar_como(historial, tmp_path):
+    (tmp_path / "bloqueo").write_text("no es una carpeta")
+    id_ = historial.crear(str(tmp_path / "reunion.mp3"), _resultado())
+    historial.eliminar(id_)
+    ruta = str(tmp_path / "bloqueo" / "reunion_minuta.md")
+    p = persistir_documento(historial, id_, "minuta", "# Minuta: Revisión", "gpt-5.4", ruta)
+    assert p.id_historial is None and p.ruta_exportada is None
+    assert "Guardar como…" in texto_destino_documento(p)
+
+
+def test_motivo_de_error_de_sistema_usa_solo_la_causa():
+    error = PermissionError(13, "Permiso denegado", "/casa/secreta/reunion_minuta.md")
+    assert motivo_de_error(error) == "Permiso denegado"
+
+
+def test_motivo_de_error_sin_mensaje_usa_el_tipo():
+    assert motivo_de_error(RuntimeError()) == "RuntimeError"

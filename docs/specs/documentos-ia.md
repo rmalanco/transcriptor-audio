@@ -26,3 +26,23 @@ Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
   línea de estado dice «El resultado no quedó guardado en ningún sitio. Usa «Guardar como…» para conservarlo.».
 
 Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
+
+### Entrada eliminada durante la generación
+- Given una entrada del historial que se elimina mientras Copilot genera su documento, when termina la generación, then
+  el documento se muestra y se exporta junto al audio si se puede, y la línea de estado dice «no se guardó en el
+  historial: La entrada ya no está en el historial»; si tampoco se pudo exportar, la línea de estado añade «El
+  resultado no quedó guardado en ningún sitio. Usa «Guardar como…» para conservarlo.».
+
+Origen: carril S, 2026-11-22: avisa si la entrada del historial se eliminó mientras se generaba un documento (A-02)
+
+### Errores de Guardar como… de un documento
+- Given un resumen o una minuta generados, when «Guardar como…» no puede escribir el archivo, then aparece un diálogo de
+  error con «No se pudo guardar el archivo» y el motivo, y la misma información queda en la pestaña Registro.
+
+Origen: carril S, 2026-11-22: los errores de «Guardar como…» se muestran en un diálogo y en Registro (A-27)
+
+### Pestañas sin restos
+- Given un documento generado para una grabación, when se carga otro archivo, then la línea de estado de las pestañas
+  Resumen y Minuta vuelve a mostrar el modelo de IA configurado, sin el mensaje del documento anterior.
+
+Origen: carril S, 2026-11-22: al cargar otro archivo, las pestañas de IA quedan sin restos del documento anterior (A-02)

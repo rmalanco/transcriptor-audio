@@ -2,7 +2,7 @@
 
 ## Propósito
 Qué pasa con el resultado de una transcripción hecha desde la interfaz gráfica: dónde queda guardado, qué ve la persona
-cuando algo falla y cuándo puede abrir la carpeta del archivo.
+cuando algo falla, cuándo puede abrir la carpeta del archivo y qué pasa al cargar otro archivo.
 
 ## Comportamiento
 
@@ -23,8 +23,10 @@ Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
   está habilitado.
 - Given una transcripción en pantalla cuyo archivo no se exportó, when termina la transcripción, then «Abrir carpeta»
   está deshabilitado.
+- Given una transcripción en pantalla, when «Guardar como…» escribe el archivo, then «Abrir carpeta» queda habilitado.
 
 Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
+Origen: carril S, 2026-11-22: «Abrir carpeta» se habilita también tras un «Guardar como…» que escribe el archivo (A-27)
 
 ### Aviso cuando el resultado no queda guardado en ningún sitio
 - Given un historial no disponible o que falla al guardar, y un audio en una carpeta donde no se puede escribir, when
@@ -32,3 +34,32 @@ Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
   aviso dice «El resultado no quedó guardado en ningún sitio. Usa «Guardar como…» para conservarlo.».
 
 Origen: docs/historias/hechas/2026-11-22-01-guardar-antes-de-exportar.md
+
+### Cargar otro archivo
+- Given una transcripción en pantalla, con o sin resumen y minuta, when se carga otro archivo, then la vista queda sin
+  resultado: el texto, el título y el vínculo con el historial desaparecen, «Copiar», «Guardar como…» y «Abrir
+  carpeta» quedan deshabilitados, y las pestañas Resumen y Minuta vuelven a su estado inicial con «Generar»
+  deshabilitado.
+- Given una transcripción o una generación de documento en curso, when se intenta cargar otro archivo, then no se carga
+  y un aviso dice «Espera a que termine el proceso en curso.».
+
+Origen: carril S, 2026-11-22: al cargar otro archivo se invalida el resultado, las pestañas de IA y el vínculo con el historial (A-02)
+
+### Descartar un resultado sin guardar
+- Given una transcripción en pantalla que no quedó guardada ni en el historial ni como archivo, when se carga otro
+  archivo o se abre una entrada del historial, then se pregunta «La transcripción en pantalla no quedó guardada en
+  ningún sitio y se perderá al cargar otra. ¿Continuar?»; si se responde que no, la transcripción sigue en pantalla.
+
+Origen: carril S, 2026-11-22: se pregunta antes de reemplazar un resultado que no quedó guardado en ningún sitio (A-02)
+
+### Errores de Guardar como…
+- Given un resultado en pantalla, when «Guardar como…» no puede escribir el archivo, then aparece un diálogo de error
+  con «No se pudo guardar el archivo» y el motivo, y la misma información queda en la pestaña Registro.
+
+Origen: carril S, 2026-11-22: los errores de «Guardar como…» se muestran en un diálogo y en Registro (A-27)
+
+### Transcribir tras generar sin audio
+- Given una entrada del historial cuyo audio ya no existe, abierta en la ventana, when se genera su resumen o su
+  minuta, then «Transcribir» sigue deshabilitado al terminar.
+
+Origen: carril S, 2026-11-22: «Transcribir» no se habilita tras generar un documento sin audio (A-26)

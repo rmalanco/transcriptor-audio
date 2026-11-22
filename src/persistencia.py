@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from src.transcriber import ResultadoTranscripcion
 
 
-def _motivo(error: Exception) -> str:
+def motivo_de_error(error: Exception) -> str:
     """Texto del fallo; si la excepción no trae mensaje, su tipo (para que el aviso no quede vacío).
 
     Un OSError se reduce a su causa (p. ej. «Permission denied»): sin número de error ni ruta, que ya va en el aviso.
@@ -48,12 +48,12 @@ def persistir_transcripcion(
         try:
             id_historial = historial.crear(archivo, resultado, modelo_whisper=modelo_whisper)
         except Exception as e:
-            motivo_historial = _motivo(e)
+            motivo_historial = motivo_de_error(e)
     try:
         guardar_transcripcion(resultado, ruta_salida, formato=formato, incluir_timestamps=incluir_timestamps)
     except Exception as e:
         return Persistencia(id_historial=id_historial, motivo_historial=motivo_historial,
-                            motivo_exportacion=f"{Path(ruta_salida).name}: {_motivo(e)}")
+                            motivo_exportacion=f"{Path(ruta_salida).name}: {motivo_de_error(e)}")
     return Persistencia(id_historial=id_historial, motivo_historial=motivo_historial, ruta_exportada=ruta_salida)
 
 
@@ -72,17 +72,20 @@ def persistir_documento(
         motivo_historial = "La transcripción no está en el historial"
     else:
         try:
-            historial.guardar_documento(id_historial, clave, contenido, modelo=modelo)
-            guardado_id = id_historial
+            if historial.obtener(id_historial) is None:
+                motivo_historial = "La entrada ya no está en el historial"
+            else:
+                historial.guardar_documento(id_historial, clave, contenido, modelo=modelo)
+                guardado_id = id_historial
         except Exception as e:
-            motivo_historial = _motivo(e)
+            motivo_historial = motivo_de_error(e)
     if ruta_salida is None:
         return Persistencia(id_historial=guardado_id, motivo_historial=motivo_historial)
     try:
         Path(ruta_salida).write_text(contenido + "\n", encoding="utf-8")
     except Exception as e:
         return Persistencia(id_historial=guardado_id, motivo_historial=motivo_historial,
-                            motivo_exportacion=f"{Path(ruta_salida).name}: {_motivo(e)}")
+                            motivo_exportacion=f"{Path(ruta_salida).name}: {motivo_de_error(e)}")
     return Persistencia(id_historial=guardado_id, motivo_historial=motivo_historial, ruta_exportada=ruta_salida)
 
 

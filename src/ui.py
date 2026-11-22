@@ -26,7 +26,7 @@ from src.historial import Historial
 from src.registro import configurar_logging
 from src.transcriber import TranscriptorAudio, cargar_configuracion, guardar_modelo_ia
 from src.ui_copilot import DialogoLoginCopilot
-from src.persistencia import (Persistencia, persistir_documento, persistir_transcripcion,
+from src.persistencia import (Persistencia, motivo_de_error, persistir_documento, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
@@ -120,6 +120,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.tabs_ia: dict = {}
         self.id_historial: Optional[int] = None        # entrada del historial mostrada ahora
         self._fecha_historial: Optional[str] = None     # fecha de creación si el audio ya no existe
+        self._estado_transcribir_previo = "normal"      # estado de «Transcribir» antes de generar un documento
         self.panel_historial = None                     # se construye la primera vez que se muestra
         self.vista_actual = VISTA_TRANSCRIBIR
         self._titulo_mostrado = ""
@@ -485,7 +486,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     # ------------------------------------------------------------ Archivo
 
     def _seleccionar_archivo(self):
-        if self._transcribiendo():
+        if self._transcribiendo() or self._generando_ia():
+            messagebox.showwarning("Atención", "Espera a que termine el proceso en curso.")
             return
         archivo = filedialog.askopenfilename(
             title="Seleccionar archivo de audio/video",
@@ -499,19 +501,36 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         if archivo:
             self._cargar_archivo(archivo)
 
-    def _cargar_archivo(self, ruta: str):
-        if self._transcribiendo():
-            return
+    def _confirmar_descarte(self) -> bool:
+        """Pregunta antes de reemplazar un resultado que no quedó guardado en ningún sitio."""
+        if self.resultado_actual and self.id_historial is None and self.ruta_guardada is None:
+            return messagebox.askyesno("Atención", "La transcripción en pantalla no quedó guardada en ningún sitio "
+                                                   "y se perderá al cargar otra. ¿Continuar?")
+        return True
+
+    def _cargar_archivo(self, ruta: str, confirmar: bool = True) -> bool:
+        """Carga un archivo nuevo y reinicia la vista. Devuelve False si el usuario decide no cargarlo.
+
+        Un archivo inválido ya avisa con un error y devuelve True: quien abre el historial sigue con su entrada.
+        """
+        if self._transcribiendo() or self._generando_ia():
+            messagebox.showwarning("Atención", "Espera a que termine el proceso en curso.")
+            return False
         try:
             validar_archivo(ruta)
             info = obtener_info_archivo(ruta)
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar el archivo:\n{e}")
             self._log(f"Error cargando archivo: {e}")
-            return
+            return True
+
+        if confirmar and not self._confirmar_descarte():
+            return False
 
         self.archivo_actual = ruta
         self.duracion_archivo = info.duracion_segundos
+        self._limpiar_resultado()
+        self._mostrar_marcador()
 
         detalles = [
             formatear_duracion(info.duracion_segundos) if info.duracion_segundos else "duración desconocida",
@@ -526,6 +545,22 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.btn_transcribir.configure(state="normal")
         self._actualizar_estado("Archivo listo para transcribir", 0)
         self._log(f"Archivo cargado: {info.ruta}")
+        return True
+
+    def _limpiar_resultado(self):
+        """Deja la vista sin resultado: texto, título, resumen, botones de resultado y pestañas de IA."""
+        self.resultado_actual = None
+        self.ruta_guardada = None
+        self._fecha_historial = None
+        self._mostrar_titulo(None)
+        self.text_resultado.configure(state="normal", text_color=("gray10", "gray90"))
+        self.text_resultado.delete("1.0", "end")
+        self.text_resultado.configure(state="disabled")
+        self.label_resumen.configure(text="")
+        for btn in (self.btn_copiar, self.btn_guardar, self.btn_abrir_carpeta):
+            btn.configure(state="disabled")
+        for clave in self.tabs_ia:
+            self._reiniciar_tab_ia(clave)
 
     # -------------------------------------------------------- Transcripción
 
@@ -561,20 +596,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         }
 
         self.cancelar_flag.clear()
-        self.resultado_actual = None
-        self.ruta_guardada = None
-        self._mostrar_titulo(None)
+        self._limpiar_resultado()
         self._progreso = 0.0
         self._inicio_transcripcion = time.monotonic()
 
-        self.text_resultado.configure(state="normal", text_color=("gray10", "gray90"))
-        self.text_resultado.delete("1.0", "end")
-        self.text_resultado.configure(state="disabled")
-        self.label_resumen.configure(text="")
-        for btn in (self.btn_copiar, self.btn_guardar, self.btn_abrir_carpeta):
-            btn.configure(state="disabled")
-        for clave in self.tabs_ia:
-            self._reiniciar_tab_ia(clave)
         self._bloquear_opciones(True)
         self.btn_transcribir.configure(text="■  Cancelar", fg_color=COLOR_CANCELAR, hover_color=COLOR_CANCELAR_HOVER)
         self.progress.set(0)
@@ -787,6 +812,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         for boton in ("generar", "copiar", "guardar"):
             tab[boton].configure(state="disabled")
         tab["generar"].configure(text=f"✨ Generar {DOCUMENTOS_IA[clave]['pestana'].lower()}")
+        tab["estado"].configure(text=self._texto_modelo_ia())  # sin restos del documento anterior
 
     def _generar_documento_ia(self, clave: str):
         if not self.resultado_actual or self._generando_ia() or self._transcribiendo():
@@ -817,6 +843,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         for tab in self.tabs_ia.values():
             tab["generar"].configure(state="disabled")
+        self._estado_transcribir_previo = self.btn_transcribir.cget("state")
         self.btn_transcribir.configure(state="disabled")
         self.combo_modelo_ia.configure(state="disabled")
         self._escribir_tab_ia(clave, f"Generando con {self._asistente.nombre_proveedor} ({self._asistente.modelo})…", secundario=True)
@@ -856,7 +883,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         nombre = DOCUMENTOS_IA[clave]["pestana"]
         for t in self.tabs_ia.values():
             t["generar"].configure(state="normal")
-        self.btn_transcribir.configure(state="normal")
+        self.btn_transcribir.configure(state=self._estado_transcribir_previo)
         self.combo_modelo_ia.configure(state="normal")
 
         if error:
@@ -985,7 +1012,11 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             initialfile=Path(self.archivo_actual).stem + DOCUMENTOS_IA[clave]["sufijo"],
         )
         if archivo:
-            Path(archivo).write_text(contenido + "\n", encoding="utf-8")
+            try:
+                Path(archivo).write_text(contenido + "\n", encoding="utf-8")
+            except Exception as e:
+                self._avisar_error_guardar(archivo, e)
+                return
             self._log(f"Guardado en: {archivo}")
             self.label_estado.configure(text=f"Guardado como {Path(archivo).name}")
 
@@ -1051,11 +1082,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             messagebox.showwarning("Historial", "Espera a que termine el proceso en curso.")
             return False
         entrada = self.historial.obtener(id_historial) if self.historial else None
-        if entrada is None:
+        if entrada is None or not self._confirmar_descarte():
             return False
 
         if entrada.archivo_existe:
-            self._cargar_archivo(entrada.archivo_ruta)
+            if not self._cargar_archivo(entrada.archivo_ruta, confirmar=False):
+                return False
         else:
             self.label_drop_icono.configure(text="🗂")
             self.label_drop.configure(text=entrada.archivo_nombre)
@@ -1143,15 +1175,26 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         if archivo:
             # El formato se deduce de la extensión elegida en el diálogo
             ext = Path(archivo).suffix.lstrip(".").lower()
-            guardar_transcripcion(
-                self.resultado_actual,
-                archivo,
-                formato=ext if ext in FORMATOS_DISPONIBLES else formato,
-                incluir_timestamps=self.var_timestamps.get()
-            )
+            try:
+                guardar_transcripcion(
+                    self.resultado_actual,
+                    archivo,
+                    formato=ext if ext in FORMATOS_DISPONIBLES else formato,
+                    incluir_timestamps=self.var_timestamps.get()
+                )
+            except Exception as e:
+                self._avisar_error_guardar(archivo, e)
+                return
             self.ruta_guardada = archivo
+            self.btn_abrir_carpeta.configure(state="normal")
             self._log(f"Guardado en: {archivo}")
             self.label_estado.configure(text=f"Guardado como {Path(archivo).name}")
+
+    def _avisar_error_guardar(self, archivo: str, error: Exception):
+        """«Guardar como…» que falla: se ve en pantalla y queda en el Registro."""
+        motivo = motivo_de_error(error)
+        self._log(f"No se pudo guardar {Path(archivo).name}: {motivo}")
+        messagebox.showerror("Error", f"No se pudo guardar el archivo:\n{motivo}")
 
     def _abrir_carpeta(self):
         if not self.ruta_guardada:

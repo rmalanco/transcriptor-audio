@@ -14,7 +14,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 
 1. ✅ [🔴] Guardar la transcripción y los documentos de IA en el historial antes de exportarlos; si la exportación falla, avisar sin descartar el resultado, y no sobrescribir archivos sin aviso — hallazgos A-01, A-25 — carril M
 2. ✅ [🟡] Declarar `pytest` y las dependencias de desarrollo con versiones fijadas, y cubrir con tests el flujo transcribir → guardar → historial y la CLI — hallazgos A-16, A-29 — carril M
-3. [🟡] Al cargar otro archivo, invalidar el resultado, las pestañas de IA y el vínculo al historial del anterior, y avisar si la entrada del historial se eliminó mientras se generaba un documento (review de la historia 01) — hallazgo A-02 — carril S
+3. ✅ [🟡] Al cargar otro archivo, invalidar el resultado, las pestañas de IA y el vínculo al historial del anterior, y avisar si la entrada del historial se eliminó mientras se generaba un documento (review de la historia 01) — hallazgo A-02 — carril S
 4. [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
 5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
 6. [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
@@ -27,8 +27,8 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 13. [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
 14. [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S
 15. [🟡] Convertir en `ErrorCopilot` las respuestas de GitHub con formato inesperado, para que el diálogo de login no se quede colgado — hallazgo A-17 (posible) — carril S
-16. [🟢] No habilitar «Transcribir» tras generar un documento de una entrada cuyo audio ya no existe — hallazgo A-26 — carril S
-17. [🟢] Mostrar en pantalla o en la pestaña Registro los errores de «Guardar como…» — hallazgo A-27 — carril S
+16. ✅ [🟢] No habilitar «Transcribir» tras generar un documento de una entrada cuyo audio ya no existe — hallazgo A-26 — carril S
+17. ✅ [🟢] Mostrar en pantalla o en la pestaña Registro los errores de «Guardar como…» — hallazgo A-27 — carril S
 18. [🟡] No sobrescribir sin aviso la transcripción, el resumen o la minuta de otra grabación con el mismo nombre en la misma carpeta (`reunion.m4a` y `reunion.mp4`); decidir antes entre incluir la extensión de origen en el nombre o preguntar antes de sobrescribir — hallazgo A-25, separado del punto 1 — carril S o M según la decisión
 19. [🟡] Cubrir con tests los rechazos de la CLI (archivo inexistente o extensión no admitida, fallo al transcribir) y sus órdenes de sesión (`--copilot-logout`, `--copilot-modelos` sin sesión), con las rutas de token aisladas y sin red, sin fijar lo que cambiará el punto 9 — hallazgo A-16, separado del punto 2 — carril S
 
