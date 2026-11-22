@@ -230,8 +230,8 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
   `_recibir_documento_ia`, la cancelación y el cierre de la ventana no están cubiertos. Sí lo están `AsistenteIA` (con
   su señal de cancelación) y `persistencia.py` (incluido no guardar una generación cancelada).
 - **La orquestación vive en la clase Tk.** Solo el guardado se ha sacado a `persistencia.py`; transcribir y generar
-  siguen dentro de `AppTranscriptor`, y `historial.py` importa `transcriber.py`, de modo que cargarlo importa
-  `faster_whisper`. Backlog, Salud del código #5.
+  siguen dentro de `AppTranscriptor`, y `historial.py` importa `transcriber.py` (solo las dataclasses; `faster_whisper`
+  se carga al construir el modelo, historia 08). Backlog, Salud del código #5.
 - **El historial no tiene migraciones.** `PRAGMA user_version` se fija en cada apertura sin comparar el valor anterior:
   el primer cambio de esquema tendrá que resolverlo (hallazgo A-23, descartado por ahora). La búsqueda del historial corre
   en el hilo de la interfaz y podría notarse con cientos de reuniones (A-18, pospuesto).

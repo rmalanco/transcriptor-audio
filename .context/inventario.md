@@ -47,7 +47,7 @@ El binario `ffmpeg` no se ejecuta: solo `ffprobe`, a través de `ffmpeg.probe` d
 | `src/registro.py` (60) | `configurar_logging` y `latido` | — |
 | `src/utils.py` (182) | Validación e info de archivos (`ffprobe`, opcional), formatos de tiempo, `serializar_transcripcion` y `guardar_transcripcion` | — |
 | `config/settings.yaml` | Configuración: `modelo`, `transcripcion`, `salida`, `ia`, `historial`; la app solo la lee | — |
-| `tests/` | 11 archivos `test_*.py` y `conftest.py`; 268 tests (234 funciones `test_*`, el resto casos parametrizados) | `python -m pytest -q` |
+| `tests/` | 11 archivos `test_*.py` y `conftest.py`; 287 tests (234 funciones `test_*`, el resto casos parametrizados) | `python -m pytest -q` |
 | `docs/` | `integracion-copilot.md` (97 líneas), `disenos/00-actual.md`, `specs/` (4 specs), `historias/hechas/` (7 historias) | — |
 | `data/` (ignorado) | `historial.db` (1,4 MB) y `ui.log` (59 KB, del 6 de noviembre: ningún código actual lo escribe), locales | — |
 | `venv/` (ignorado) | Entorno virtual, recreado el 2026-11-21 | — |
@@ -74,7 +74,7 @@ instalación anterior. El venv tiene 40 paquetes en total.
 
 ## Verificación
 - Comando de tests: `./venv/bin/python -m pytest -q` (documentado en `AGENTS.md` y `README.md`) ·
-  Resultado: **268 tests en verde** (Python 3.14.10, Linux, sin red).
+  Resultado: **287 tests en verde** (Python 3.14.10, Linux, sin red).
 - Comprobación de humo: `./venv/bin/python -m src.main --listar-modelos` funciona (lista 8 modelos de Whisper).
 - CI: **no hay** (no existe `.github/`, ni otro pipeline).
 - Linters / formatters / typecheck: **ninguno configurado**; tampoco hay ruff, black, mypy ni flake8 instalados.

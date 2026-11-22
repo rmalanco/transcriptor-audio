@@ -36,3 +36,9 @@ Origen: carril S, 2026-11-22: rechazos de la CLI cubiertos con tests (A-16)
 
 Origen: carril S, 2026-11-22: órdenes de sesión de la CLI cubiertas con tests y `--copilot-modelos` sin familias excluidas (A-12, A-16)
 Origen: carril S, 2026-11-22: una respuesta de GitHub con formato inesperado da un error de la CLI en vez de un trazo de Python (A-17)
+
+### Órdenes que no transcriben
+- Given que la biblioteca de transcripción (`faster_whisper`) falta o no se puede cargar, when se ejecuta `--listar-modelos`, `--copilot-login`, `--copilot-modelos` o `--copilot-logout`, then la orden funciona igual.
+- Given que la biblioteca de transcripción (`faster_whisper`) falta o no se puede cargar, when se pide una transcripción, then termina con «Error durante la transcripción» y código 1.
+
+Origen: docs/historias/hechas/2026-11-22-08-faster-whisper-perezoso.md

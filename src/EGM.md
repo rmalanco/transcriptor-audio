@@ -10,7 +10,7 @@ Dependencias entre módulos (quién importa a quién):
 
 | Módulo | Usa |
 |---|---|
-| `__init__.py` | `transcriber`, `utils` (imports relativos) |
+| `__init__.py` | nada (solo `__version__`) |
 | `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
 | `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
@@ -31,7 +31,7 @@ Dependencias entre módulos (quién importa a quién):
   `--ui`, `-v/--verbose`, `--log`. `--copilot-modelos` (`main.py:listar_modelos_copilot`) omite los modelos de `FAMILIAS_EXCLUIDAS`.
   `main.py:listar_modelos` lista los modelos de Whisper (no es `copilot.listar_modelos`).
 - `ui.py:main` — interfaz gráfica (`python -m src.ui`, o `run_ui.py` en la raíz).
-- `__init__.py` — reexporta `TranscriptorAudio`, `validar_archivo` y `obtener_info_archivo`; `__version__ = "0.1.0"`.
+- `__init__.py` — no reexporta nada; `__version__ = "0.1.0"`.
 
 ### Transcripción — `transcriber.py`, `utils.py`
 

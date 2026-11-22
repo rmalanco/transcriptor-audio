@@ -14,7 +14,7 @@
 - Funciones y variables en `snake_case`; clases en `PascalCase`; constantes de módulo en `MAYÚSCULAS`.
 - Lo privado lleva guion bajo inicial (`_completar`, `_en_ui`).
 - Las excepciones propias empiezan por `Error` (`ErrorCopilot`, `ErrorAsistenteIA`, `ErrorSinSesionCopilot`).
-- Los imports entre módulos son absolutos: `from src.<módulo> import …` (salvo `src/__init__.py`, que usa relativos).
+- Los imports entre módulos son absolutos: `from src.<módulo> import …`.
 - Los loggers cuelgan de `transcriptor` (`transcriptor.ui`, `transcriptor.whisper`, `transcriptor.copilot`,
   `transcriptor.ia`, `transcriptor.configuracion`).
 - No hay linter ni formateador configurado: sigue el estilo del archivo que edites.

@@ -1,15 +1,20 @@
 """Módulo principal de transcripción usando faster-whisper."""
 
+from __future__ import annotations
+
 import logging
 import os
 import threading
 import time
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 from dataclasses import dataclass
-from faster_whisper import WhisperModel
 
 from src.registro import latido
 from src.utils import formatear_duracion
+
+if TYPE_CHECKING:
+    # Solo para el análisis de tipos: faster-whisper se importa al cargar el modelo (ver TranscriptorAudio.modelo).
+    from faster_whisper import WhisperModel
 
 log = logging.getLogger("transcriptor.whisper")
 
@@ -66,6 +71,7 @@ class TranscriptorAudio:
                      self.modelo_nombre, self.dispositivo, self.compute_type, self.cache_dir)
             inicio = time.monotonic()
             with latido(f"cargando/descargando el modelo '{self.modelo_nombre}'"):
+                from faster_whisper import WhisperModel
                 self._modelo = WhisperModel(
                     self.modelo_nombre,
                     device=self.dispositivo,
