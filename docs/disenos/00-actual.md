@@ -28,7 +28,7 @@ No hay subcarpetas con código: los componentes son módulos de `src/`. Todos se
 | CLI | `main.py` | Transcribir a `stdout` o a un archivo; login, logout y lista de modelos de Copilot |
 | Registro | `registro.py` | Configurar el logging y avisar cada cierto tiempo en operaciones largas (`latido`) |
 
-Fuera de `src/`: `run_ui.py` (lanzador), `config/settings.yaml` (configuración) y `tests/` (seis archivos de tests).
+Fuera de `src/`: `run_ui.py` (lanzador), `config/settings.yaml` (configuración) y `tests/` (nueve archivos `test_*.py` y `conftest.py`).
 
 ## Flujo de datos
 
@@ -91,14 +91,14 @@ de `-o`. No genera resumen ni minuta y no guarda en el historial.
 ## Cómo se prueba
 
 - Comando: `./venv/bin/python -m pytest -q`.
-- Estado al 2026-11-22: **no ejecutado**. `pytest` no está instalado en el venv ni declarado en `requirements.txt`;
-  el README pide instalarlo aparte.
-- Hay 60 funciones de test en seis archivos de `tests/`. Según el README, no hacen llamadas reales a la red.
+- Estado al 2026-11-22: **87 tests en verde** con Python 3.14.10 en Linux (`pytest` 9.2.0, fijado en
+  `requirements-dev.txt`; instalar con `pip install -r requirements-dev.txt`).
+- Hay 87 funciones de test en nueve archivos `test_*.py` de `tests/`, más `conftest.py`. Según el README, no hacen llamadas reales a la red.
 - No hay CI, linter ni comprobación de tipos.
 
 ## Huecos conocidos
 
-- **Tests sin ejecutar.** No se sabe si pasan hoy, y menos con Python 3.14 (el README dice «probado con 3.12»).
+- **Tests solo verificados en Python 3.14.** Pasan con 3.14.10 en Linux; el README dice «probado con 3.12» y no se ha comprobado con otras versiones.
 - **Comportamiento real de la API de Copilot.** Lo documentado sale del código, no de llamadas reales: no se probó
   el login, el catálogo de modelos, el modo `auto` ni la generación.
 - **Interfaz gráfica sin ejecutar.** Los atajos, los estados de los botones y el diseño se leyeron en el código.

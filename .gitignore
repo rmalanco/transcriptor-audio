@@ -40,6 +40,7 @@ Thumbs.db
 !config/settings.yaml
 !README.md
 !requirements.txt
+!requirements-dev.txt
 # Secretos
 .env
 

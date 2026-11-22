@@ -32,6 +32,9 @@ pip install -r requirements.txt
 # Windows:       winget install ffmpeg
 ```
 
+Para desarrollo y tests, instala en su lugar `pip install -r requirements-dev.txt` (incluye las dependencias de
+ejecución y `pytest`, fijado a la misma versión con la que pasan los tests).
+
 La primera transcripción descarga el modelo de Whisper elegido (de 39 MB a 1.6 GB) en
 `~/.cache/faster-whisper`; las siguientes ya no necesitan red.
 
@@ -156,11 +159,12 @@ Nada de lo siguiente se sube al repositorio (está en `.gitignore`):
 ## Tests
 
 ```bash
-pip install pytest
+pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-Los tests no hacen llamadas reales a la red: las peticiones a GitHub se simulan.
+Ejecuta el comando desde la raíz del repositorio. Los tests no hacen llamadas reales a la red, no cargan ningún
+modelo de Whisper ni abren ventanas: las peticiones a GitHub se simulan y la transcripción usa un doble del modelo.
 
 ## Aviso
 

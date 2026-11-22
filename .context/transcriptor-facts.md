@@ -51,6 +51,6 @@ Fuente: `docs/integracion-copilot.md`.
 
 ## Sin verificar
 
-- Que los tests pasen hoy (`pytest` no está instalado).
+- Que los tests pasen en otros equipos o versiones de Python: solo se ejecutaron con Python 3.14.10 en Linux (2026-11-22).
 - El comportamiento real de la API de Copilot y de la interfaz gráfica: la auditoría fue por lectura.
 - Que no haya secretos en commits anteriores.

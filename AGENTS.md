@@ -56,9 +56,9 @@ La regla 7 nace de un hallazgo aceptado y el código aún no la cumple: ver `BAC
 ./venv/bin/python -m src.main --copilot-logout
 ```
 
-Al 2026-11-22, `pytest` no está instalado en el venv ni declarado en `requirements.txt`: hay que instalarlo
-(`./venv/bin/python -m pip install pytest`) antes de ejecutar los tests. Los comandos se ejecutan desde la raíz del
-repo, porque `config/settings.yaml` se lee con ruta relativa.
+Las dependencias de desarrollo, incluido `pytest`, se instalan con `./venv/bin/python -m pip install -r requirements-dev.txt`
+(ese archivo incluye `requirements.txt`). Los comandos se ejecutan desde la raíz del repo, porque
+`config/settings.yaml` se lee con ruta relativa.
 
 ## Arquitectura (`src/`)
 

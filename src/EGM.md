@@ -229,5 +229,4 @@ Dependencias entre módulos (quién importa a quién):
 
 ## Verification
 
-- Run: `./venv/bin/python -m pytest -q` (los tests están en `../tests/` y necesitan `pytest`, que no figura en
-  `requirements.txt`).
+- Run: `./venv/bin/python -m pytest -q` (los tests están en `../tests/`; `pytest` figura en `requirements-dev.txt`).
