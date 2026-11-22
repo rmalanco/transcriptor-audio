@@ -65,3 +65,9 @@ Origen: carril S, 2026-11-22: los errores de «Guardar como…» se muestran en 
   minuta, then «Transcribir» sigue deshabilitado al terminar.
 
 Origen: carril S, 2026-11-22: «Transcribir» no se habilita tras generar un documento sin audio (A-26)
+
+### Cargar un archivo sin metadatos
+- Given un equipo sin `ffprobe` instalado, o un archivo del que `ffprobe` no puede leer los metadatos, when se carga un archivo de audio o vídeo admitido, then el archivo se carga igual y se muestra su tamaño con «duración desconocida».
+- Given el diálogo de selección de archivo, when se abre, then ofrece las mismas extensiones de audio y vídeo que la app admite al validar un archivo (incluidas `.ts` y `.mts`).
+
+Origen: carril S, 2026-11-22: los metadatos de ffprobe son opcionales (A-20)

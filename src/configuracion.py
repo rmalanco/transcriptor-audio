@@ -1,6 +1,6 @@
 """Carga y validación de `config/settings.yaml`: el único punto que lee la configuración.
 
-No importa faster_whisper, customtkinter ni pydantic, para que la CLI pueda validarla sin cargar Whisper.
+No importa faster_whisper ni customtkinter, para que la CLI pueda validarla sin cargar Whisper.
 """
 
 import copy
@@ -18,6 +18,8 @@ SECCIONES = ("modelo", "transcripcion", "salida", "ia", "historial")
 DISPOSITIVOS = ("cpu", "cuda", "auto")
 TIPOS_COMPUTO = ("int8", "int16", "float16", "float32")
 FORMATOS = ("txt", "srt", "vtt", "json")
+# Única lista de modelos de Whisper: la usan la CLI, la ventana y la validación de `modelo.nombre`.
+MODELOS_WHISPER = ("tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3")
 
 
 class ErrorConfiguracion(Exception):
@@ -59,16 +61,9 @@ class _Clave:
     valida: Callable[[Any], bool] = _cualquiera
 
 
-def _tabla(modelos_whisper=None) -> dict[tuple[str, str], _Clave]:
-    """Las claves que lee la app: (sección, clave) → valor por defecto y comprobación.
-
-    `modelos_whisper` es la lista de modelos que admite la CLI o la ventana; se pasa desde fuera porque
-    este módulo no puede importarla sin crear un ciclo (`main` y `ui` importan este módulo).
-    """
-    if modelos_whisper:
-        nombre = _Clave("large-v3-turbo", "uno de " + ", ".join(modelos_whisper), lambda v: v in modelos_whisper)
-    else:
-        nombre = _Clave("large-v3-turbo", "un texto", _es_texto)
+def _tabla() -> dict[tuple[str, str], _Clave]:
+    """Las claves que lee la app: (sección, clave) → valor por defecto y comprobación."""
+    nombre = _Clave("large-v3-turbo", "uno de " + ", ".join(MODELOS_WHISPER), lambda v: v in MODELOS_WHISPER)
     entero = "un número entero mayor que 0"
     numero = "un número"
     no_negativo = "un número mayor o igual que 0"
@@ -111,7 +106,7 @@ def _leer_yaml(ruta) -> Any:
         raise ErrorConfiguracion(f"La configuración {ruta} no es un YAML válido{detalle}.") from None
 
 
-def cargar_configuracion(ruta=None, *, modelos_whisper=None) -> dict:
+def cargar_configuracion(ruta=None) -> dict:
     ruta = RUTA_POR_DEFECTO if ruta is None else ruta
     datos = _leer_yaml(ruta)
     if datos is None:
@@ -127,7 +122,7 @@ def cargar_configuracion(ruta=None, *, modelos_whisper=None) -> dict:
             raise ErrorConfiguracion(f"En la configuración {ruta}, `{seccion}` debe ser una sección con claves "
                                      f"(vale «{valores}»).")
         resultado[seccion] = valores
-    for (seccion, clave), entrada in _tabla(modelos_whisper).items():
+    for (seccion, clave), entrada in _tabla().items():
         valor = resultado[seccion].get(clave)
         if valor is None:
             resultado[seccion][clave] = entrada.defecto

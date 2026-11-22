@@ -45,7 +45,7 @@ reglas para agentes, en [CLAUDE.md](./CLAUDE.md). Este archivo es el contrato de
 - Base SQLite `data/historial.db` (tabla `transcripciones`).
 - Archivos junto al audio: `<nombre>_transcripcion.<formato>`, `<nombre>_resumen.md`, `<nombre>_minuta.md`.
 - Reescritura de `config/settings.yaml` al cambiar el modelo de IA en la interfaz.
-- Procesos externos: `ffprobe`, `ffmpeg`, y `xdg-open` / `open` / `os.startfile`.
+- Procesos externos: `ffprobe` (opcional), y `xdg-open` / `open` / `os.startfile`.
 
 ## System Verification
 

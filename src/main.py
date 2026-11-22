@@ -6,17 +6,14 @@ import logging
 import sys
 
 from src.registro import configurar_logging
-from src.configuracion import ErrorConfiguracion, cargar_configuracion
+from src.configuracion import MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion
 from src.transcriber import TranscriptorAudio
 from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
 
 
-MODELOS_DISPONIBLES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3"]
-
-
 def _cargar_configuracion_o_salir(ruta):
     try:
-        return cargar_configuracion(ruta, modelos_whisper=MODELOS_DISPONIBLES)
+        return cargar_configuracion(ruta)
     except ErrorConfiguracion as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -24,7 +21,7 @@ def _cargar_configuracion_o_salir(ruta):
 
 def listar_modelos():
     print("Modelos disponibles:")
-    for m in MODELOS_DISPONIBLES:
+    for m in MODELOS_WHISPER:
         print(f"  - {m}")
     sys.exit(0)
 
@@ -91,7 +88,7 @@ Ejemplos:
     
     parser.add_argument("archivo", nargs="?", help="Archivo de audio/video a transcribir")
     parser.add_argument("-o", "--salida", help="Archivo de salida (por defecto: stdout)")
-    parser.add_argument("-m", "--modelo", choices=MODELOS_DISPONIBLES, help="Modelo Whisper (por defecto: el de config/settings.yaml)")
+    parser.add_argument("-m", "--modelo", choices=MODELOS_WHISPER, help="Modelo Whisper (por defecto: el de config/settings.yaml)")
     parser.add_argument("-d", "--dispositivo", choices=["cpu", "cuda", "auto"], help="Dispositivo de cómputo (por defecto: config)")
     parser.add_argument("-c", "--compute-type", choices=["int8", "int16", "float16", "float32"], help="Tipo de computación (por defecto: config)")
     parser.add_argument("-l", "--idioma", help="Idioma (es, en, fr, auto, etc.) (por defecto: el de la configuración)")

@@ -11,12 +11,10 @@ ENV/
 # VS Code
 .vscode/
 
-# Modelo cache
-~/.cache/faster-whisper/
+# Modelos locales
 models/
 
 # Archivos temporales
-/tmp/chunk_*.wav
 *.tmp
 
 # IDE
@@ -53,12 +51,26 @@ data/
 *.db
 *.sqlite*
 
-# Audio/video (nunca subir grabaciones)
+# Documentos generados junto al audio (contienen la reunión)
+*_resumen.md
+*_minuta.md
+
+# Audio/video (nunca subir grabaciones): las mismas extensiones que admite utils.py
 *.m4a
 *.mp3
 *.wav
 *.ogg
 *.flac
+*.aac
+*.opus
+*.wma
 *.mp4
 *.mkv
+*.avi
+*.mov
 *.webm
+*.flv
+*.wmv
+*.m4v
+*.ts
+*.mts

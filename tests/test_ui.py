@@ -1,8 +1,8 @@
 """Tests básicos para el módulo de UI."""
 
 import pytest
+from src.configuracion import MODELOS_WHISPER
 from src.ui import (
-    MODELOS_DISPONIBLES,
     IDIOMAS_DISPONIBLES,
     FORMATOS_DISPONIBLES,
     AppTranscriptor,
@@ -11,9 +11,9 @@ from src.ui import (
 
 
 def test_modelos_disponibles():
-    assert "tiny" in MODELOS_DISPONIBLES
-    assert "base" in MODELOS_DISPONIBLES
-    assert "large-v3" in MODELOS_DISPONIBLES
+    assert "tiny" in MODELOS_WHISPER
+    assert "base" in MODELOS_WHISPER
+    assert "large-v3" in MODELOS_WHISPER
 
 
 def test_idiomas_disponibles():

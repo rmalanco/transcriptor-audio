@@ -74,7 +74,7 @@ aunque se ejecute desde otra carpeta.
 | `ui_historial.py` / `historial.py` | Vista y base SQLite (`data/historial.db`) del historial |
 | `persistencia.py` | Guardar sin interfaz: primero el historial y después el archivo; devuelve avisos en vez de lanzar |
 | `registro.py` | Logging por consola y `latido` (aviso periódico en pasos largos) |
-| `utils.py` | Validación de archivos, metadatos con `ffprobe`, exportación a `txt`/`srt`/`vtt`/`json` |
+| `utils.py` | Validación de archivos, metadatos con `ffprobe` (opcionales), exportación a `txt`/`srt`/`vtt`/`json` |
 | `main.py` | CLI |
 
 Configuración en `config/settings.yaml` (sección `ia:`: `modelo`, `copilot_enterprise_url`, `temperatura`,

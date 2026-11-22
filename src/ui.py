@@ -25,15 +25,15 @@ from src.asistente_ia import (NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
 from src import copilot
 from src.historial import Historial
 from src.registro import configurar_logging
-from src.configuracion import ErrorConfiguracion, cargar_configuracion, guardar_modelo_ia
+from src.configuracion import MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_ia
 from src.transcriber import TranscriptorAudio
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error, persistir_documento_si_vigente, persistir_transcripcion,
                               texto_destino_documento, texto_sin_guardado)
-from src.utils import validar_archivo, obtener_info_archivo, guardar_transcripcion
+from src.utils import (validar_archivo, obtener_info_archivo, guardar_transcripcion, filtros_seleccion_archivo,
+                       formatear_duracion)
 
 
-MODELOS_DISPONIBLES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3"]
 IDIOMAS_DISPONIBLES = {
     "auto": "Auto-detectar",
     "es": "Español",
@@ -86,16 +86,6 @@ COLOR_TRANSCRIBIR = ("#2E8B57", "#2E7D4F")
 COLOR_TRANSCRIBIR_HOVER = ("#256F46", "#23613D")
 COLOR_CANCELAR = ("#C0392B", "#A93226")
 COLOR_CANCELAR_HOVER = ("#992D22", "#86281E")
-
-
-def formatear_duracion(segundos: float) -> str:
-    """Formato corto legible: 1:05:09 o 05:09."""
-    segundos = int(max(segundos, 0))
-    horas, resto = divmod(segundos, 3600)
-    minutos, segs = divmod(resto, 60)
-    if horas:
-        return f"{horas}:{minutos:02d}:{segs:02d}"
-    return f"{minutos:02d}:{segs:02d}"
 
 
 if TKDND_DISPONIBLE:
@@ -252,7 +242,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         )
 
         self._etiqueta(opciones, "Modelo", 1, 0)
-        self.combo_modelo = ctk.CTkOptionMenu(opciones, values=MODELOS_DISPONIBLES, variable=self.var_modelo)
+        self.combo_modelo = ctk.CTkOptionMenu(opciones, values=list(MODELOS_WHISPER), variable=self.var_modelo)
         self.combo_modelo.grid(row=2, column=0, padx=(14, 6), pady=(0, 8), sticky="ew")
 
         self._etiqueta(opciones, "Idioma", 1, 1)
@@ -488,11 +478,6 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             self._cargar_archivo(archivos[0])
         return event.action
 
-    def _on_drop(self, archivos):
-        """Callback cuando se suelta un archivo."""
-        if archivos:
-            self._cargar_archivo(archivos[0])
-
     def _al_cerrar(self):
         if self._transcribiendo():
             if not messagebox.askyesno("Salir", "Hay una transcripción en curso. ¿Cancelarla y salir?"):
@@ -514,12 +499,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             return
         archivo = filedialog.askopenfilename(
             title="Seleccionar archivo de audio/video",
-            filetypes=[
-                ("Archivos multimedia", "*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma *.mp4 *.mkv *.avi *.mov *.webm *.flv *.wmv *.m4v"),
-                ("Audio", "*.mp3 *.wav *.flac *.ogg *.m4a *.aac *.opus *.wma"),
-                ("Video", "*.mp4 *.mkv *.avi *.mov *.webm *.flv *.wmv *.m4v"),
-                ("Todos los archivos", "*.*")
-            ]
+            filetypes=filtros_seleccion_archivo()
         )
         if archivo:
             self._cargar_archivo(archivo)
@@ -551,7 +531,6 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             return False
 
         self.archivo_actual = ruta
-        self.duracion_archivo = info.duracion_segundos
         self._limpiar_resultado()
         self._mostrar_marcador()
 
@@ -1334,7 +1313,7 @@ def main():
     log.info("Iniciando interfaz (nivel de log %s; cámbialo con TRANSCRIPTOR_LOG=DEBUG)",
              logging.getLevelName(logging.getLogger("transcriptor").level))
     try:
-        configuracion = cargar_configuracion(modelos_whisper=MODELOS_DISPONIBLES)
+        configuracion = cargar_configuracion()
     except ErrorConfiguracion as e:
         log.error("%s", e)
         raiz = tk.Tk()  # ventana oculta solo para poder mostrar el diálogo antes de construir la app

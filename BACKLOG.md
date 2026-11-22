@@ -15,7 +15,7 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 1. ✅ [🔴] Guardar la transcripción y los documentos de IA en el historial antes de exportarlos; si la exportación falla, avisar sin descartar el resultado, y no sobrescribir archivos sin aviso — hallazgos A-01, A-25 — carril M
 2. ✅ [🟡] Declarar `pytest` y las dependencias de desarrollo con versiones fijadas, y cubrir con tests el flujo transcribir → guardar → historial y la CLI — hallazgos A-16, A-29 — carril M
 3. ✅ [🟡] Al cargar otro archivo, invalidar el resultado, las pestañas de IA y el vínculo al historial del anterior, y avisar si la entrada del historial se eliminó mientras se generaba un documento (review de la historia 01) — hallazgo A-02 — carril S
-4. [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
+4. ✅ [🟡] Completar `.gitignore` (`*_resumen.md`, `*_minuta.md`, extensiones de audio y video que faltan), quitar los patrones sin efecto y corregir el modelo `large` del README — hallazgos A-03, A-30 — carril S
 5. [🟡] Sacar de la clase Tk los flujos «transcribir y persistir» y «generar y persistir» a funciones sin interfaz, y dejar de cargar `faster_whisper` donde no se transcribe — hallazgo A-15 — carril L
 6. ✅ [🟡] Un módulo de configuración que resuelva la ruta contra la raíz, valide el YAML y tenga los valores por defecto en un solo lugar; que la CLI los use y se quiten las claves que nadie lee — hallazgos A-08, A-09 — carril M
 7. [🟡] Tratar el 401 del modo `auto` como falta de sesión, y decir en el error cuándo el token rechazado viene de `COPILOT_GITHUB_TOKEN` en vez de reabrir el login — hallazgos A-06, A-07 — carril S
@@ -23,8 +23,8 @@ Arquitectura actual: docs/disenos/00-actual.md · Auditoría: audit_report.md (2
 9. [🟡] En la CLI, validar la combinación de formato y salida antes de transcribir y usar el mismo serializador que la exportación a archivo — hallazgo A-10 — carril S
 10. [🟡] Consultar el catálogo de Copilot una sola vez y bajo demanda, sin abrir una sesión `auto` al arrancar, y documentar ese tráfico y el orden de búsqueda del token — hallazgo A-13 — carril S
 11. [🟡] Guardar el modelo de IA elegido fuera del repo, junto al token, en vez de reescribir `config/settings.yaml` — hallazgo A-19 — carril S
-12. [🟡] Eliminar `transcribir_archivo_largo`, `_on_drop`, `duracion_archivo`, `pydantic` y `tqdm`, y tratar los metadatos de `ffprobe` como opcionales — hallazgo A-20 — carril S
-13. [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
+12. ✅ [🟡] Eliminar `transcribir_archivo_largo`, `_on_drop`, `duracion_archivo`, `pydantic` y `tqdm`, y tratar los metadatos de `ffprobe` como opcionales — hallazgo A-20 — carril S
+13. ✅ [🟡] Dejar una sola lista de modelos de Whisper y de extensiones, y un solo formateador de tiempo por uso — hallazgo A-21 — carril S
 14. [🟡] Añadir a `docs/disenos/00-actual.md` los riesgos y límites, el modelo de concurrencia y los datos y secretos, y aplicar las correcciones de `2026-11-22_DRIFT_REPORT.md` a los tres contratos — hallazgo A-22 — carril S
 15. [🟡] Convertir en `ErrorCopilot` las respuestas de GitHub con formato inesperado, para que el diálogo de login no se quede colgado — hallazgo A-17 (posible) — carril S
 16. ✅ [🟢] No habilitar «Transcribir» tras generar un documento de una entrada cuyo audio ya no existe — hallazgo A-26 — carril S

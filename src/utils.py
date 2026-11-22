@@ -23,6 +23,20 @@ EXTENSIONES_AUDIO = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.opus', '
 EXTENSIONES_VIDEO = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.m4v', '.ts', '.mts'}
 
 
+def filtros_seleccion_archivo() -> list[tuple[str, str]]:
+    """Filtros del diálogo «Abrir»; salen de las mismas listas que comprueba `validar_archivo`."""
+    def patron(extensiones):
+        return " ".join(f"*{ext}" for ext in sorted(extensiones))
+
+    audio, video = patron(EXTENSIONES_AUDIO), patron(EXTENSIONES_VIDEO)
+    return [
+        ("Archivos multimedia", f"{audio} {video}"),
+        ("Audio", audio),
+        ("Video", video),
+        ("Todos los archivos", "*.*"),
+    ]
+
+
 def validar_archivo(ruta: str) -> bool:
     path = Path(ruta)
     if not path.exists():
@@ -58,7 +72,9 @@ def obtener_info_archivo(ruta: str) -> InfoArchivo:
             canales=audio_stream.get('channels') if audio_stream else None,
             es_video=video_stream is not None
         )
-    except ffmpeg.Error:
+    except (ffmpeg.Error, OSError, ValueError):
+        # Los metadatos son informativos: si ffprobe no está (OSError) o no responde JSON (ValueError),
+        # el archivo se carga igual, con el tamaño del sistema de archivos y sin duración ni códec.
         return InfoArchivo(
             ruta=str(path.absolute()),
             nombre=path.stem,
@@ -70,6 +86,16 @@ def obtener_info_archivo(ruta: str) -> InfoArchivo:
             canales=None,
             es_video=path.suffix.lower() in EXTENSIONES_VIDEO
         )
+
+
+def formatear_duracion(segundos: float) -> str:
+    """Formato corto legible para marcas y duraciones: 1:05:09 o 05:09."""
+    segundos = int(max(segundos, 0))
+    horas, resto = divmod(segundos, 3600)
+    minutos, segs = divmod(resto, 60)
+    if horas:
+        return f"{horas}:{minutos:02d}:{segs:02d}"
+    return f"{minutos:02d}:{segs:02d}"
 
 
 def formatear_tiempo(segundos: float) -> str:

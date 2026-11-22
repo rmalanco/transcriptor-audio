@@ -36,16 +36,15 @@ Dependencias entre módulos (quién importa a quién):
   - `.modelo` — propiedad que carga el `WhisperModel` la primera vez que se usa.
   - `.transcribir(archivo, idioma, task, beam_size, best_of, temperature, condition_on_previous_text, …,
     word_timestamps, on_segmento, cancelar) -> ResultadoTranscripcion`
-  - `.transcribir_archivo_largo(archivo, chunk_duration=30, **kwargs)` — generador por trozos. Ningún módulo lo llama.
 - `transcriber.py:SegmentoTranscripcion(inicio, fin, texto, palabras)` y
   `transcriber.py:ResultadoTranscripcion(texto_completo, segmentos, idioma_detectado, probabilidad_idioma, duracion_total)`.
 - `transcriber.py:es_alucinacion_conocida(texto)` y el conjunto `ALUCINACIONES_CONOCIDAS`.
 - `configuracion.py:RUTA_POR_DEFECTO` (`<raíz del proyecto>/config/settings.yaml`), `configuracion.py:ErrorConfiguracion`.
-- `configuracion.py:cargar_configuracion(ruta=None, *, modelos_whisper=None) -> dict`: sin `ruta`, usa `RUTA_POR_DEFECTO`;
+- `configuracion.py:cargar_configuracion(ruta=None) -> dict`: sin `ruta`, usa `RUTA_POR_DEFECTO`;
   una ruta relativa se interpreta desde la carpeta de trabajo. Devuelve todas las secciones y las 21 claves que usa la
-  app, con sus valores por defecto. `modelos_whisper` (la lista de la CLI o de la ventana) valida `modelo.nombre`.
+  app, con sus valores por defecto. valida `modelo.nombre` contra `configuracion.MODELOS_WHISPER`, la única lista de modelos de Whisper (la usan la CLI y la ventana).
 - `configuracion.py:guardar_modelo_ia(modelo, ruta=None) -> bool`
-- `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo`,
+- `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`.
 - `utils.py:formatear_tiempo`, `formatear_tiempo_srt`, `formatear_tiempo_vtt`; `EXTENSIONES_AUDIO`, `EXTENSIONES_VIDEO`.
 
@@ -205,7 +204,6 @@ Dependencias entre módulos (quién importa a quién):
   `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - Junto al audio: `<nombre>_transcripcion.<formato>` (`ui.py:AppTranscriptor._generar_ruta_salida`), y
   `<nombre>_resumen.md` y `<nombre>_minuta.md` (`ui.py:AppTranscriptor._procesar_documento_ia`).
-- `/tmp/chunk_<nombre>_<inicio>_<fin>.wav`: archivo temporal de `transcriber.py:TranscriptorAudio.transcribir_archivo_largo`.
 - La CLI escribe en `stdout`, o en el archivo de `-o` mediante `utils.py:guardar_transcripcion`.
 
 ### Base de datos
@@ -220,8 +218,7 @@ Dependencias entre módulos (quién importa a quién):
 
 ### Procesos, hilos y sistema
 
-- `ffprobe` mediante `ffmpeg.probe` (`utils.py:obtener_info_archivo`) y `ffmpeg` para cortar trozos
-  (`transcriber.py:TranscriptorAudio.transcribir_archivo_largo`).
+- `ffprobe` mediante `ffmpeg.probe` (`utils.py:obtener_info_archivo`); es opcional: sin él, la carga sigue sin duración.
 - `xdg-open`, `open` u `os.startfile` para abrir la carpeta de salida (`ui.py:AppTranscriptor._abrir_carpeta`).
 - `webbrowser.open` y copia del código al portapapeles (`ui_copilot.py:DialogoLoginCopilot._abrir_github`).
 - Hilos `daemon`: transcripción, generación de IA y consulta de modelos (`ui.py`), `login-copilot`

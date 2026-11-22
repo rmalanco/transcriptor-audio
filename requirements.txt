@@ -1,9 +1,7 @@
 faster-whisper==1.2.1
 av==18.1.1  # PyAV 19 quitó metadata_errors, que faster-whisper 1.2.1 usa en av.open()
 ffmpeg-python==0.2.0
-pydantic==2.14.4
 PyYAML==6.0.4
-tqdm==4.70.1
 customtkinter==6.0.0
 tkinterdnd2-universal==1.7.3
 httpx==0.28.1

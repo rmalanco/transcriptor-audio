@@ -185,16 +185,16 @@ def test_el_yaml_del_proyecto_es_valido_y_no_tiene_claves_muertas():
 
 
 def test_modelo_nombre_fuera_de_la_lista_de_whisper_es_un_error(tmp_path):
-    from src.configuracion import ErrorConfiguracion
+    from src.configuracion import MODELOS_WHISPER, ErrorConfiguracion
 
     ruta = tmp_path / "modelo.yaml"
     ruta.write_text('modelo:\n  nombre: "gigante"\n', encoding="utf-8")
 
     with pytest.raises(ErrorConfiguracion) as error:
-        cargar_configuracion(str(ruta), modelos_whisper=("tiny", "base"))
+        cargar_configuracion(str(ruta))
 
     assert str(error.value) == (f"En la configuración {ruta}, `modelo.nombre` debe ser "
-                                "uno de tiny, base (vale «gigante»).")
+                                f"uno de {', '.join(MODELOS_WHISPER)} (vale «gigante»).")
 
 
 @pytest.mark.parametrize("yaml_texto, mensaje", [

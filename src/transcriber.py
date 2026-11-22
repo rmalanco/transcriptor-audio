@@ -2,14 +2,14 @@
 
 import logging
 import os
-from pathlib import Path
 import threading
 import time
-from typing import Callable, Optional, Generator
+from typing import Callable, Optional
 from dataclasses import dataclass
 from faster_whisper import WhisperModel
 
 from src.registro import latido
+from src.utils import formatear_duracion
 
 log = logging.getLogger("transcriptor.whisper")
 
@@ -118,7 +118,7 @@ class TranscriptorAudio:
             )
 
         log.info("Audio de %s; idioma %s (%.0f%%); preparación en %.1f s",
-                 _mmss(info.duration), info.language, info.language_probability * 100, time.monotonic() - inicio)
+                 formatear_duracion(info.duration), info.language, info.language_probability * 100, time.monotonic() - inicio)
 
         segmentos_lista = []
         texto_completo = []
@@ -126,13 +126,13 @@ class TranscriptorAudio:
 
         def _estado() -> str:
             posicion = segmentos_lista[-1].fin if segmentos_lista else 0.0
-            return (f"transcribiendo, {len(segmentos_lista)} segmentos hasta {_mmss(posicion)} "
-                    f"de {_mmss(info.duration)}")
+            return (f"transcribiendo, {len(segmentos_lista)} segmentos hasta {formatear_duracion(posicion)} "
+                    f"de {formatear_duracion(info.duration)}")
 
         with latido(_estado, cada=30):
             for seg in segmentos:
                 if es_alucinacion_conocida(seg.text):
-                    log.info("Descartada alucinación conocida en %s: %r", _mmss(seg.start), seg.text.strip())
+                    log.info("Descartada alucinación conocida en %s: %r", formatear_duracion(seg.start), seg.text.strip())
                     continue
                 segmento = SegmentoTranscripcion(
                     inicio=seg.start,
@@ -144,20 +144,20 @@ class TranscriptorAudio:
                 texto_completo.append(seg.text.strip())
                 if on_segmento:
                     on_segmento(segmento, info.duration)
-                log.debug("[%s → %s] %s", _mmss(seg.start), _mmss(seg.end), segmento.texto)
+                log.debug("[%s → %s] %s", formatear_duracion(seg.start), formatear_duracion(seg.end), segmento.texto)
                 if info.duration and seg.end / info.duration >= siguiente_aviso:
                     transcurrido = time.monotonic() - inicio
                     log.info("Avance %3.0f%% · %s de %s · %d segmentos · %.1fx tiempo real",
-                             seg.end / info.duration * 100, _mmss(seg.end), _mmss(info.duration),
+                             seg.end / info.duration * 100, formatear_duracion(seg.end), formatear_duracion(info.duration),
                              len(segmentos_lista), seg.end / transcurrido if transcurrido else 0)
                     siguiente_aviso = int(seg.end / info.duration * 10) / 10 + 0.1
                 if cancelar and cancelar.is_set():
-                    log.info("Cancelado en %s", _mmss(seg.end))
+                    log.info("Cancelado en %s", formatear_duracion(seg.end))
                     break
 
         total = time.monotonic() - inicio
         log.info("Transcripción terminada: %d segmentos en %s (%.1fx tiempo real)",
-                 len(segmentos_lista), _mmss(total), info.duration / total if total else 0)
+                 len(segmentos_lista), formatear_duracion(total), info.duration / total if total else 0)
         return ResultadoTranscripcion(
             texto_completo=" ".join(texto_completo),
             segmentos=segmentos_lista,
@@ -165,37 +165,3 @@ class TranscriptorAudio:
             probabilidad_idioma=info.language_probability,
             duracion_total=info.duration
         )
-
-    def transcribir_archivo_largo(
-        self,
-        archivo: str,
-        chunk_duration: int = 30,
-        **kwargs
-    ) -> Generator[ResultadoTranscripcion, None, None]:
-        """Transcribe archivos largos dividiéndolos en chunks."""
-        import ffmpeg
-        
-        probe = ffmpeg.probe(archivo)
-        duracion = float(probe['format']['duration'])
-        
-        for inicio in range(0, int(duracion), chunk_duration):
-            fin = min(inicio + chunk_duration, duracion)
-            
-            chunk_path = f"/tmp/chunk_{Path(archivo).stem}_{inicio}_{fin}.wav"
-            (
-                ffmpeg
-                .input(archivo, ss=inicio, t=fin-inicio)
-                .output(chunk_path, acodec='pcm_s16le', ar=16000, ac=1)
-                .overwrite_output()
-                .run(quiet=True)
-            )
-            
-            yield self.transcribir(chunk_path, **kwargs)
-            
-            os.remove(chunk_path)
-
-
-def _mmss(segundos: float) -> str:
-    minutos, segs = divmod(int(segundos), 60)
-    return f"{minutos:02d}:{segs:02d}" if minutos < 60 else f"{minutos // 60}:{minutos % 60:02d}:{segs:02d}"
-

@@ -134,11 +134,13 @@ python -m src.main audio.m4a --log DEBUG  # en la CLI: --log o -v
 | small  | 244 MB | ~6x       | Buena     |
 | medium | 769 MB | ~2x       | Muy buena |
 | large-v3-turbo | 1.6 GB | ~1x en CPU (medido: 1.1x con 4 núcleos) | Mejor · **por defecto** |
-| large  | 1550 MB| ~0.3x     | Mejor     |
 
 Medido sobre una reunión real de 27 min en español (CPU de 4 núcleos, int8): `base` transcribe
 a ~6x tiempo real pero confunde nombres y términos; `large-v3-turbo`
 va a ~1x y los acierta. Para ir más rápido con calidad aceptable, usa `small` (~3.4x).
+
+También se aceptan `large-v1`, `large-v2` y `large-v3` (`-m large-v3` en la CLI). No existe un modelo `large` sin
+versión. La lista completa la muestra `python -m src.main --listar-modelos`.
 
 ## Configuración
 
@@ -150,14 +152,16 @@ muestra en un diálogo y no arranca.
 
 ## Privacidad y datos locales
 
-Nada de lo siguiente se sube al repositorio (está en `.gitignore`):
+Nada de lo siguiente se sube al repositorio. El historial y los archivos exportados junto al audio están en
+`.gitignore`; el token y los modelos de Whisper se guardan fuera de la carpeta del proyecto:
 
 | Dato | Dónde se guarda |
 |---|---|
-| Historial (transcripciones, resúmenes, minutas) | `data/historial.db` |
-| Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (permisos 600) |
-| Modelos de Whisper | `~/.cache/faster-whisper` |
-| Transcripciones exportadas | junto al archivo de audio |
+| Historial (transcripciones, resúmenes, minutas) | `data/historial.db` (en `.gitignore`) |
+| Transcripciones exportadas | junto al archivo de audio (`.txt`, `.srt`, `.vtt`, `.json`; en `.gitignore`) |
+| Resumen y minuta exportados | junto al archivo de audio (`*_resumen.md`, `*_minuta.md`; en `.gitignore`) |
+| Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (permisos 600, fuera del repo) |
+| Modelos de Whisper | `~/.cache/faster-whisper` (fuera del repo) |
 
 ## Tests
 
