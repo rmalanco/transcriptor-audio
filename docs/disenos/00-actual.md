@@ -174,7 +174,7 @@ lo lee.
   por una acción del usuario: «↻» (una consulta `GET /models`), iniciar sesión (`POST /login/device/code` y consultas
   a `/login/oauth/access_token`), generar un documento (`/chat/completions`; en modo `auto`, también
   `POST /models/session` y `GET /models`; un documento de varias partes cuya redacción supera unos 32 000 tokens
-  estimados añade como mucho un `GET /models`, una vez por asistente) y la primera carga de cada modelo de Whisper
+  estimados añade un `GET /models`: una vez por asistente si responde, y en cada generación mientras falle) y la primera carga de cada modelo de Whisper
   (descarga por faster-whisper). En la CLI, `--copilot-login`, `--copilot-modelos` (que también abre una sesión `auto`) y la primera
   carga de cada modelo; `--copilot-logout` y `--listar-modelos` no usan la red.
 - **Sin telemetría propia.** El único `client_id` del código es el de opencode, que es público (el device flow no usa
