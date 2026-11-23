@@ -152,7 +152,8 @@ def test_guardar_configuracion_durante_un_proceso_no_escribe(monkeypatch):
         raise AssertionError("no se debe guardar mientras hay un proceso en curso")
 
     monkeypatch.setattr(ui, "guardar_formulario", no_debe_llamarse)
-    app = SimpleNamespace(_transcribiendo=lambda: True, _generando_ia=lambda: False)
+    app = SimpleNamespace(_transcribiendo=lambda: True, _generando_ia=lambda: False, _consultando_modelos=False,
+                          _login_abierto=False)
 
     resultado = AppTranscriptor.guardar_configuracion(app, {("salida", "formato"): "srt"})
 
@@ -225,7 +226,8 @@ def test_restablecer_configuracion_rechazado_o_cancelado_no_escribe(monkeypatch,
         raise AssertionError("no se debe restablecer")
 
     monkeypatch.setattr(ui, "restablecer_formulario", no_debe_llamarse)
-    app = SimpleNamespace(_transcribiendo=lambda: transcribiendo, _generando_ia=lambda: False)
+    app = SimpleNamespace(_transcribiendo=lambda: transcribiendo, _generando_ia=lambda: False,
+                          _consultando_modelos=False, _login_abierto=False)
 
     resultado = AppTranscriptor.restablecer_configuracion(app)
 
@@ -321,25 +323,31 @@ def test_aplicar_guardado_repone_el_modelo_de_ia_y_olvida_el_asistente():
     assert app._documentos.olvidados == 0
 
 
-def test_campos_de_ia_sin_modelo():
-    """D1, criterio 1: `CAMPOS` tiene las cinco claves `ia.*` salvo `ia.modelo`, seguidas y en el grupo «IA», entre
-    la última de «Salida» y `historial.ruta`; dominio y revisión sin plegar, el resto plegado; sin nota; con sus
-    etiquetas."""
+def test_campos_cubren_las_21_claves():
+    """D2, criterio 1: `CAMPOS` tiene exactamente las 21 claves de `configuracion._tabla()`; `ia.modelo` es el primer
+    campo del grupo «IA», con la etiqueta «Modelo de IA», sin plegar y sin nota. Las demás claves de «ia» siguen
+    como en D1: dominio y revisión sin plegar, el resto plegado."""
+    from src import configuracion
     from src.ui_configuracion import CAMPOS
 
-    indices = [i for i, c in enumerate(CAMPOS) if c.seccion == "ia"]
-    ia = [CAMPOS[i] for i in indices]
+    assert len(CAMPOS) == 21
+    assert {(c.seccion, c.clave) for c in CAMPOS} == set(configuracion._tabla())
+    ia = [c for c in CAMPOS if c.seccion == "ia"]
     assert [c.clave for c in ia] == [
-        "copilot_enterprise_url", "revision_fidelidad", "temperatura", "max_caracteres_bloque", "peticiones_paralelas",
+        "modelo", "copilot_enterprise_url", "revision_fidelidad", "temperatura", "max_caracteres_bloque",
+        "peticiones_paralelas",
     ]
-    assert indices == list(range(indices[0], indices[0] + 5))
+    indices = [i for i, c in enumerate(CAMPOS) if c.seccion == "ia"]
+    assert indices == list(range(indices[0], indices[0] + 6))
     assert all(c.grupo == "IA" for c in ia)
     assert CAMPOS[indices[0] - 1].grupo == "Salida"
     assert (CAMPOS[indices[-1] + 1].seccion, CAMPOS[indices[-1] + 1].clave) == ("historial", "ruta")
-    assert [(c.control, c.avanzado) for c in ia] == [
+    modelo = ia[0]
+    assert (modelo.etiqueta, modelo.avanzado, modelo.nota) == ("Modelo de IA", False, "")
+    assert [(c.control, c.avanzado) for c in ia[1:]] == [
         ("texto", False), ("interruptor", False), ("texto", True), ("texto", True), ("texto", True),
     ]
-    assert [c.etiqueta for c in ia] == [
+    assert [c.etiqueta for c in ia[1:]] == [
         "Dominio de GitHub Enterprise (vacío = github.com)", "Revisión de fidelidad", "Temperatura de la IA",
         "Caracteres por parte", "Partes a la vez",
     ]
@@ -594,3 +602,253 @@ def test_cargar_modelos_ia_descarta_si_cambia_la_epoca_durante_la_consulta(monke
         assert app.registro == [DESCARTE]
     else:
         assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "gpt-4.1"]})]
+
+
+def test_aviso_modelo_solo_para_familias_excluidas():
+    """D2, criterio 2: el aviso del campo «Modelo de IA» solo sale para un modelo de familia excluida, con el texto
+    del criterio; los autorizados no tienen aviso."""
+    from src.ui_configuracion import aviso_modelo
+
+    assert aviso_modelo("Mistral-Large-3") == (
+        "El modelo configurado «Mistral-Large-3» es de la familia «mistral», que no está autorizada por la empresa: "
+        "no se enviará. Elige otro.")
+    assert "«kimi»" in aviso_modelo("kimi-k3-mini")
+    assert aviso_modelo("gpt-4.1") is None
+    assert aviso_modelo("auto") is None
+    assert aviso_modelo("claude-haiku-5.5") is None
+
+
+def test_motivo_para_no_guardar_con_consulta_o_login():
+    """D2, criterio 3: con «↻» consultando o con el inicio de sesión abierto no se guarda, y se dice por qué; el
+    proceso en curso manda sobre los otros dos motivos."""
+    from src.ui_configuracion import motivo_para_no_guardar
+
+    espera_consulta = "Espera a que termine la consulta de modelos de IA."
+    espera_login = "Termina o cancela el inicio de sesión en GitHub Copilot."
+    espera_proceso = "Espera a que termine el proceso en curso."
+    assert motivo_para_no_guardar(False, False, consultando_modelos=True) == espera_consulta
+    assert motivo_para_no_guardar(False, False, login_abierto=True) == espera_login
+    assert motivo_para_no_guardar(True, False, login_abierto=True) == espera_proceso
+    assert motivo_para_no_guardar(False, True, consultando_modelos=True) == espera_proceso
+    assert motivo_para_no_guardar(False, False, consultando_modelos=True, login_abierto=True) == espera_consulta
+    assert motivo_para_no_guardar(False, False, False, False) is None
+
+
+def test_guardar_configuracion_pasa_el_modelo_en_la_misma_escritura(monkeypatch):
+    """D2, criterio 1: guardar con un modelo nuevo escribe `modelo_ia` y `configuracion` en una sola escritura, y no
+    llama a `_al_cambiar_modelo_ia`; con un modelo de familia excluida no escribe nada y devuelve el error de la regla 7."""
+    import copy
+    import json
+    from types import SimpleNamespace
+
+    from src import configuracion
+    from src.configuracion import cargar_configuracion
+
+    escrituras = []
+    escribir_original = configuracion._escribir_preferencias_atomico
+
+    def espia(datos):
+        escrituras.append(copy.deepcopy(datos))
+        escribir_original(datos)
+
+    monkeypatch.setattr(configuracion, "_escribir_preferencias_atomico", espia)
+    aplicados = []
+
+    def al_cambiar_modelo(modelo):
+        raise AssertionError("el campo no pasa por el selector del lateral")
+
+    proyecto = cargar_configuracion()
+    app = SimpleNamespace(
+        configuracion_proyecto=proyecto, configuracion=proyecto, _modelo_preferido=None,
+        _transcribiendo=lambda: False, _generando_ia=lambda: False, _consultando_modelos=False, _login_abierto=False,
+        aplicar_guardado=lambda resultado: aplicados.append(resultado), _log=lambda texto: None,
+        _al_cambiar_modelo_ia=al_cambiar_modelo,
+    )
+
+    resultado = AppTranscriptor.guardar_configuracion(app, {("salida", "formato"): "srt"}, "gpt-4.1")
+
+    assert escrituras == [{"modelo_ia": "gpt-4.1", "configuracion": {"salida": {"formato": "srt"}}}]
+    assert json.loads(configuracion.RUTA_PREFERENCIAS.read_text(encoding="utf-8")) == escrituras[0]
+    assert len(aplicados) == 1
+    assert {("ia", "modelo"), ("salida", "formato")} <= aplicados[0].cambiadas
+    assert aplicados[0].modelo_preferido == "gpt-4.1"
+    assert resultado is aplicados[0]
+
+    escrituras.clear()
+    aplicados.clear()
+    resultado = AppTranscriptor.guardar_configuracion(app, {("salida", "formato"): "srt"}, "Mistral-Large-3")
+
+    assert escrituras == []
+    assert aplicados == []
+    assert ("ia", "modelo") in resultado.errores
+    assert "no está autorizada por la empresa" in resultado.errores[("ia", "modelo")]
+
+
+@pytest.mark.parametrize("consultando,login,espera", [
+    (True, False, "Espera a que termine la consulta de modelos de IA."),
+    (False, True, "Termina o cancela el inicio de sesión en GitHub Copilot."),
+])
+def test_guardar_y_restablecer_rechazados_con_consulta_o_login(monkeypatch, consultando, login, espera):
+    """D2, criterio 3: con «↻» consultando o con el inicio de sesión abierto, Guardar y Restablecer avisan con el
+    diálogo, no preguntan, no escriben y devuelven el texto como pie."""
+    from types import SimpleNamespace
+
+    from src import configuracion, ui
+
+    avisos, preguntas = [], []
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        showwarning=lambda titulo, texto: avisos.append((titulo, texto)),
+        showerror=lambda titulo, texto: avisos.append((titulo, texto)),
+        askyesno=lambda titulo, texto: preguntas.append((titulo, texto)) or True,
+    ))
+
+    def no_debe_llamarse(*args, **kwargs):
+        raise AssertionError("no se debe escribir mientras hay una consulta o un inicio de sesión")
+
+    monkeypatch.setattr(ui, "guardar_formulario", no_debe_llamarse)
+    monkeypatch.setattr(ui, "restablecer_formulario", no_debe_llamarse)
+    app = SimpleNamespace(_transcribiendo=lambda: False, _generando_ia=lambda: False,
+                          _consultando_modelos=consultando, _login_abierto=login)
+
+    guardado = AppTranscriptor.guardar_configuracion(app, {("salida", "formato"): "srt"}, "gpt-4.1")
+    restablecido = AppTranscriptor.restablecer_configuracion(app)
+
+    assert avisos == [("Configuración", espera), ("Configuración", espera)]
+    assert preguntas == []
+    assert guardado.efectiva is None and guardado.mensaje == espera
+    assert restablecido.efectiva is None and restablecido.mensaje == espera
+    assert not configuracion.RUTA_PREFERENCIAS.exists()
+
+
+def test_login_abierto_mientras_el_dialogo_existe(monkeypatch):
+    """D2, criterio 3: `_iniciar_sesion_copilot` marca `_login_abierto` mientras el diálogo existe; al terminar lo quita
+    antes de llamar a `al_conectar` (así el «↻» que relanza tras iniciar sesión no queda bloqueado por su propio
+    diálogo) y, si se cancela, la barra de estado lo dice."""
+    from types import SimpleNamespace
+
+    from src import ui
+    from src.configuracion import cargar_configuracion
+
+    dialogos = []
+
+    class DialogoDoble:
+        def __init__(self, master, enterprise_url, al_terminar):
+            self.al_terminar = al_terminar
+            dialogos.append(self)
+
+    monkeypatch.setattr(ui, "DialogoLoginCopilot", DialogoDoble)
+    app = SimpleNamespace(configuracion=cargar_configuracion(), _login_abierto=False, label_estado=Doble(),
+                          _log=lambda texto: None)
+    vistos = []
+
+    def al_conectar():
+        vistos.append(app._login_abierto)
+
+    AppTranscriptor._iniciar_sesion_copilot(app, al_conectar)
+    assert app._login_abierto is True
+
+    dialogos[-1].al_terminar(False)
+    assert app._login_abierto is False
+    assert app.label_estado.llamadas[-1] == ("configure", (), {"text": "Inicio de sesión en GitHub Copilot cancelado"})
+
+    AppTranscriptor._iniciar_sesion_copilot(app, al_conectar)
+    dialogos[-1].al_terminar(True)
+    assert vistos == [False]
+    assert app._login_abierto is False
+
+
+class PanelDoble:
+    """Doble de la vista Configuración: anota las opciones que recibe el campo y los cambios de su «↻»."""
+
+    def __init__(self):
+        self.opciones = []
+        self.btn_cargar_modelos_ia = Doble()
+
+    def mostrar_modelos_ia(self, opciones):
+        self.opciones.append(opciones)
+
+
+def test_lista_de_modelos_llega_tambien_al_campo_de_la_vista():
+    """D2, criterio 1: al llegar la lista de «↻», el campo «Modelo de IA» de la vista recibe las mismas opciones que el
+    lateral y su «↻» vuelve a estar habilitado. Sin vista construida hace lo de hoy; con una época vieja (D1), ni el
+    lateral ni el campo cambian, aunque su «↻» sí se rehabilita."""
+    app = _ventana_para_modelos(epoca_actual=0)
+    panel = PanelDoble()
+    app.panel_configuracion = panel
+
+    AppTranscriptor._mostrar_modelos_ia(app, ["auto", "gpt-4.1"], 0)
+
+    assert panel.opciones == [["auto", "gpt-4.1"]]
+    assert panel.btn_cargar_modelos_ia.llamadas == [("configure", (), {"state": "normal"})]
+    assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "gpt-4.1"]})]
+
+    app = _ventana_para_modelos(epoca_actual=0)
+    app.panel_configuracion = None
+    AppTranscriptor._mostrar_modelos_ia(app, ["auto", "gpt-4.1"], 0)  # sin vista: hace lo de hoy, sin error
+    assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "gpt-4.1"]})]
+
+    app = _ventana_para_modelos(epoca_actual=1)
+    panel = PanelDoble()
+    app.panel_configuracion = panel
+    AppTranscriptor._mostrar_modelos_ia(app, ["auto", "gpt-4.1"], 0)
+
+    assert panel.opciones == []
+    assert panel.btn_cargar_modelos_ia.llamadas == [("configure", (), {"state": "normal"})]
+    assert app.combo_modelo_ia.llamadas == []
+
+
+def test_guardar_del_panel_pasa_el_modelo_aparte():
+    """D2, criterio 1: «Guardar» de la vista pasa el valor de «Modelo de IA» como `modelo_ia`, aparte del resto de
+    valores, que no llevan `("ia", "modelo")`."""
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado
+    from src.ui_configuracion import CAMPOS, PanelConfiguracion
+
+    class Valor:
+        def __init__(self, valor):
+            self.valor = valor
+
+        def get(self):
+            return self.valor
+
+    llamadas = []
+    app = SimpleNamespace(guardar_configuracion=lambda valores, modelo_ia=None: (
+        llamadas.append((valores, modelo_ia)) or ResultadoGuardado({}, None, None, [], set(), "Corrige 1 valor.")))
+    variables = {(c.seccion, c.clave): Valor("gpt-4.1" if c.control == "modelo_ia" else "") for c in CAMPOS}
+    panel = SimpleNamespace(app=app, _variables=variables, _errores={(c.seccion, c.clave): Doble() for c in CAMPOS},
+                            _avanzados={}, label_pie=Doble(), refrescar=lambda: None)
+    panel._valores_formulario = lambda: PanelConfiguracion._valores_formulario(panel)
+    panel._pintar = lambda resultado: PanelConfiguracion._pintar(panel, resultado)
+
+    PanelConfiguracion._guardar(panel)
+
+    valores, modelo_ia = llamadas[0]
+    assert ("ia", "modelo") not in valores
+    assert len(valores) == len(CAMPOS) - 1
+    assert modelo_ia == "gpt-4.1"
+    assert panel.label_pie.llamadas[-1] == ("configure", (), {"text": "Corrige 1 valor."})
+
+
+def test_rechazo_sin_error_del_modelo_conserva_el_aviso_de_familia_excluida():
+    """D2, criterio 2: tras un «Guardar» que no da error en «Modelo de IA» (por ejemplo, rechazado por una consulta en
+    curso), el aviso rojo del modelo no autorizado sigue bajo el campo; si hay error del modelo, el error lo sustituye."""
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado
+    from src.ui_configuracion import CAMPOS, PanelConfiguracion, aviso_modelo
+
+    class Valor:
+        def get(self):
+            return "Mistral-Large-3"
+
+    errores = {(c.seccion, c.clave): Doble() for c in CAMPOS}
+    panel = SimpleNamespace(_variables={("ia", "modelo"): Valor()}, _errores=errores, _avanzados={},
+                            label_pie=Doble())
+
+    PanelConfiguracion._pintar(panel, ResultadoGuardado({}, None, None, [], set(), "Espera."))
+    assert errores[("ia", "modelo")].llamadas[-1] == ("configure", (), {"text": aviso_modelo("Mistral-Large-3")})
+
+    PanelConfiguracion._pintar(panel, ResultadoGuardado({("ia", "modelo"): "Elige otro modelo."}, None, None, [], set(),
+                                                        "No se guardó nada: corrige 1 valor."))
+    assert errores[("ia", "modelo")].llamadas[-1] == ("configure", (), {"text": "Elige otro modelo."})

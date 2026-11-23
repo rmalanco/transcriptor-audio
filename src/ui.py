@@ -57,13 +57,26 @@ def _etiqueta_modelo_ia(modelo: str) -> str:
     return f"Modelo: {NOMBRE_PROVEEDOR} · {modelo}"
 
 
+def _panel_de_modelos(app):
+    """La vista Configuración, si ya se construyó."""
+    return getattr(app, "panel_configuracion", None)  # los dobles de test de la ventana no siempre la tienen
+
+
+def _marcar_cargar_modelos(app, estado: str):
+    """Habilita o deshabilita a la vez el «↻» del lateral y el de la vista Configuración."""
+    app.btn_cargar_modelos_ia.configure(state=estado)
+    panel = _panel_de_modelos(app)
+    if panel is not None:
+        panel.btn_cargar_modelos_ia.configure(state=estado)
+
+
 def _cerrar_consulta_de_modelos(app, epoca: int) -> bool:
     """Cierra una respuesta de «↻»: ya no hay consulta en curso y el botón vuelve a estar habilitado. Si la época ya
     no es la de cuando se lanzó (cambió el dominio de GitHub Enterprise), se descarta: se anota en Registro, la barra
     de estado vuelve a «Listo» (salvo si hay una transcripción o una generación en curso, que la usan) y devuelve
     False."""
     app._consultando_modelos = False
-    app.btn_cargar_modelos_ia.configure(state="normal")
+    _marcar_cargar_modelos(app, "normal")
     if epoca == app._epoca_ia:
         return True
     app._log("Se descarta una lista de modelos de una sesión o un dominio anteriores")
@@ -168,6 +181,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         # Sube al cambiar el dominio de GitHub Enterprise: una respuesta de «↻» de otra época se descarta
         self._epoca_ia = 0
         self._consultando_modelos = False  # «↻» tiene una consulta en curso
+        self._login_abierto = False        # el diálogo de inicio de sesión en GitHub Copilot está abierto
 
         self._construir_ui()
         for aviso in self.avisos_preferencias:
@@ -969,7 +983,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def _cargar_modelos_ia(self):
         """Pulsación de «↻»: consulta una vez el catálogo de Copilot, en segundo plano, y lo muestra en el selector.
         Sin sesión, abre el inicio de sesión y vuelve a cargar al terminar bien."""
-        self.btn_cargar_modelos_ia.configure(state="disabled")
+        _marcar_cargar_modelos(self, "disabled")
         self._consultando_modelos = True
         self.label_estado.configure(text="Consultando los modelos de GitHub Copilot…")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
@@ -1006,6 +1020,9 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         if not _cerrar_consulta_de_modelos(self, epoca):
             return
         self.combo_modelo_ia.configure(values=opciones)
+        panel = _panel_de_modelos(self)
+        if panel is not None:
+            panel.mostrar_modelos_ia(opciones)
         actual = self._modelo_ia_configurado()
         if copilot.familia_excluida(actual):
             self._log(f"El modelo configurado ({actual}) es de una familia no autorizada por la empresa; no se ofrece")
@@ -1030,8 +1047,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self._log(f"Modelo de IA: {modelo}" + ("" if guardado else " (solo para esta sesión; no se pudo guardar en preferencias.json)"))
 
     def _iniciar_sesion_copilot(self, al_conectar):
-        """Abre el diálogo de inicio de sesión; si termina bien, ejecuta `al_conectar`."""
+        """Abre el diálogo de inicio de sesión; si termina bien, ejecuta `al_conectar`. Mientras el diálogo existe,
+        `_login_abierto` es True: Guardar y Restablecer lo comprueban."""
         def al_terminar(ok: bool):
+            self._login_abierto = False  # antes de `al_conectar`: lo que relanza no lo ve como abierto
             if ok:
                 self._log("Sesión de GitHub Copilot iniciada")
                 al_conectar()
@@ -1039,6 +1058,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 self.label_estado.configure(text="Inicio de sesión en GitHub Copilot cancelado")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
         DialogoLoginCopilot(self, enterprise_url, al_terminar)
+        self._login_abierto = True  # después de construirlo: si el constructor falla, la marca no queda puesta
 
     def _copiar_documento_ia(self, clave: str):
         contenido = self.tabs_ia[clave]["contenido"]
@@ -1125,15 +1145,17 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         else:
             self.vista_transcribir.grid()
 
-    def guardar_configuracion(self, valores_widget: dict) -> ResultadoGuardado:
+    def guardar_configuracion(self, valores_widget: dict, modelo_ia: Optional[str] = None) -> ResultadoGuardado:
         """Guarda lo que pide la vista Configuración (solo en el hilo principal). Con un proceso en curso no escribe
-        nada; si la escritura falla, no se aplica nada."""
-        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        nada; si la escritura falla, no se aplica nada. `modelo_ia` es el valor del campo «Modelo de IA»: va en la
+        misma escritura que el resto y no pasa por el selector del lateral."""
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia(), self._consultando_modelos,
+                                        self._login_abierto)
         if motivo is not None:
             messagebox.showwarning("Configuración", motivo)
             return ResultadoGuardado({}, None, None, [], set(), motivo)
         resultado = guardar_formulario(self.configuracion_proyecto, self.configuracion, valores_widget,
-                                       None, self._modelo_preferido)
+                                       modelo_ia, self._modelo_preferido)
         if resultado.efectiva is None:
             if not resultado.errores:
                 messagebox.showerror("Configuración", resultado.mensaje)
@@ -1146,7 +1168,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def restablecer_configuracion(self) -> Optional[ResultadoGuardado]:
         """Pulsación de «Restablecer valores del proyecto» (solo en el hilo principal). Con un proceso en curso no
         hace nada; si se responde «No», devuelve None. Si la escritura falla, no aplica nada."""
-        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia(), self._consultando_modelos,
+                                        self._login_abierto)
         if motivo is not None:
             messagebox.showwarning("Configuración", motivo)
             return ResultadoGuardado({}, None, None, [], set(), motivo)

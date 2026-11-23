@@ -120,9 +120,7 @@ Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
 
 ### Vista Configuración
-La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con su «Avanzado» plegado y sin
-campo de modelo) e Historial; el resto (el campo de modelo de IA y la sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
-vista solo cambia los controles del lateral de las claves guardadas.
+La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con «Modelo de IA» primero y su «Avanzado» plegado) e Historial; el resto (la sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la vista solo cambia los controles del lateral de las claves guardadas.
 
 - Given el YAML del proyecto (`salida.formato: "txt"`, `modelo.nombre: "large-v3-turbo"`), sin `preferencias.json` y con
   el modelo de Whisper del panel lateral cambiado a mano a `tiny`, when se abre «⚙ Configuración» con `Ctrl+3` (o con el
@@ -137,10 +135,17 @@ vista solo cambia los controles del lateral de las claves guardadas.
   = `nl` y el selector de idioma del lateral muestra `nl` y lo ofrece al final de su lista; y si después se cambia
   «Formato de salida» a `vtt` sin guardar, se va a Transcribir (`Ctrl+1`) y se vuelve (`Ctrl+3`), el campo vuelve a
   mostrar el valor guardado (`srt`), el lateral no cambió y `preferencias.json` tampoco.
-- Given una transcripción en curso (o una generación de resumen o minuta), when se pulsa «Guardar» en la vista, then
-  aparece el diálogo «Configuración» con «Espera a que termine el proceso en curso.», el pie de la vista muestra ese mismo
-  texto, `preferencias.json` no cambia (ni se crea) y los controles del lateral conservan sus valores. Al terminar el
-  proceso, «Guardar» funciona como en el primer criterio.
+- Given una transcripción o una generación en curso, o «↻» (del lateral o de la vista) consultando la lista de modelos, o
+  el diálogo «Iniciar sesión en GitHub Copilot» abierto, y «Formato de salida» cambiado a `srt` en la vista, when se pulsa
+  «Guardar» o «Restablecer valores del proyecto», then aparece el diálogo «Configuración» con «Espera a que termine el
+  proceso en curso.» (con un proceso), «Espera a que termine la consulta de modelos de IA.» (con la consulta) o «Termina o
+  cancela el inicio de sesión en GitHub Copilot.» (con el inicio de sesión), sin preguntar antes «Restablecer
+  configuración»; el pie de la vista muestra ese mismo texto, `preferencias.json` no cambia (ni se crea), y los controles
+  del lateral y el selector de modelo de IA conservan sus valores. Mientras «↻» consulta, el «↻» de la vista está
+  deshabilitado como el del lateral, y en cuanto termina el proceso, llega la lista (o falla) o se cierra el diálogo,
+  «Guardar» funciona como en el primer criterio de «Modelo de IA en la vista Configuración». (antes: «Guardar» y
+  «Restablecer» solo se rechazaban con una transcripción o una generación en curso; con «↻» en curso guardaban, y con el
+  diálogo de inicio de sesión abierto también.)
 - Given el YAML del proyecto (`transcripcion.beam_size: 5`, `transcripcion.no_speech_threshold: 0.6`) y sin
   `preferencias.json`, when se abre «⚙ Configuración», then el grupo «Transcripción» muestra sus cuatro campos y un
   «▸ Avanzado» plegado que oculta los siete de decodificación (Haz de búsqueda, Candidatos, Temperatura de Whisper,
@@ -170,13 +175,47 @@ vista solo cambia los controles del lateral de las claves guardadas.
 
 Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md
 Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md
+Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
+
+### Modelo de IA en la vista Configuración
+- Given el YAML del proyecto (`ia.modelo: "claude-haiku-5.5"`, `salida.formato: "txt"`), sin `preferencias.json`, con
+  sesión de Copilot y una generación anterior que dejó creado el asistente, when se abre «⚙ Configuración», then el grupo
+  «IA» empieza con «Modelo de IA» (clave `ia.modelo` en gris) en `claude-haiku-5.5`, sin aviso, con las mismas opciones
+  que el selector del lateral (`auto` y `claude-haiku-5.5`), y abrirla no hace ninguna petición de red.
+- Given la vista con «Modelo de IA» en `claude-haiku-5.5`, when se pulsa su «↻» y llega la lista (`auto`, `gpt-4.1`,
+  `claude-haiku-5.5`), then el campo y el selector del lateral ofrecen esa misma lista, sin perder lo que el formulario
+  tuviera escrito sin guardar.
+- Given `gpt-4.1` elegido en «Modelo de IA» y «Formato de salida» en `srt`, when se pulsa «Guardar», then el pie dice
+  «Configuración guardada», `preferencias.json` queda exactamente `{"modelo_ia": "gpt-4.1", "configuracion": {"salida":
+  {"formato": "srt"}}}` en una sola escritura, `config/settings.yaml` no cambia, el selector del lateral muestra
+  `gpt-4.1`, la línea de estado de Resumen y de Minuta dice «Modelo: GitHub Copilot · gpt-4.1», Registro anota
+  «Configuración guardada: ia.modelo, salida.formato» (y no «Modelo de IA: gpt-4.1»), y la siguiente generación crea un
+  asistente nuevo con `gpt-4.1`.
+- Given `gpt-4.1` elegido en «Modelo de IA» sin guardar, when se va a Transcribir (`Ctrl+1`) y se vuelve (`Ctrl+3`), then
+  el selector del lateral sigue en el modelo anterior, el archivo no se crea y el campo vuelve a mostrar el modelo
+  guardado.
+
+Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
+
+### Modelo no autorizado en la vista Configuración
+- Given `"modelo_ia": "Mistral-Large-3"` en `preferencias.json` (o `ia.modelo: "Mistral-Large-3"` en el YAML sin
+  preferencia), when se abre la vista, then bajo «Modelo de IA», en rojo, aparece «El modelo configurado «Mistral-Large-3»
+  es de la familia «mistral», que no está autorizada por la empresa: no se enviará. Elige otro.»; el campo muestra
+  `Mistral-Large-3` pero no lo ofrece entre sus opciones (ni antes ni después de «↻») y no admite texto libre.
+- Given lo mismo, when se pulsa «Guardar» sin cambiar el modelo, then bajo el campo aparece «El modelo «Mistral-Large-3»
+  es de la familia «mistral», que no está autorizada por la empresa. Elige otro modelo.», el pie dice «No se guardó
+  nada: corrige 1 valor.» y `preferencias.json` no cambia.
+- Given lo mismo, when se elige `auto` y se pulsa «Guardar», then `preferencias.json` tiene `"modelo_ia": "auto"`, el
+  selector del lateral muestra `auto` y el aviso rojo desaparece. Con un modelo autorizado no hay aviso.
+
+Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
 
 ### Grupo IA de la vista Configuración
 - Given el YAML del proyecto (`ia.copilot_enterprise_url: ""`, `revision_fidelidad: false`, `temperatura: 0.2`,
   `max_caracteres_bloque: 60000`, `peticiones_paralelas: 3`) y sin `preferencias.json`, when se abre «⚙ Configuración»,
   then entre «Salida» e «Historial» hay un grupo «IA» con «Dominio de GitHub Enterprise (vacío = github.com)» vacío,
   «Revisión de fidelidad» apagado y un «▸ Avanzado» plegado con «Temperatura de la IA» `0.2`, «Caracteres por parte»
-  `60000` y «Partes a la vez» `3`, cada campo con su clave del YAML en gris (no hay campo «Modelo de IA»).
+  `60000` y «Partes a la vez» `3`, cada campo con su clave del YAML en gris (el campo «Modelo de IA», primero del grupo, es el de «Modelo de IA en la vista Configuración»).
 - Given esa vista con `https://empresa.ghe.com/` en el dominio y `9` en «Partes a la vez», when se pulsa «Guardar», then
   bajo el dominio aparece «`ia.copilot_enterprise_url` debe ser un nombre de dominio sin https:// ni barras, como
   empresa.ghe.com, o estar vacío (vale «https://empresa.ghe.com/»).», «Avanzado» se despliega y bajo «Partes a la vez»
@@ -190,14 +229,19 @@ Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md
 Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
 
 ### Cambio del dominio de GitHub Enterprise en la vista
-- Given «↻» pulsado con el dominio vacío (github.com) y todavía sin respuesta, when se guarda `empresa.ghe.com` en el
-  dominio, then el selector «Modelo de IA (resumen y minuta)» del lateral pasa a ofrecer solo `auto` y el modelo
-  configurado; cuando llega la lista de github.com se descarta (el selector no cambia, «↻» vuelve a estar habilitado y
-  Registro anota «Se descarta una lista de modelos de una sesión o un dominio anteriores»), y si esa consulta termina sin
-  sesión no se abre el inicio de sesión.
+- Given «↻» pulsado con el dominio vacío (github.com) y todavía sin respuesta, when se pulsa «Guardar» con
+  `empresa.ghe.com` en el dominio, then no se guarda nada y el pie dice «Espera a que termine la consulta de modelos de
+  IA.» (ver «Vista Configuración»): desde la vista, el dominio no cambia con una consulta en curso.
+- Given una lista de modelos pedida con una época de la IA anterior a la actual, when llega (o falla, o no hay sesión),
+  then no se pinta, no se abre el inicio de sesión, «↻» vuelve a estar habilitado y Registro anota «Se descarta una
+  lista de modelos de una sesión o un dominio anteriores». Ninguna acción de la vista cambia la época mientras consulta:
+  esta protección queda para el inicio y el cierre de sesión de Copilot desde la vista (pendiente, E2 de la historia 24). (antes: con «↻» en curso,
+  guardar `empresa.ghe.com` cambiaba la época y el selector del lateral se reiniciaba a `auto` y el configurado; la lista
+  de github.com que llegaba después se descartaba.)
 - Given el dominio guardado como `empresa.ghe.com`, when se pulsa «↻», se genera un resumen o una minuta o se abre el
   inicio de sesión de Copilot, then esas acciones usan `empresa.ghe.com`.
 - Given «↻» sin consulta en curso, when se guarda un cambio de dominio, then el selector vuelve a ofrecer solo `auto` y
   el modelo configurado.
 
 Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
+Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md

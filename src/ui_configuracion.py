@@ -6,6 +6,7 @@ from typing import Optional
 
 import customtkinter as ctk
 
+from src import copilot
 from src.configuracion import DISPOSITIVOS, FORMATOS, MODELOS_WHISPER, TIPOS_COMPUTO, ResultadoGuardado
 from src.idiomas import codigo_de_idioma, nombre_de_idioma, opciones_de_idioma
 
@@ -19,7 +20,7 @@ class Campo:
     seccion: str
     clave: str
     etiqueta: str
-    control: str          # "lista" | "lista_editable" | "botones" | "interruptor" | "texto"
+    control: str          # "lista" | "lista_editable" | "botones" | "interruptor" | "texto" | "modelo_ia"
     grupo: str            # "Transcripción" | "Salida" | "IA" | "Historial"
     avanzado: bool = False
     opciones: tuple = ()  # para "lista" y "botones"
@@ -43,6 +44,7 @@ CAMPOS = (
     Campo("salida", "formato", "Formato de salida", "botones", "Salida", opciones=FORMATOS),
     Campo("salida", "incluir_timestamps", "Incluir marcas de tiempo", "interruptor", "Salida"),
     Campo("salida", "palabra_por_palabra", "Marcas por palabra", "interruptor", "Salida"),
+    Campo("ia", "modelo", "Modelo de IA", "modelo_ia", "IA"),
     Campo("ia", "copilot_enterprise_url", "Dominio de GitHub Enterprise (vacío = github.com)", "texto", "IA"),
     Campo("ia", "revision_fidelidad", "Revisión de fidelidad", "interruptor", "IA"),
     Campo("ia", "temperatura", "Temperatura de la IA", "texto", "IA", avanzado=True),
@@ -53,11 +55,25 @@ CAMPOS = (
 )
 
 
-def motivo_para_no_guardar(transcribiendo: bool, generando: bool) -> Optional[str]:
+def motivo_para_no_guardar(transcribiendo: bool, generando: bool, consultando_modelos: bool = False,
+                           login_abierto: bool = False) -> Optional[str]:
     """Por qué no se puede guardar ahora desde la vista, o None si se puede."""
     if transcribiendo or generando:
         return "Espera a que termine el proceso en curso."
+    if consultando_modelos:
+        return "Espera a que termine la consulta de modelos de IA."
+    if login_abierto:
+        return "Termina o cancela el inicio de sesión en GitHub Copilot."
     return None
+
+
+def aviso_modelo(modelo: str) -> Optional[str]:
+    """Aviso rojo bajo «Modelo de IA» para un modelo de familia excluida; None si el modelo está autorizado."""
+    familia = copilot.familia_excluida(modelo)
+    if familia is None:
+        return None
+    return (f"El modelo configurado «{modelo}» es de la familia «{familia}», que no está autorizada por la empresa: "
+            "no se enviará. Elige otro.")
 
 
 class PanelConfiguracion(ctk.CTkFrame):
@@ -132,10 +148,13 @@ class PanelConfiguracion(ctk.CTkFrame):
             row=0, column=0, sticky="w")
         if campo.control == "interruptor":
             variable = tk.BooleanVar(value=False)
-            widget = ctk.CTkSwitch(bloque, text="", variable=variable)
+            widget = control = ctk.CTkSwitch(bloque, text="", variable=variable)
+        elif campo.control == "modelo_ia":
+            variable = tk.StringVar(value="")
+            widget, control = self._crear_fila_modelo(bloque, variable)
         else:
             variable = tk.StringVar(value="")
-            widget = self._crear_control(bloque, campo, variable)
+            widget = control = self._crear_control(bloque, campo, variable)
         widget.grid(row=1, column=0, sticky="w", pady=(4, 0))
         ctk.CTkLabel(bloque, text=f"{campo.seccion}.{campo.clave}", font=ctk.CTkFont(size=11),
                      text_color=COLOR_TEXTO_SECUNDARIO).grid(row=2, column=0, sticky="w")
@@ -149,8 +168,17 @@ class PanelConfiguracion(ctk.CTkFrame):
         error.grid(row=fila_error, column=0, sticky="w")
 
         self._variables[clave] = variable
-        self._widgets[clave] = widget
+        self._widgets[clave] = control
         self._errores[clave] = error
+
+    def _crear_fila_modelo(self, padre, variable: tk.StringVar):
+        """«Modelo de IA»: el selector (sin texto libre) y su «↻», que lanza la misma consulta que el del lateral."""
+        fila = ctk.CTkFrame(padre, fg_color="transparent")
+        menu = ctk.CTkOptionMenu(fila, values=[], variable=variable, width=260)
+        menu.grid(row=0, column=0, sticky="w")
+        self.btn_cargar_modelos_ia = ctk.CTkButton(fila, text="↻", width=36, command=self.app._cargar_modelos_ia)
+        self.btn_cargar_modelos_ia.grid(row=0, column=1, padx=(6, 0), sticky="w")
+        return fila, menu
 
     @staticmethod
     def _crear_control(padre, campo: Campo, variable: tk.StringVar):
@@ -168,6 +196,8 @@ class PanelConfiguracion(ctk.CTkFrame):
         """Pone en cada campo el valor de la configuración de la ventana (así descarta lo no guardado) y limpia
         los errores y el pie."""
         for campo in CAMPOS:
+            if campo.control == "modelo_ia":
+                continue
             clave = (campo.seccion, campo.clave)
             valor = self.app.configuracion[campo.seccion][campo.clave]
             if campo.control == "lista_editable":
@@ -178,7 +208,22 @@ class PanelConfiguracion(ctk.CTkFrame):
         for etiqueta in self._errores.values():
             etiqueta.configure(text="")
         self.label_pie.configure(text="")
+        self._refrescar_modelo()
         self._pintar_avisos()
+
+    def _refrescar_modelo(self):
+        """«Modelo de IA» vuelve a mostrar el modelo efectivo de la ventana, con las opciones del selector del lateral y
+        su aviso si es de una familia excluida; su «↻» está deshabilitado mientras la consulta de modelos está en curso."""
+        clave = ("ia", "modelo")
+        modelo = self.app._modelo_ia_configurado()
+        self._variables[clave].set(modelo)
+        self._widgets[clave].configure(values=self.app.combo_modelo_ia.cget("values"))
+        self._errores[clave].configure(text=aviso_modelo(modelo) or "")
+        self.btn_cargar_modelos_ia.configure(state="disabled" if self.app._consultando_modelos else "normal")
+
+    def mostrar_modelos_ia(self, opciones: list[str]):
+        """Pone en el campo «Modelo de IA» las opciones que acaba de cargar «↻» (las del selector del lateral)."""
+        self._widgets[("ia", "modelo")].configure(values=opciones)
 
     def _pintar_avisos(self):
         avisos = self.app.avisos_preferencias
@@ -214,13 +259,16 @@ class PanelConfiguracion(ctk.CTkFrame):
     def _valores_formulario(self) -> dict:
         valores = {}
         for campo in CAMPOS:
+            if campo.control == "modelo_ia":
+                continue  # el modelo va aparte: `guardar_configuracion(valores, modelo_ia)`
             clave = (campo.seccion, campo.clave)
             valor = self._variables[clave].get()
             valores[clave] = codigo_de_idioma(valor) if campo.control == "lista_editable" else valor
         return valores
 
     def _guardar(self):
-        resultado = self.app.guardar_configuracion(self._valores_formulario())
+        modelo_ia = self._variables[("ia", "modelo")].get()
+        resultado = self.app.guardar_configuracion(self._valores_formulario(), modelo_ia)
         if resultado.efectiva is not None:
             self.refrescar()  # la configuración nueva ya está en la ventana; el pie se rellena abajo
         self._pintar(resultado)
@@ -235,7 +283,10 @@ class PanelConfiguracion(ctk.CTkFrame):
 
     def _pintar(self, resultado: ResultadoGuardado):
         for clave, etiqueta in self._errores.items():
-            etiqueta.configure(text=resultado.errores.get(clave, ""))
+            texto = resultado.errores.get(clave, "")
+            if not texto and clave == ("ia", "modelo"):  # sin error, el aviso del modelo no autorizado sigue
+                texto = aviso_modelo(self._variables[clave].get()) or ""
+            etiqueta.configure(text=texto)
         for grupo in self._avanzados:  # un error dentro de un «Avanzado» se ve sin desplegarlo a mano
             if any((c.seccion, c.clave) in resultado.errores for c in CAMPOS if c.avanzado and c.grupo == grupo):
                 self._desplegar_avanzado(grupo, True)
