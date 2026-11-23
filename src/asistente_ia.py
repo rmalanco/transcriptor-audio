@@ -118,6 +118,27 @@ DOCUMENTO:
 {documento}
 \"\"\""""
 
+# El resumen no tiene reposición: no se le pide quitar nada, solo corregir (regla 4)
+PROMPT_REVISION_RESUMEN = """Revisa el DOCUMENTO comparándolo frase por frase con la TRANSCRIPCIÓN y corrige únicamente:
+- Condiciones, matices o compromisos reformulados con otro sentido: reescríbelos con las palabras de la \
+transcripción (por ejemplo, si se dijo "lo entrego el lunes si me llegan los datos", no puede quedar \
+"entrega sujeta a validación de datos").
+- Datos que no aparecen en la transcripción (nombres, fechas, cifras).
+- Calificativos o valoraciones que nadie expresó.
+
+No cambies la estructura, los títulos, el orden ni el estilo; no elimines secciones ni tareas. Si no hay nada \
+que corregir, devuelve el documento igual. Responde solo con el documento completo.
+
+TRANSCRIPCIÓN:
+\"\"\"
+{texto}
+\"\"\"
+
+DOCUMENTO:
+\"\"\"
+{documento}
+\"\"\""""
+
 PROMPT_NOTAS_BLOQUE = """Esta es la parte {n} de {total} de una transcripción larga. Extrae notas detalladas \
 en viñetas: temas, argumentos, nombres, fechas, cifras, decisiones y tareas con su responsable. \
 Conserva las condiciones y matices tal como se dijeron. No redactes conclusiones generales ni añadas \
@@ -192,7 +213,8 @@ def _es_separador(linea: str) -> bool:
 
 
 def _celdas(linea: str) -> list[str]:
-    return [c.strip() for c in linea.strip().strip("|").split("|")]
+    """Celdas de una fila; un «\\|» dentro de una celda no separa."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", linea.strip().strip("|"))]
 
 
 def _clave(texto: str) -> str:
@@ -205,23 +227,44 @@ def _clave_fila(linea: str) -> str:
 
 
 def _filas_tareas(lineas: list[str]) -> list[int]:
-    """Índices de las filas de datos de la tabla de tareas: sin cabecera, separador ni la fila «Sin tareas»."""
+    """Índices de las filas de datos de la tabla de tareas: sin cabecera, separador ni la fila «Sin tareas». La primera
+    fila es cabecera solo si la sigue el separador; una tabla sin cabecera (la revisión a veces la quita) da todas."""
     rango = _seccion(lineas, TITULO_TAREAS)
     if rango is None:
         return []
     inicio, fin = rango
     filas = [i for i in range(inicio + 1, fin) if lineas[i].strip().startswith("|") and not _es_separador(lineas[i])]
-    return [i for i in filas[1:] if _celdas(lineas[i])[0].lower().rstrip(".") != "sin tareas"]
+    con_cabecera = bool(filas) and filas[0] + 1 < len(lineas) and lineas[filas[0] + 1].strip().startswith("|") \
+        and _es_separador(lineas[filas[0] + 1])
+    datos = filas[1:] if con_cabecera else filas
+    return [i for i in datos if not _es_relleno_tarea(lineas[i])]
+
+
+def _es_relleno_tarea(linea: str) -> bool:
+    """La fila «Sin tareas» (de una o de varias columnas), que la app no cuenta como tarea."""
+    return _celdas(linea)[0].lower().rstrip(".") == "sin tareas"
 
 
 def _pendientes(antes: list[str], despues: list[str], clave) -> list[str]:
     """Filas de `antes` sin pareja en `despues`. Si `despues` no tiene menos, no falta ninguna. Las parejas se eligen de
-    mayor a menor similitud (a igualdad, el orden original de antes y de después), una a una."""
+    mayor a menor similitud (a igualdad, el orden original de antes y de después), una a una. Las iguales (similitud 1)
+    se emparejan primero, en orden, sin comparar nada; solo lo que sobra se compara, así que una revisión que quita filas
+    sin reescribir las demás cuesta casi nada."""
     if len(despues) >= len(antes):
         return []
-    pares = sorted((-SequenceMatcher(None, clave(a), clave(b)).ratio(), i, j)
-                   for i, a in enumerate(antes) for j, b in enumerate(despues))
+    libres: dict[str, list[int]] = {}
+    for j, b in enumerate(despues):
+        libres.setdefault(clave(b), []).append(j)
     usadas_antes, usadas_despues = set(), set()
+    for i, a in enumerate(antes):
+        candidatas = libres.get(clave(a))
+        if candidatas:
+            usadas_antes.add(i)
+            usadas_despues.add(candidatas.pop(0))
+    sobrantes_antes = [i for i in range(len(antes)) if i not in usadas_antes]
+    sobrantes_despues = [j for j in range(len(despues)) if j not in usadas_despues]
+    pares = sorted((-SequenceMatcher(None, clave(antes[i]), clave(despues[j])).ratio(), i, j)
+                   for i in sobrantes_antes for j in sobrantes_despues)
     for _, i, j in pares:
         if i not in usadas_antes and j not in usadas_despues:
             usadas_antes.add(i)
@@ -249,7 +292,11 @@ def _elemento_de_tarea(linea: str) -> str:
 
 
 def _reponer_tareas(lineas: list[str], quitadas: list[str]) -> list[str]:
-    """Añade al final de la tabla de tareas las filas quitadas, marcadas; si no hay tabla, bajo el título."""
+    """Añade al final de la tabla de tareas las filas quitadas, marcadas; si no hay tabla, bajo el título. Quita la fila
+    de relleno «Sin tareas», que ya no hace falta."""
+    inicio, fin = _seccion(lineas, TITULO_TAREAS)
+    lineas = [l for i, l in enumerate(lineas)
+              if not (inicio < i < fin and l.strip().startswith("|") and _es_relleno_tarea(l))]
     inicio, fin = _seccion(lineas, TITULO_TAREAS)
     filas = [i for i in range(inicio + 1, fin) if lineas[i].strip().startswith("|")]
     marcadas = [_marcar_fila(l) for l in quitadas]
@@ -298,18 +345,22 @@ def _reponer_acuerdos(lineas: list[str], quitados: list[str]) -> list[str]:
     return lineas[:pos] + marcadas + lineas[pos:]
 
 
-def _sin_donde_reponer(antes: str, despues: str) -> bool:
+def _sin_donde_reponer(despues: str, quitadas: list[str], quitados: list[str]) -> bool:
     """Hay tareas o acuerdos que reponer y `despues` ya no tiene el título de su sección, donde irían."""
     dl = despues.splitlines()
-    return (bool(_tareas_quitadas(antes, despues)) and _seccion(dl, TITULO_TAREAS) is None
-            or bool(_acuerdos_quitados(antes, despues)) and _seccion(dl, TITULO_ACUERDOS) is None)
+    return (bool(quitadas) and _seccion(dl, TITULO_TAREAS) is None
+            or bool(quitados) and _seccion(dl, TITULO_ACUERDOS) is None)
 
 
-def reponer_lo_quitado(antes: str, despues: str) -> tuple[str, list[str]]:
+def reponer_lo_quitado(antes: str, despues: str, quitadas: Optional[list[str]] = None,
+                       quitados: Optional[list[str]] = None) -> tuple[str, list[str]]:
     """Devuelve `despues` con lo que la revisión quitó de las tareas y de los acuerdos, repuesto y marcado, y la lista de
-    lo repuesto para la nota. Solo repone donde `despues` tiene menos filas o viñetas que `antes`."""
-    quitadas = _tareas_quitadas(antes, despues)
-    quitados = _acuerdos_quitados(antes, despues)
+    lo repuesto para la nota. Solo repone donde `despues` tiene menos filas o viñetas que `antes`. `quitadas` y `quitados`
+    son lo que ya calculó `_tareas_quitadas` y `_acuerdos_quitados`; si no se pasan, se calculan."""
+    if quitadas is None:
+        quitadas = _tareas_quitadas(antes, despues)
+    if quitados is None:
+        quitados = _acuerdos_quitados(antes, despues)
     if not quitadas and not quitados:
         return despues, []
     lineas = despues.splitlines()
@@ -987,9 +1038,12 @@ class AsistenteIA:
         fuente_revision = "notas"
         motivo_notas = None
         if self.revision_fidelidad:
-            # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
+            # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones. Solo la minuta puede
+            # quitar tareas y acuerdos (y se repone lo quitado); el resumen no tiene reposición y no los quita
+            plantilla_revision = PROMPT_REVISION if conservar_tareas_y_acuerdos else PROMPT_REVISION_RESUMEN
             try:
-                fuente = self._fuente_de_revision(original, texto, documento, len(bloques), consulta, cancelar)
+                fuente = self._fuente_de_revision(original, texto, documento, len(bloques), consulta, cancelar,
+                                                  plantilla_revision)
                 fuente_revision = fuente.tipo
                 motivo_notas = fuente.motivo
                 if on_progreso:
@@ -998,8 +1052,8 @@ class AsistenteIA:
                     if fuente.motivo:
                         quien += f" (la transcripción completa no cabe en «{fuente.motivo[2]}»)"
                     on_progreso(f"Revisando fidelidad con {quien}…")
-                revisado = _sin_cortar(self._completar(PROMPT_REVISION.format(texto=fuente.texto, documento=documento),
-                                                       cancelar))
+                revisado = _sin_cortar(self._completar(
+                    plantilla_revision.format(texto=fuente.texto, documento=documento), cancelar))
             except ErrorAsistenteIA as e:
                 if cancelar and cancelar.is_set():
                     raise InterruptedError from e  # cancelada: el documento sin revisar no se entrega
@@ -1009,16 +1063,18 @@ class AsistenteIA:
                 error_revision = _motivo(e)
             else:
                 # Solo se acepta si conserva todas las secciones que tenía. En la minuta, lo que la revisión quitó de las
-                # tareas se repone marcado (D4)
+                # tareas se repone marcado (D4). Lo quitado se calcula una sola vez: decide y repone
                 conserva_secciones = (len(secciones_faltantes(revisado, secciones or []))
                                       <= len(secciones_faltantes(documento, secciones or [])))
+                quitadas = _tareas_quitadas(documento, revisado) if conservar_tareas_y_acuerdos else []
+                quitados = _acuerdos_quitados(documento, revisado) if conservar_tareas_y_acuerdos else []
                 # Si hay que reponer algo y la revisión ya no tiene el título de su sección, no hay dónde: se descarta
-                if not conserva_secciones or (conservar_tareas_y_acuerdos and _sin_donde_reponer(documento, revisado)):
+                if not conserva_secciones or _sin_donde_reponer(revisado, quitadas, quitados):
                     revision_descartada = "quitaba secciones obligatorias"
                 else:
                     motivo_corte = _corte(revisado)  # el motivo es el de la respuesta que quedó
                     if conservar_tareas_y_acuerdos:
-                        revisado, repuestas = reponer_lo_quitado(documento, revisado)
+                        revisado, repuestas = reponer_lo_quitado(documento, revisado, quitadas, quitados)
                     documento, corte = revisado, motivo_corte
         if postproceso:
             documento = postproceso(documento)
@@ -1074,13 +1130,14 @@ class AsistenteIA:
                 "partes.")
 
     def _fuente_de_revision(self, original: str, notas: str, documento: str, partes: int,
-                            consulta: _ConsultaDeLimite, cancelar: Optional[threading.Event]) -> FuenteRevision:
+                            consulta: _ConsultaDeLimite, cancelar: Optional[threading.Event],
+                            plantilla_revision: str = PROMPT_REVISION) -> FuenteRevision:
         """Qué recibe la revisión: la transcripción completa si cabe en el modelo, y las notas si no. Con varias partes
         se estima la petición con la transcripción y solo se consulta el límite si pasa del umbral (con la misma
         consulta de la redacción). Sin dato del límite se revisa con la transcripción, y el registro lo dice."""
         if partes == 1:
             return FuenteRevision("transcripcion", original)
-        estimado = estimar_tokens(PROMPT_SISTEMA + PROMPT_REVISION.format(texto=original, documento=documento))
+        estimado = estimar_tokens(PROMPT_SISTEMA + plantilla_revision.format(texto=original, documento=documento))
         if estimado <= UMBRAL_COMPROBAR_LIMITE:
             return FuenteRevision("transcripcion", original)
         modelo, limite = self._limite_del_modelo(consulta, cancelar)

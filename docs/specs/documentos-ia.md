@@ -259,10 +259,11 @@ Origen: docs/historias/hechas/2026-11-22-33-motivo-de-revisar-con-notas.md
   no conserva el título de su sección («## Tareas y pendientes» o «## Acuerdos»), then no hay dónde reponerlo: se
   descarta, se conserva la minuta anterior a la revisión sin ninguna marca y la nota dice «… se descartó porque quitaba
   secciones obligatorias; este documento no está revisado.».
-- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta
-  mientras conserve las secciones, también si quita una viñeta de «### Puntos clave», sin marca ni nota.
+- Given la revisión de fidelidad activada, una minuta de una parte con las tareas «Revisar A \| B» y «Enviar el informe», when la revisión devuelve solo «Enviar el informe», then la fila «| Revisar A \| B [comprobar] | Ana | Sin fecha |» vuelve intacta con sus tres columnas; si la revisión devuelve la tabla de tareas sin cabecera, ninguna tarea se duplica; y la fila «Sin tareas» de una sola columna se quita al reponer.
+- Given la revisión de fidelidad activada y un resumen, when se revisa, then la revisión se pide sin permiso para quitar nada («no elimines secciones ni tareas») y no se repone nada. Si la respuesta quita una viñeta de «### Puntos clave» igualmente, se acepta mientras conserve las secciones, sin marca ni nota.
 
 Origen: docs/historias/hechas/2026-11-22-29-reponer-lo-quitado.md
+Origen: carril S, 2026-11-22: code review del diseño 07 (la revisión del resumen no quita nada; lo repuesto con barra escapada, tabla sin cabecera y relleno de una columna)
 
 ### Revisión que pierde secciones
 - Given la revisión de fidelidad activada, una transcripción de una sola parte y una revisión de resumen que devuelve el documento sin «### Puntos clave» ni «### Conclusiones», when genero el resumen, then el resumen empieza por el redactado, con todas sus secciones y sin ninguna corrección de la revisión, y contiene, tras «\n---\n\n», «> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está revisado.». La nota no se envía a Copilot.

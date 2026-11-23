@@ -463,6 +463,92 @@ def test_revision_que_quita_una_tarea_se_aplica_y_la_repone_marcada(monkeypatch)
     assert "se descartó" not in minuta
 
 
+def test_revision_del_resumen_no_permite_quitar(monkeypatch):
+    completo = "## Resumen\nt\n### Puntos clave\n- a\n### Conclusiones\n- b"
+    prompts = []
+    respuestas = iter([completo, completo])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar",
+                        lambda prompt, cancelar=None: prompts.append(prompt) or next(respuestas))
+
+    asistente.generar_resumen("texto")
+
+    revision_resumen = prompts[1]
+    assert "Tareas o acuerdos que nada de la transcripción respalda" not in revision_resumen
+    assert "no elimines secciones ni tareas" in revision_resumen
+
+
+def test_revision_de_la_minuta_si_permite_quitar(monkeypatch):
+    redaccion = _minuta()
+    prompts = []
+    respuestas = iter([redaccion, redaccion])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar",
+                        lambda prompt, cancelar=None: prompts.append(prompt) or next(respuestas))
+
+    asistente.generar_minuta("texto")
+
+    assert "Tareas o acuerdos que nada de la transcripción respalda" in prompts[1]
+
+
+def test_fila_con_barra_escapada_se_repone_intacta(monkeypatch):
+    redaccion = _minuta(tareas=("Revisar A \\| B", "Enviar el informe"))
+    revision = _minuta(tareas=("Enviar el informe",))
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "| Revisar A \\| B [comprobar] | Ana | Sin fecha |" in minuta
+    assert "«Revisar A \\| B (Ana)»" in minuta
+
+
+def test_tabla_sin_cabecera_no_duplica_una_tarea(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor", "Revisar el contrato"))
+    revision = redaccion.replace("| Tarea | Responsable | Fecha límite |\n|-------|-------------|--------------|\n", "")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "[comprobar]" not in minuta
+    assert minuta.count("| Revisar el contrato | Ana | Sin fecha |") == 1
+    assert "quiso quitar" not in minuta
+
+
+def test_relleno_de_una_columna_se_quita_al_reponer(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe",))
+    revision = _minuta(tareas=()).replace("|--------------|\n", "|--------------|\n| Sin tareas |\n")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "| Sin tareas |" not in minuta
+    assert "| Enviar el informe [comprobar] | Ana | Sin fecha |" in minuta
+
+
+def test_reponer_con_muchas_tareas_es_rapido():
+    import time
+    from src.asistente_ia import _sin_donde_reponer, _tareas_quitadas, reponer_lo_quitado
+    tareas = [f"Tarea número {i:03d} sobre el proyecto de la oficina regional" for i in range(150)]
+    antes = _minuta(tareas=tareas)
+    despues = _minuta(tareas=tareas[:50] + tareas[51:])  # la revisión quita una
+
+    inicio = time.perf_counter()
+    quitadas = _tareas_quitadas(antes, despues)  # como en la generación: una vez, para decidir y para reponer
+    assert not _sin_donde_reponer(despues, quitadas, [])
+    repuesto, repuestas = reponer_lo_quitado(antes, despues, quitadas, [])
+    duracion = time.perf_counter() - inicio
+
+    assert duracion < 2, f"tardó {duracion:.1f} s con 150 tareas"
+    assert repuestas == [f"{tareas[50]} (Ana)"]
+    assert f"| {tareas[50]} [comprobar] | Ana | Sin fecha |" in repuesto
+
+
 class _RespuestaFalsa:
     """Respuesta en streaming (SSE) de un modelo con razonamiento: razonamiento, contenido en trozos y uso al final."""
     status_code = 200
