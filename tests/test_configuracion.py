@@ -883,3 +883,156 @@ def test_guardar_ajustes_descarta_entradas_mal_formadas_sin_fallar(tmp_path, mon
     assert guardado["configuracion"]["salida"] == {"formato": "srt"}
     assert "modelo" not in guardado["configuracion"].get("ia", {})
     assert avisos == [f"Se descartaron de {ruta} claves que no sirven: {descartadas}."]
+
+
+# --- Historia 20: componer el guardado y los valores laterales sin ventana ---
+
+def test_claves_cambiadas_solo_las_de_la_tabla(tmp_path):
+    import copy
+
+    from src.configuracion import cargar_configuracion, claves_cambiadas
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text('salida:\n  formato: "txt"\n', encoding="utf-8")
+    anterior = cargar_configuracion(ruta)
+    nueva = copy.deepcopy(anterior)
+    nueva["salida"]["formato"] = "srt"
+    nueva["salida"]["extra"] = 1
+    nueva["audio"] = {"a": 1}
+
+    assert claves_cambiadas(anterior, nueva) == {("salida", "formato")}
+    assert claves_cambiadas(anterior, copy.deepcopy(anterior)) == set()
+
+
+def test_valores_laterales_solo_de_las_claves_cambiadas(tmp_path):
+    import copy
+
+    from src.configuracion import cargar_configuracion, valores_laterales
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text(
+        'modelo:\n  nombre: "small"\n  dispositivo: "cuda"\n  compute_type: "float16"\n'
+        'transcripcion:\n  idioma: "nl"\n  beam_size: 3\n'
+        'salida:\n  formato: "srt"\n  incluir_timestamps: false\n',
+        encoding="utf-8")
+    configuracion = cargar_configuracion(ruta)
+    idioma_nl = {("transcripcion", "idioma"), ("salida", "formato"), ("transcripcion", "beam_size")}
+
+    assert valores_laterales(idioma_nl, configuracion) == {
+        "var_idioma": "nl",
+        "opciones_idioma": ["Auto-detectar", "Español", "Inglés", "Francés", "Alemán", "Italiano", "Portugués",
+                            "Catalán", "Ruso", "Chino", "Japonés", "Coreano", "nl"],
+        "var_formato": "srt",
+    }
+
+    directos = {("modelo", "nombre"), ("modelo", "dispositivo"), ("modelo", "compute_type"),
+                ("salida", "formato"), ("salida", "incluir_timestamps")}
+    assert valores_laterales(directos, configuracion) == {
+        "var_modelo": "small", "var_dispositivo": "cuda", "var_compute": "float16", "var_formato": "srt",
+        "var_timestamps": False,
+    }
+
+    es = copy.deepcopy(configuracion)
+    es["transcripcion"]["idioma"] = "es"
+    laterales_es = valores_laterales({("transcripcion", "idioma")}, es)
+    assert laterales_es["var_idioma"] == "Español"
+    assert "es" not in laterales_es["opciones_idioma"]
+
+
+def test_guardar_formulario_con_errores_no_escribe(tmp_path, monkeypatch):
+    from src.configuracion import combinar, guardar_formulario, leer_ajustes
+
+    proyecto = _proyecto_19(tmp_path)
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, '{"x": 1}')
+    antes = ruta.read_bytes()
+    anterior = combinar(proyecto, leer_ajustes())[0]
+
+    resultado = guardar_formulario(proyecto, anterior, {
+        ("transcripcion", "beam_size"): "cinco",
+        ("salida", "formato"): "srt",
+    })
+
+    assert resultado.errores == {
+        ("transcripcion", "beam_size"): "`transcripcion.beam_size` debe ser un número entero entre 1 y 20 "
+                                        "(vale «cinco»).",
+    }
+    assert resultado.efectiva is None
+    assert resultado.modelo_preferido is None
+    assert resultado.avisos == []
+    assert resultado.cambiadas == set()
+    assert resultado.mensaje == "No se guardó nada: corrige 1 valor."
+    assert ruta.read_bytes() == antes
+
+
+def test_guardar_formulario_con_fallo_de_escritura_no_devuelve_efectiva(tmp_path, monkeypatch):
+    import errno
+
+    from src import configuracion
+    from src.configuracion import combinar, guardar_formulario, leer_ajustes
+
+    proyecto = _proyecto_19(tmp_path)
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, '{"x": 1}')
+    antes = ruta.read_bytes()
+    anterior = combinar(proyecto, leer_ajustes())[0]
+
+    def fallar(*args, **kwargs):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(configuracion, "guardar_ajustes", fallar)
+
+    resultado = guardar_formulario(proyecto, anterior, {("salida", "formato"): "srt"})
+
+    assert resultado.errores == {}
+    assert resultado.efectiva is None
+    assert resultado.modelo_preferido is None
+    assert resultado.cambiadas == set()
+    assert resultado.mensaje == "No se pudo guardar la configuración: Permission denied."
+    assert ruta.read_bytes() == antes
+
+
+def test_guardar_formulario_devuelve_cambiadas_avisos_y_mensaje(tmp_path, monkeypatch):
+    from src.configuracion import combinar, guardar_formulario, leer_ajustes
+
+    proyecto = _proyecto_19(tmp_path)
+    yaml = tmp_path / "settings.yaml"
+    antes_yaml = (yaml.read_bytes(), yaml.stat().st_mtime_ns)
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, "{")  # archivo ilegible: al abrir dio aviso
+    historial = tmp_path / "historial.db"
+    anterior = combinar(proyecto, leer_ajustes())[0]
+
+    cambio_formato_y_ruta = guardar_formulario(proyecto, anterior, {
+        ("salida", "formato"): "srt",
+        ("historial", "ruta"): str(historial),
+    })
+
+    assert cambio_formato_y_ruta.efectiva["salida"]["formato"] == "srt"
+    assert cambio_formato_y_ruta.efectiva["historial"]["ruta"] == str(historial)
+    assert cambio_formato_y_ruta.cambiadas == {("salida", "formato"), ("historial", "ruta")}
+    assert cambio_formato_y_ruta.avisos == []
+    assert cambio_formato_y_ruta.modelo_preferido is None
+    assert cambio_formato_y_ruta.mensaje == (
+        "Configuración guardada · el historial nuevo se abrirá al reiniciar la app")
+
+    solo_formato = guardar_formulario(proyecto, cambio_formato_y_ruta.efectiva, {
+        ("salida", "formato"): "vtt",
+        ("historial", "ruta"): str(historial),
+    })
+
+    assert solo_formato.cambiadas == {("salida", "formato")}
+    assert solo_formato.mensaje == "Configuración guardada"
+
+    con_modelo = guardar_formulario(proyecto, solo_formato.efectiva, {
+        ("salida", "formato"): "vtt",
+        ("historial", "ruta"): str(historial),
+    }, modelo_ia="claude-sonnet-5.5", preferido_anterior=None)
+
+    assert con_modelo.modelo_preferido == "claude-sonnet-5.5"
+    assert con_modelo.cambiadas == {("ia", "modelo")}
+
+    repetido = guardar_formulario(proyecto, con_modelo.efectiva, {
+        ("salida", "formato"): "vtt",
+        ("historial", "ruta"): str(historial),
+    }, modelo_ia="claude-sonnet-5.5", preferido_anterior="claude-sonnet-5.5")
+
+    assert repetido.cambiadas == set()
+    assert (yaml.read_bytes(), yaml.stat().st_mtime_ns) == antes_yaml

@@ -4,7 +4,7 @@
 
 Paquete único de la aplicación. Contiene la transcripción local con faster-whisper, la generación de resumen y
 minuta con GitHub Copilot, el historial en SQLite, la interfaz gráfica (CustomTkinter) y la CLI. No tiene
-subpaquetes: sus quince archivos `.py` se importan entre sí como `src.<módulo>`.
+subpaquetes: sus dieciséis archivos `.py` se importan entre sí como `src.<módulo>`.
 
 Dependencias entre módulos (quién importa a quién):
 
@@ -12,7 +12,7 @@ Dependencias entre módulos (quién importa a quién):
 |---|---|
 | `__init__.py` | nada (solo `__version__`) |
 | `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
-| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`, `flujo_documentos`; `ui_historial` al mostrar el historial por primera vez |
+| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `idiomas`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`, `flujo_documentos`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
 | `ui_historial.py` | `historial`, y métodos de `AppTranscriptor` (incluidos privados) |
 | `asistente_ia.py` | `copilot`, `registro` |
@@ -21,7 +21,9 @@ Dependencias entre módulos (quién importa a quién):
 | `transcriber.py` | `registro`, `utils` |
 | `flujo_transcripcion.py` | `transcriber`, `utils`, `historial`, `persistencia`; sin Tk ni `faster_whisper` al importarse |
 | `flujo_documentos.py` | `transcriber`, `utils` y `asistente_ia` (importarlo carga `httpx`); sin Tk ni `faster_whisper` al importarse |
-| `configuracion.py`, `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
+| `idiomas.py` | nada: nombres y códigos de idioma del selector, sin Tk |
+| `configuracion.py` | `idiomas` |
+| `copilot.py`, `registro.py`, `utils.py` | ningún módulo hermano |
 
 ## Interface
 
@@ -64,6 +66,14 @@ Dependencias entre módulos (quién importa a quién):
 - `configuracion.py:TOPES_PANEL`, `valor_desde_formulario(seccion, clave, valor_widget)` (convierte el texto de un campo y lanza
   `ErrorConfiguracion`), `validar_formulario(valores_widget, modelo_ia=None) -> tuple[dict, dict]` (convertidos y errores; `ia.modelo` va
   aparte y aplica la regla de familias excluidas) y `resumen_errores(n)` (texto del pie).
+- `configuracion.py:guardar_formulario(proyecto, anterior, valores_widget, modelo_ia=None, preferido_anterior=None) -> ResultadoGuardado`:
+  valida el formulario y, si hay errores, no escribe nada. Si no, guarda con `guardar_ajustes`, relee y combina las preferencias
+  y devuelve `ResultadoGuardado(errores, efectiva, modelo_preferido, avisos, cambiadas, mensaje)` (`efectiva` es `None` si no se
+  guardó; un `OSError` al escribir da solo el mensaje). Es un dataclass inmutable que la vista solo lee.
+- `configuracion.py:claves_cambiadas(anterior, nueva) -> set`: claves de la tabla de configuración cuyo valor cambió.
+- `configuracion.py:valores_laterales(cambiadas, configuracion) -> dict`: valores de los controles del panel lateral de las
+  claves cambiadas, con las claves nombradas como las variables de la ventana (`var_modelo`, `var_formato`…); el idioma añade `opciones_idioma`. No toca Tk.
+- `configuracion.py:REQUIEREN_REINICIO`: claves que piden reiniciar la app al cambiar (hoy, `historial.ruta`).
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
 - `utils.py:formatear_duracion` (marcas de la interfaz), `formatear_tiempo`, `formatear_tiempo_srt`,

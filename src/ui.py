@@ -24,6 +24,8 @@ from src.asistente_ia import (NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
                               ErrorSinSesionCopilot)
 from src import copilot
 from src.historial import Historial
+from src.idiomas import (IDIOMAS_DISPONIBLES, codigo_de_idioma, nombre_de_idioma,
+                         opciones_de_idioma)
 from src.registro import configurar_logging
 from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, combinar,
                                guardar_modelo_preferido, leer_ajustes, leer_modelo_preferido, modelo_ia_efectivo)
@@ -38,36 +40,6 @@ from src.persistencia import (Persistencia, motivo_de_error,
                               texto_destino_documento, texto_sin_guardado)
 from src.utils import (validar_archivo, obtener_info_archivo, guardar_transcripcion, filtros_seleccion_archivo,
                        formatear_duracion, ruta_junto_al_audio)
-
-
-IDIOMAS_DISPONIBLES = {
-    "auto": "Auto-detectar",
-    "es": "Español",
-    "en": "Inglés",
-    "fr": "Francés",
-    "de": "Alemán",
-    "it": "Italiano",
-    "pt": "Portugués",
-    "ca": "Catalán",
-    "ru": "Ruso",
-    "zh": "Chino",
-    "ja": "Japonés",
-    "ko": "Coreano"
-}
-
-
-def opciones_de_idioma(idioma_configurado: str) -> list[str]:
-    """Nombres del selector de idioma. Si el código configurado no está en él (p. ej. `nl`, que Whisper admite),
-    se añade tal cual, para que la ventana transcriba en ese idioma igual que la CLI."""
-    opciones = list(IDIOMAS_DISPONIBLES.values())
-    if idioma_configurado not in IDIOMAS_DISPONIBLES:
-        opciones.append(idioma_configurado)
-    return opciones
-
-
-def codigo_de_idioma(opcion: str) -> str:
-    """Código de una opción del selector; una opción que no es un nombre conocido se devuelve tal cual."""
-    return next((codigo for codigo, nombre in IDIOMAS_DISPONIBLES.items() if nombre == opcion), opcion)
 
 
 FORMATOS_DISPONIBLES = ["txt", "srt", "vtt", "json"]
@@ -160,7 +132,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         # Variables de control
         idioma_cfg = self.configuracion["transcripcion"]["idioma"]
         self.var_modelo = tk.StringVar(value=self.configuracion["modelo"]["nombre"])
-        self.var_idioma = tk.StringVar(value=IDIOMAS_DISPONIBLES.get(idioma_cfg, idioma_cfg))
+        self.var_idioma = tk.StringVar(value=nombre_de_idioma(idioma_cfg))
         self.var_formato = tk.StringVar(value=self.configuracion["salida"]["formato"])
         self.var_dispositivo = tk.StringVar(value=self.configuracion["modelo"]["dispositivo"])
         self.var_compute = tk.StringVar(value=self.configuracion["modelo"]["compute_type"])

@@ -15,6 +15,8 @@ from typing import Any, Callable, Optional
 
 import yaml
 
+from src.idiomas import nombre_de_idioma, opciones_de_idioma
+
 log = logging.getLogger("transcriptor.configuracion")
 
 RAIZ_PROYECTO = Path(__file__).resolve().parent.parent
@@ -342,6 +344,30 @@ def combinar(proyecto: dict, ajustes: AjustesLeidos) -> tuple[dict, list]:
     return efectiva, avisos
 
 
+def claves_cambiadas(anterior: dict, nueva: dict) -> set:
+    """Claves de `_tabla()` cuyo valor en `nueva` no es el de `anterior`."""
+    return {(seccion, clave) for seccion, clave in _tabla() if anterior[seccion][clave] != nueva[seccion][clave]}
+
+
+def valores_laterales(cambiadas: set, configuracion: dict) -> dict:
+    """Valores de los controles del panel lateral de las claves de `cambiadas` que los tienen. Las claves del dict
+    son los nombres de las variables de la ventana; el idioma añade sus opciones."""
+    directos = {
+        ("modelo", "nombre"): "var_modelo",
+        ("modelo", "dispositivo"): "var_dispositivo",
+        ("modelo", "compute_type"): "var_compute",
+        ("salida", "formato"): "var_formato",
+        ("salida", "incluir_timestamps"): "var_timestamps",
+    }
+    valores = {nombre: configuracion[seccion][clave] for (seccion, clave), nombre in directos.items()
+               if (seccion, clave) in cambiadas}
+    if ("transcripcion", "idioma") in cambiadas:
+        codigo = configuracion["transcripcion"]["idioma"]
+        valores["var_idioma"] = nombre_de_idioma(codigo)
+        valores["opciones_idioma"] = opciones_de_idioma(codigo)
+    return valores
+
+
 def valor_desde_formulario(seccion: str, clave: str, valor_widget):
     """Convierte el valor de un campo del formulario al tipo del valor por defecto de su clave y lo comprueba.
 
@@ -436,6 +462,42 @@ def validar_formulario(valores_widget: dict, modelo_ia: Optional[str] = None) ->
             errores[("ia", "modelo")] = (f"El modelo «{modelo_ia}» es de la familia «{familia}», que no está "
                                          "autorizada por la empresa. Elige otro modelo.")
     return convertidos, errores
+
+
+REQUIEREN_REINICIO = frozenset({("historial", "ruta")})  # cambiar estas claves pide reiniciar
+
+
+@dataclass(frozen=True)
+class ResultadoGuardado:
+    """Lo que devuelve guardar_formulario: la vista solo lo lee. `efectiva` es None si no se guardó nada."""
+    errores: dict               # (sección, clave) → texto; vacío si se intentó escribir
+    efectiva: Optional[dict]    # configuración tras guardar y releer; None si no se guardó
+    modelo_preferido: Optional[str]  # modelo de IA que quedó guardado (None = ninguno); solo si efectiva no es None
+    avisos: list                # descartes de guardar_ajustes y avisos de combinar tras releer
+    cambiadas: set              # claves que cambiaron respecto de `anterior` (y ("ia", "modelo") si cambió)
+    mensaje: str                # pie de la vista
+
+
+def guardar_formulario(proyecto: dict, anterior: dict, valores_widget: dict, modelo_ia: Optional[str] = None,
+                       preferido_anterior: Optional[str] = None) -> ResultadoGuardado:
+    """Valida el formulario y, si está bien, guarda las diferencias. Con errores no escribe nada."""
+    convertidos, errores = validar_formulario(valores_widget, modelo_ia)
+    if errores:
+        return ResultadoGuardado(errores, None, None, [], set(), resumen_errores(len(errores)))
+    try:
+        descartes = guardar_ajustes(proyecto, convertidos, modelo_ia)
+    except OSError as e:
+        return ResultadoGuardado({}, None, None, [], set(),
+                                 f"No se pudo guardar la configuración: {e.strerror or str(e)}.")
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+    preferido = leer_modelo_preferido()
+    cambiadas = claves_cambiadas(anterior, efectiva)
+    if modelo_ia_efectivo(anterior, preferido_anterior) != modelo_ia_efectivo(efectiva, preferido):
+        cambiadas.add(("ia", "modelo"))
+    mensaje = "Configuración guardada"
+    if cambiadas & REQUIEREN_REINICIO:
+        mensaje += " · el historial nuevo se abrirá al reiniciar la app"
+    return ResultadoGuardado({}, efectiva, preferido, descartes + avisos, cambiadas, mensaje)
 
 
 def resumen_errores(n: int) -> str:
