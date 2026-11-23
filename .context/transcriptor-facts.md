@@ -70,5 +70,7 @@ Fuente: `docs/integracion-copilot.md`.
 
 - **Copilot, comprobado con peticiones reales el 2026-11-22:** una respuesta cortada por longitud termina con
   `finish_reason: "length"` y `[DONE]`; una normal, con `"stop"` y `[DONE]`. El catálogo (`GET /models`) trae
-  `capabilities.limits.max_prompt_tokens` y `max_output_tokens` por modelo. Detalle en
+  `capabilities.limits.max_prompt_tokens` y `max_output_tokens` por modelo. `claude-haiku-5.5` aceptó y leyó entera
+  una petición de 164 993 caracteres sintéticos en español: 70 318 tokens, **≈2,35 caracteres por token** (no 4).
+  Detalle en
   `docs/integracion-copilot.md` §«Comprobado con peticiones reales».

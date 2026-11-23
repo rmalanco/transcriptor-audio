@@ -90,7 +90,7 @@ otra `claude-haiku-4.5`.
 
 ## Comprobado con peticiones reales (2026-11-22)
 
-Cuatro peticiones con texto sintético (nunca una transcripción), con la sesión propia de la app:
+Cinco peticiones con texto sintético (nunca una transcripción), con la sesión propia de la app:
 
 - **Límites en el catálogo.** `GET /models` devuelve en `capabilities.limits` de cada modelo: `max_prompt_tokens`,
   `max_output_tokens`, `max_context_window_tokens` y `max_non_streaming_output_tokens`. Ejemplos de ese día:
@@ -99,6 +99,11 @@ Cuatro peticiones con texto sintético (nunca una transcripción), con la sesió
 - **Respuesta cortada.** En `/chat/completions` con `stream: true`, una respuesta que llega al límite de salida
   (forzado con `max_tokens: 20`, en `claude-haiku-5.5` y en `gpt-4.1`) termina con `finish_reason: "length"` y
   después `data: [DONE]`. Una respuesta normal termina con `finish_reason: "stop"` y `[DONE]`.
+- **Petición grande y caracteres por token.** Una petición a `claude-haiku-5.5` con 164 993 caracteres (transcripción
+  sintética en español de 1 300 líneas con nombres y cifras, más `PROMPT_SISTEMA`) se aceptó (200, `fin=stop`, 3,9 s)
+  y el modelo localizó tres claves plantadas al principio, en medio y al final. Copilot contó **70 318 tokens de
+  entrada: ≈2,35 caracteres por token**, menos que los 4 que estima hoy `_comprobar_limite_de_entrada`. Es un texto
+  con muchas cifras y nombres; el español corrido puede dar algo más, pero no 4.
 - **No comprobado:** `finish_reason: "content_filter"` (no se forzó a propósito) ni un stream que se corte sin
   `[DONE]`.
 
