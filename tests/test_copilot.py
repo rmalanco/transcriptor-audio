@@ -627,3 +627,49 @@ def test_cargar_opciones_no_incluye_familias_excluidas(monkeypatch):
 def test_opciones_de_modelo_nunca_incluyen_familias_excluidas_aunque_lleguen_en_la_lista():
     opciones = copilot.opciones_de_modelo(["auto", "gpt-5.4", "kimi-k3-mini", "Mistral-Large-3"], "claude-haiku-5.5")
     assert opciones == ["auto", "gpt-5.4", "claude-haiku-5.5"]
+
+
+def test_cerrar_sesion_propia_no_toca_opencode(monkeypatch):
+    copilot.guardar_token("gho_app")
+    copilot.RUTA_AUTH_OPENCODE.parent.mkdir(parents=True)
+    copilot.RUTA_AUTH_OPENCODE.write_text('{"github-copilot": {"refresh": "gho_oc"}}', encoding="utf-8")
+    antes = (copilot.RUTA_AUTH_OPENCODE.read_bytes(), copilot.RUTA_AUTH_OPENCODE.stat().st_mtime_ns)
+
+    def sin_red(*args, **kwargs):
+        raise AssertionError("cerrar_sesion_propia no debe hacer peticiones de red")
+
+    monkeypatch.setattr(copilot.httpx, "get", sin_red)
+    monkeypatch.setattr(copilot.httpx, "post", sin_red)
+
+    estado = copilot.cerrar_sesion_propia(None)
+
+    assert estado == copilot.EstadoSesion(copilot.ORIGEN_OPENCODE, False)
+    assert not copilot.RUTA_TOKEN.exists()
+    assert (copilot.RUTA_AUTH_OPENCODE.read_bytes(), copilot.RUTA_AUTH_OPENCODE.stat().st_mtime_ns) == antes
+    assert copilot.cerrar_sesion_propia(None) == estado
+
+
+def test_cerrar_sesion_propia_con_la_variable_sigue_en_la_variable(monkeypatch):
+    monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_variable")
+    copilot.guardar_token("gho_app")
+
+    estado = copilot.cerrar_sesion_propia(None)
+
+    assert estado == copilot.EstadoSesion(copilot.ORIGEN_VARIABLE, False)
+    assert os.environ[copilot.VARIABLE_ENTORNO] == "gho_variable"
+    assert not copilot.RUTA_TOKEN.exists()
+
+
+def test_cerrar_sesion_propia_propaga_oserror(monkeypatch):
+    copilot.guardar_token("gho_app")
+
+    def sin_permiso(self, *args, **kwargs):
+        raise PermissionError("permiso denegado")
+
+    monkeypatch.setattr(type(copilot.RUTA_TOKEN), "unlink", sin_permiso)
+
+    with pytest.raises(OSError):
+        copilot.cerrar_sesion_propia(None)
+
+    assert copilot.RUTA_TOKEN.exists()
+    assert copilot.leer_token().token == "gho_app"

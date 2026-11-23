@@ -122,7 +122,7 @@ Dependencias entre módulos (quién importa a quién):
 ### Acceso a GitHub Copilot — `copilot.py`
 
 - Sesión y token: `leer_token(enterprise_url=None) -> Optional[Sesion]` (un archivo propio mal formado —no JSON, no UTF-8,
-  token o dominio que no son texto— cuenta como ausente), `guardar_token`, `cerrar_sesion`, `invalidar_token`.
+  token o dominio que no son texto— cuenta como ausente), `guardar_token`, `cerrar_sesion`, `cerrar_sesion_propia(enterprise_url=None) -> EstadoSesion` (borra solo el archivo propio y devuelve el estado resultante; un error de borrado sube tal cual), `invalidar_token`.
 - Origen de la sesión, sin red y sin escribir: `estado_sesion(enterprise_url=None) -> EstadoSesion` (origen
   `ORIGEN_VARIABLE`, `ORIGEN_APP`, `ORIGEN_OPENCODE` o `None`, y `hay_token_propio`) y
   `describir_sesion(estado) -> DescripcionSesion` (`texto`, `puede_iniciar`, `texto_iniciar`, `puede_cerrar`).

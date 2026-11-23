@@ -233,6 +233,13 @@ def cerrar_sesion() -> bool:
     return False
 
 
+def cerrar_sesion_propia(enterprise_url: Optional[str] = None) -> EstadoSesion:
+    """Cierra la sesión guardada por la app (sin tocar opencode ni la variable) y devuelve el estado resultante.
+    Si el borrado falla, el OSError sube tal cual."""
+    cerrar_sesion()
+    return estado_sesion(enterprise_url)
+
+
 def invalidar_token(token: str) -> None:
     """Tras un 401, borra el token propio si es el rechazado, para que se pida iniciar sesión de nuevo."""
     try:

@@ -280,3 +280,11 @@ Origen: docs/historias/hechas/2026-11-22-25-origen-de-la-sesion.md
 - Given una sesión de Copilot guardada con un token, when se representa la sesión o se describe su estado, then el token no aparece en el texto que se obtiene.
 
 Origen: docs/historias/hechas/2026-11-22-25-origen-de-la-sesion.md
+
+### Cerrar solo la sesión propia de Copilot
+- Given una sesión propia de Copilot guardada por la app y una sesión de opencode, when se cierra la sesión propia, then el archivo de la app deja de existir, el de opencode queda igual (mismo contenido y misma fecha de modificación), la sesión pasa a ser la de opencode y no se hace ninguna petición de red.
+- Given una sesión propia de Copilot guardada por la app y la variable `COPILOT_GITHUB_TOKEN` definida, when se cierra la sesión propia, then el archivo de la app deja de existir, la variable sigue definida con el mismo valor y la sesión pasa a ser la de la variable.
+- Given una sesión propia de Copilot ya cerrada, when se cierra otra vez, then no hay error y el estado de la sesión es el mismo que tras la primera vez.
+- Given una sesión propia de Copilot que no se puede borrar por un error del sistema de archivos (por ejemplo, permiso denegado), when se cierra la sesión propia, then el error llega a quien lo pidió, no se devuelve ningún estado y el archivo de la app sigue con su contenido.
+
+Origen: docs/historias/hechas/2026-11-22-26-cerrar-solo-la-sesion-propia.md
