@@ -118,3 +118,28 @@ Origen: docs/historias/hechas/2026-11-22-18-validar-formulario.md
 Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
 Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
+
+### Vista Configuración
+La vista de hoy tiene los grupos Transcripción y Salida; el resto (opciones avanzadas, Historial, IA y la sesión de
+GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
+vista solo cambia los controles del lateral de las claves guardadas.
+
+- Given el YAML del proyecto (`salida.formato: "txt"`, `modelo.nombre: "large-v3-turbo"`), sin `preferencias.json` y con
+  el modelo de Whisper del panel lateral cambiado a mano a `tiny`, when se abre «⚙ Configuración» con `Ctrl+3` (o con el
+  botón de la barra), se elige `srt` en «Formato de salida» y se pulsa «Guardar», then el pie de la vista dice
+  «Configuración guardada», `preferencias.json` queda exactamente `{"configuracion": {"salida": {"formato": "srt"}}}`,
+  `config/settings.yaml` no cambia (mismos bytes y misma fecha de modificación), y al volver con `Ctrl+1` el selector de
+  formato del lateral muestra `srt` y el de modelo sigue en `tiny`. La vista muestra dos grupos, «Transcripción» (Modelo
+  de Whisper, Idioma, Dispositivo, Precisión) y «Salida» (Formato de salida, Incluir marcas de tiempo, Marcas por
+  palabra), cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
+  ninguna petición de red ni lee el token.
+- Given «Idioma» con `nl` escrito a mano, when se pulsa «Guardar», then `preferencias.json` guarda `transcripcion.idioma`
+  = `nl` y el selector de idioma del lateral muestra `nl` y lo ofrece al final de su lista; y si después se cambia
+  «Formato de salida» a `vtt` sin guardar, se va a Transcribir (`Ctrl+1`) y se vuelve (`Ctrl+3`), el campo vuelve a
+  mostrar el valor guardado (`srt`), el lateral no cambió y `preferencias.json` tampoco.
+- Given una transcripción en curso (o una generación de resumen o minuta), when se pulsa «Guardar» en la vista, then
+  aparece el diálogo «Configuración» con «Espera a que termine el proceso en curso.», el pie de la vista muestra ese mismo
+  texto, `preferencias.json` no cambia (ni se crea) y los controles del lateral conservan sus valores. Al terminar el
+  proceso, «Guardar» funciona como en el primer criterio.
+
+Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md

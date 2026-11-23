@@ -4,7 +4,7 @@
 
 Paquete único de la aplicación. Contiene la transcripción local con faster-whisper, la generación de resumen y
 minuta con GitHub Copilot, el historial en SQLite, la interfaz gráfica (CustomTkinter) y la CLI. No tiene
-subpaquetes: sus dieciséis archivos `.py` se importan entre sí como `src.<módulo>`.
+subpaquetes: sus diecisiete archivos `.py` se importan entre sí como `src.<módulo>`.
 
 Dependencias entre módulos (quién importa a quién):
 
@@ -12,9 +12,10 @@ Dependencias entre módulos (quién importa a quién):
 |---|---|
 | `__init__.py` | nada (solo `__version__`) |
 | `main.py` | `transcriber`, `utils`, `registro`, `configuracion`; `copilot` solo en las órdenes de sesión; `ui` solo con `--ui` |
-| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `idiomas`, `historial`, `persistencia`, `registro`, `ui_copilot`, `flujo_transcripcion`, `flujo_documentos`; `ui_historial` al mostrar el historial por primera vez |
+| `ui.py` | `transcriber`, `utils`, `asistente_ia`, `copilot`, `configuracion`, `idiomas`, `historial`, `persistencia`, `registro`, `ui_copilot`, `ui_configuracion`, `flujo_transcripcion`, `flujo_documentos`; `ui_historial` al mostrar el historial por primera vez |
 | `ui_copilot.py` | `copilot` |
 | `ui_historial.py` | `historial`, y métodos de `AppTranscriptor` (incluidos privados) |
+| `ui_configuracion.py` | `configuracion` e `idiomas`; pinta con CustomTkinter |
 | `asistente_ia.py` | `copilot`, `registro` |
 | `persistencia.py` | `utils`; `historial` y `transcriber` solo como tipos |
 | `historial.py` | `transcriber` (solo las dataclasses de resultado) |
@@ -141,16 +142,17 @@ Dependencias entre módulos (quién importa a quién):
 - Constantes: `RUTA_POR_DEFECTO` (`<raíz del proyecto>/data/historial.db`), `VERSION_ESQUEMA = 1`, `ESQUEMA`,
   `DOCUMENTOS = ("resumen", "minuta")`.
 
-### Interfaz gráfica — `ui.py`, `ui_copilot.py`, `ui_historial.py`
+### Interfaz gráfica — `ui.py`, `ui_copilot.py`, `ui_historial.py`, `ui_configuracion.py`
 
 - `ui.py:AppTranscriptor` — ventana principal. Usa como `configuracion` la efectiva (YAML + preferencias,
   `configuracion.py:combinar`) y guarda la del proyecto en `configuracion_proyecto`; los avisos de las preferencias van a
   Registro. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
   `historial_eliminado(id_historial)`, el atributo `id_historial` y los métodos privados `_configurar_estilos_markdown`,
-  `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las vistas de la barra de navegación.
+  `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las tres vistas de la barra de navegación (Transcribir, Historial y Configuración). `guardar_configuracion(valores_widget)` guarda lo que pide la vista Configuración (no escribe si hay un proceso en curso) y `aplicar_guardado(resultado)` pone la configuración nueva y cambia en el lateral solo las claves guardadas.
 - `ui.py:_VistaPreviaIA` — lo que tenían los controles de IA antes de una generación; `_restaurar_controles_ia` lo devuelve al recibir el resultado o al cancelar.
 - `ui_copilot.py:DialogoLoginCopilot(master, enterprise_url, al_terminar)` — diálogo modal de login.
 - `ui_historial.py:PanelHistorial(master, app, historial)` con `refrescar()`; `LIMITE_LISTA = 200`.
+- `ui_configuracion.py:CAMPOS` — los siete campos de Transcripción y Salida. `ui_configuracion.py:PanelConfiguracion(master, app)` con `refrescar()`; `ui_configuracion.py:motivo_para_no_guardar(transcribiendo, generando)` decide si no se puede guardar ahora.
 - `ui.py:DOCUMENTOS_IA` — define los sufijos `_resumen.md` y `_minuta.md`.
 
 ### Registro — `registro.py`

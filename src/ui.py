@@ -27,8 +27,10 @@ from src.historial import Historial
 from src.idiomas import (IDIOMAS_DISPONIBLES, codigo_de_idioma, nombre_de_idioma,
                          opciones_de_idioma)
 from src.registro import configurar_logging
-from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, combinar,
-                               guardar_modelo_preferido, leer_ajustes, leer_modelo_preferido, modelo_ia_efectivo)
+from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, ResultadoGuardado, cargar_configuracion,
+                               combinar, guardar_formulario, guardar_modelo_preferido, leer_ajustes,
+                               leer_modelo_preferido, modelo_ia_efectivo, valores_laterales)
+from src.ui_configuracion import PanelConfiguracion, motivo_para_no_guardar
 from src.transcriber import TranscriptorAudio
 from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, OpcionesTranscripcion,
                                      TranscripcionPersistida, ruta_transcripcion, transcribir_y_persistir,
@@ -47,6 +49,7 @@ log = logging.getLogger("transcriptor.ui")
 TEMAS = {"Sistema": "System", "Claro": "Light", "Oscuro": "Dark"}
 VISTA_TRANSCRIBIR = "🎙  Transcribir"
 VISTA_HISTORIAL = "📚  Historial"
+VISTA_CONFIGURACION = "⚙  Configuración"
 TAB_TEXTO = "Texto"  # nombre corto: las pestañas se recortan en ventanas estrechas
 DOCUMENTOS_IA = {
     "resumen": {"pestana": "Resumen", "sufijo": SUFIJOS_DOCUMENTO["resumen"], "genitivo": "del resumen",
@@ -120,6 +123,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.id_historial: Optional[int] = None        # entrada del historial mostrada ahora
         self._fecha_historial: Optional[str] = None     # fecha de creación si el audio ya no existe
         self.panel_historial = None                     # se construye la primera vez que se muestra
+        self.panel_configuracion = None                 # idem
         self.vista_actual = VISTA_TRANSCRIBIR
         self._titulo_mostrado = ""
         try:
@@ -178,7 +182,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         self.nav = ctk.CTkSegmentedButton(
             encabezado,
-            values=[VISTA_TRANSCRIBIR, VISTA_HISTORIAL],
+            values=[VISTA_TRANSCRIBIR, VISTA_HISTORIAL, VISTA_CONFIGURACION],
             command=self.mostrar_vista,
             height=34,
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -450,6 +454,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.bind("<Escape>", lambda e: self._cancelar_transcripcion() if self._transcribiendo() else None)
         self.bind("<Control-Key-1>", lambda e: self.mostrar_vista(VISTA_TRANSCRIBIR))
         self.bind("<Control-Key-2>", lambda e: self.mostrar_vista(VISTA_HISTORIAL))
+        self.bind("<Control-Key-3>", lambda e: self.mostrar_vista(VISTA_CONFIGURACION))
         self.bind("<Control-h>", lambda e: self.mostrar_vista(VISTA_HISTORIAL))
         self.bind("<Control-q>", lambda e: self._al_cerrar())
 
@@ -1075,6 +1080,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             vista = VISTA_TRANSCRIBIR
         self.nav.set(vista)
         self.vista_actual = vista
+        self.vista_transcribir.grid_remove()
+        for panel in (self.panel_historial, self.panel_configuracion):
+            if panel is not None:
+                panel.grid_remove()
 
         if vista == VISTA_HISTORIAL:
             if self.panel_historial is None:
@@ -1083,12 +1092,45 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                 self.panel_historial.grid(row=1, column=0, sticky="nsew")
             else:
                 self.panel_historial.refrescar()
-            self.vista_transcribir.grid_remove()
-            self.panel_historial.grid()
+                self.panel_historial.grid()
+        elif vista == VISTA_CONFIGURACION:
+            if self.panel_configuracion is None:
+                self.panel_configuracion = PanelConfiguracion(self, self)
+                self.panel_configuracion.grid(row=1, column=0, sticky="nsew")
+            else:
+                self.panel_configuracion.refrescar()
+                self.panel_configuracion.grid()
         else:
-            if self.panel_historial is not None:
-                self.panel_historial.grid_remove()
             self.vista_transcribir.grid()
+
+    def guardar_configuracion(self, valores_widget: dict) -> ResultadoGuardado:
+        """Guarda lo que pide la vista Configuración (solo en el hilo principal). Con un proceso en curso no escribe
+        nada; si la escritura falla, no se aplica nada."""
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        if motivo is not None:
+            messagebox.showwarning("Configuración", motivo)
+            return ResultadoGuardado({}, None, None, [], set(), motivo)
+        resultado = guardar_formulario(self.configuracion_proyecto, self.configuracion, valores_widget,
+                                       None, self._modelo_preferido)
+        if resultado.efectiva is None:
+            if not resultado.errores:
+                messagebox.showerror("Configuración", resultado.mensaje)
+            return resultado
+        self.aplicar_guardado(resultado)
+        if resultado.cambiadas:
+            self._log("Configuración guardada: " + ", ".join(sorted(f"{s}.{c}" for s, c in resultado.cambiadas)))
+        return resultado
+
+    def aplicar_guardado(self, resultado: ResultadoGuardado):
+        """Aplica un guardado correcto. La configuración nueva sustituye a la de la ventana (sin mutarla) y el panel
+        lateral solo cambia en los controles de las claves que cambiaron, para no pisar lo ajustado a mano."""
+        self.configuracion = resultado.efectiva
+        self.avisos_preferencias = resultado.avisos
+        for nombre, valor in valores_laterales(resultado.cambiadas, resultado.efectiva).items():
+            if nombre == "opciones_idioma":
+                self.combo_idioma.configure(values=valor)
+            else:
+                getattr(self, nombre).set(valor)
 
     def _refrescar_historial(self):
         if self.panel_historial is not None:

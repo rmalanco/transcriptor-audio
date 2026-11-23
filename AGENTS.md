@@ -72,7 +72,8 @@ aunque se ejecute desde otra carpeta.
 | `configuracion.py` | Carga y validación de `config/settings.yaml`: valores por defecto, `ErrorConfiguracion`; preferencias del usuario en `preferencias.json` (modelo de IA elegido, `modelo_ia_efectivo`); guardar el formulario del panel |
 | `copilot.py` | Integración con GitHub Copilot: login (device flow), token, catálogo de modelos, modo `auto` |
 | `asistente_ia.py` | `AsistenteIA`: prompts, división en bloques, notas en paralelo, streaming SSE, reintentos, post-proceso de la minuta |
-| `ui.py` | Ventana principal: transcribir, pestañas Texto/Resumen/Minuta, atajos |
+| `ui.py` | Ventana principal: transcribir, pestañas Texto/Resumen/Minuta, atajos (Ctrl+1/2/3 para las vistas) |
+| `ui_configuracion.py` | Vista Configuración: formulario de los valores por defecto y botón Guardar |
 | `ui_copilot.py` | Diálogo modal de inicio de sesión en Copilot |
 | `ui_historial.py` / `historial.py` | Vista y base SQLite (`data/historial.db`) del historial |
 | `persistencia.py` | Guardar sin interfaz: primero el historial y después el archivo; devuelve avisos en vez de lanzar |
