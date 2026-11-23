@@ -15,6 +15,10 @@
   (`BACKLOG.md`, Salud del código #21).
 - **Los contratos se llaman `EGM.md`**, no `README.md`, para no tocar el README escrito a mano.
 - **`docs/` se versiona.** La regla que lo ignoraba se quitó del `.gitignore` el 2026-11-22.
+- **La app nunca escribe `config/settings.yaml` ni el archivo de opencode** (diseño 06, alternativas A y G, rechazadas
+  por el autor): lo que el usuario guarda desde la vista Configuración va a `preferencias.json` y «Cerrar sesión» solo
+  borra `copilot.json`. Tampoco se reabre el historial en caliente al cambiar `historial.ruta` (alternativa E): se
+  aplica al reiniciar. No lo vuelvas a proponer sin un motivo nuevo.
 
 ## Hechos verificados en el código
 
@@ -23,9 +27,11 @@
   `~/.local/share/opencode/auth.json`.
 - `config/settings.yaml` se lee siempre contra la raíz del proyecto (`configuracion.py`), salvo que `--config` indique
   otra ruta, que se interpreta desde la carpeta de trabajo; `historial.ruta` también se resuelve contra la raíz. La app
-  ya no reescribe el YAML: el modelo de IA elegido en el selector va a
-  `~/.local/share/transcriptor-audio/preferencias.json` y gana a `ia.modelo`.
-- Al abrir la ventana no hay tráfico con Copilot ni se lee el token; «↻» consulta el catálogo una vez, sin sesión `auto`.
+  ya no reescribe el YAML: el modelo de IA elegido y los ajustes guardados en la vista Configuración van a
+  `~/.local/share/transcriptor-audio/preferencias.json` (`modelo_ia` y el bloque `configuracion`) y ganan al YAML al
+  abrir la ventana (`combinar`); la CLI no lee ese archivo.
+- Al abrir la ventana no hay tráfico con Copilot ni se lee el token; mostrar la vista Configuración lee la sesión del
+  disco, sin red; «↻» consulta el catálogo una vez, sin sesión `auto`.
 - Con más de un bloque, el documento se redacta a partir de notas y la revisión de fidelidad compara contra ellas.
 - Cancelar una transcripción descarta lo transcrito. Cancelar una generación de IA devuelve la ventana al instante;
   el hilo abandonado termina solo y su resultado se descarta.

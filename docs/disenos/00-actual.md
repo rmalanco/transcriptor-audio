@@ -5,16 +5,21 @@
 > Generado por /analizar (Tándem) el 2026-11-22 a partir de [EGM.md](../../EGM.md), [src/EGM.md](../../src/EGM.md),
 > [README.md](../../README.md) y `.context/inventario.md`. Describe lo que el código hace hoy, no lo que debería hacer.
 > Sincronizado con el código el 2026-11-22, tras cerrar las historias 01 a 07 y varios puntos de «Salud del código», y
-> ampliado con los riesgos, la concurrencia y los datos y secretos (A-22).
+> ampliado con los riesgos, la concurrencia y los datos y secretos (A-22). Puesto al día de nuevo tras las historias 08
+> a 27, que incluyen el panel de configuración ([06-panel-de-configuracion.md](06-panel-de-configuracion.md), ya
+> implementado): la vista «⚙ Configuración», las preferencias del usuario como segunda fuente de configuración y la
+> sesión de GitHub Copilot en la vista.
 
 ## Resumen
 
 Aplicación de escritorio en Python que transcribe audio y video en el propio equipo con faster-whisper y, cuando el
 usuario lo pide, genera un resumen y una minuta enviando el texto transcrito a GitHub Copilot. Cada transcripción
 terminada en la interfaz gráfica se guarda en un historial SQLite local, con su resumen y su minuta. Hay dos formas
-de uso: una interfaz gráfica (CustomTkinter) y una CLI que transcribe, lista los modelos de Whisper y gestiona la
-sesión de Copilot (iniciar y cerrar sesión, ver los modelos disponibles); con `--ui` también lanza la interfaz. Todo el
-código está en un paquete, `src/`, de quince archivos y 4 269 líneas.
+de uso: una interfaz gráfica (CustomTkinter), con tres vistas (Transcribir, Historial y Configuración), y una CLI que
+transcribe, lista los modelos de Whisper y gestiona la sesión de Copilot (iniciar y cerrar sesión, ver los modelos
+disponibles); con `--ui` también lanza la interfaz. La configuración sale de dos fuentes: el YAML del proyecto y, solo
+en la ventana, las preferencias del usuario guardadas desde la vista Configuración. Todo el código está en un paquete,
+`src/`, de diecisiete archivos y 5 446 líneas.
 
 ## Componentes
 
@@ -24,12 +29,13 @@ No hay subcarpetas con código: los componentes son módulos de `src/`. Todos se
 | Componente | Módulos | Responsabilidad |
 |---|---|---|
 | Transcripción | `transcriber.py`, `utils.py` | Cargar el modelo de Whisper, transcribir con filtro de silencios y de alucinaciones, validar archivos, leer metadatos con `ffprobe` (opcionales), exportar a `txt`, `srt`, `vtt` o `json` con un solo serializador |
-| Configuración | `configuracion.py` | Leer y validar `settings.yaml` contra la raíz del proyecto, con los valores por defecto en un solo lugar; la lista de modelos de Whisper; las preferencias del usuario (`preferencias.json`). La app no reescribe el YAML |
+| Configuración | `configuracion.py`, `idiomas.py` | Leer y validar `settings.yaml` contra la raíz del proyecto, con los valores por defecto en un solo lugar; la lista de modelos de Whisper; las preferencias del usuario (`preferencias.json`): leerlas (`leer_ajustes`), combinarlas con el YAML (`combinar`), validar el formulario con los topes del panel, guardar y restablecer en una escritura atómica (`guardar_formulario`, `restablecer_formulario`) y calcular qué controles del panel lateral cambian (`valores_laterales`). La app no reescribe el YAML. `idiomas.py` guarda los nombres y códigos del selector de idioma, sin Tk |
 | Resumen y minuta | `asistente_ia.py` | Dividir el texto en bloques, sacar notas en paralelo, redactar el documento, reintentar secciones faltantes, revisar la fidelidad, normalizar la minuta y añadir las notas de la aplicación |
 | Acceso a Copilot | `copilot.py` | Login por device flow, lectura y guardado del token, catálogo de modelos, filtro de modelos económicos y de familias no autorizadas, y sesión del modo `auto` |
 | Persistencia | `persistencia.py` | Guardar sin interfaz una transcripción o un documento: primero el historial y después el archivo junto al audio; devuelve avisos en vez de lanzar |
 | Historial | `historial.py` | Tabla `transcripciones` en SQLite: crear, guardar documentos, renombrar, eliminar, buscar |
-| Interfaz gráfica | `ui.py`, `ui_copilot.py`, `ui_historial.py` | Ventana principal, diálogo de login y panel del historial |
+| Flujos sin ventana | `flujo_transcripcion.py`, `flujo_documentos.py` | Transcribir y persistir; generar documentos con `GestorDocumentos` (generación vigente, asistente y decisión de qué se guarda) |
+| Interfaz gráfica | `ui.py`, `ui_copilot.py`, `ui_historial.py`, `ui_configuracion.py` | Ventana principal y su barra de tres vistas, diálogo de login, vista del historial y vista Configuración (`PanelConfiguracion`: formulario, avisos de las preferencias y sección de la sesión de Copilot) |
 | CLI | `main.py` | Transcribir a `stdout` o a un archivo; listar los modelos de Whisper; login, logout y lista de modelos de Copilot; lanzar la interfaz con `--ui` |
 | Registro | `registro.py` | Configurar el logging y avisar cada cierto tiempo en operaciones largas (`latido`) |
 
@@ -38,6 +44,49 @@ Fuera de `src/`: `run_ui.py` (lanzador), `config/settings.yaml` (configuración)
 ## Flujo de datos
 
 Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que lo ejecuta.
+
+### Abrir la ventana y combinar la configuración
+
+1. `ui.py:main` carga el YAML del proyecto con `configuracion.cargar_configuracion`. Si tiene un error, muestra un
+   diálogo «Configuración» y sale con código 1 sin abrir la ventana.
+2. `configuracion.leer_ajustes` lee de `~/.local/share/transcriptor-audio/preferencias.json` el bloque
+   `configuracion` (sección → clave → valor) sin lanzar nunca: si el archivo no existe, no es JSON o no se puede leer,
+   devuelve ajustes vacíos y, si procede, un aviso.
+3. `configuracion.combinar(proyecto, ajustes)` devuelve una copia del YAML con los ajustes válidos encima y la lista de
+   avisos. Cada ajuste pasa por la misma tabla de claves que el YAML y, además, por los topes del panel
+   (`TOPES_PANEL`, un dominio de GitHub Enterprise que sea un nombre de dominio, y un `historial.ruta` que no caiga
+   dentro del proyecto salvo en `data/`). Un ajuste inválido, desconocido o `ia.modelo` dentro de `configuracion` se
+   ignora y toma el valor del YAML. Los topes valen solo para las preferencias y el formulario: el YAML y la CLI no los
+   tienen.
+4. `AppTranscriptor` recibe la configuración efectiva (`configuracion`), la del proyecto (`configuracion_proyecto`) y
+   los avisos (`avisos_preferencias`), que van una sola vez a Registro como advertencias y al recuadro de avisos de la
+   vista Configuración. El modelo de IA elegido (`modelo_ia`) se lee aparte (`leer_modelo_preferido`) y
+   `modelo_ia_efectivo` lo prefiere a `ia.modelo`.
+5. Abrir la ventana no hace ninguna petición de red ni lee el token. La vista Configuración y la de Historial se
+   construyen la primera vez que se muestran (`ui.py:AppTranscriptor.mostrar_vista`, también con `Ctrl+1`, `Ctrl+2` y
+   `Ctrl+3`).
+
+### Guardar o restablecer desde la vista Configuración
+
+1. «Guardar» llama a `AppTranscriptor.guardar_configuracion` en el hilo principal. Si hay una transcripción o una
+   generación en curso, una consulta de «↻» o el diálogo de login abierto, no escribe nada
+   (`ui_configuracion.motivo_para_no_guardar`). Si no, `PanelConfiguracion` envía solo los campos que el usuario
+   cambió desde el último refresco.
+2. `configuracion.guardar_formulario` convierte y valida los valores (`validar_formulario`, con los topes del panel y la
+   exclusión de familias de modelo, regla 7). Si hay errores, no escribe nada y devuelve un error por campo.
+3. Si todo es válido, `guardar_ajustes` escribe en `preferencias.json`, en una sola escritura, el bloque
+   `configuracion` (solo lo que difiere del YAML) y `modelo_ia`, conservando las claves ajenas del archivo. La
+   escritura es atómica: archivo temporal y `os.replace` (`_escribir_preferencias_atomico`); si falla, el archivo queda
+   como estaba. Después relee y combina (`_resultado_tras_escribir`) para devolver la configuración efectiva, las claves
+   cambiadas y el texto del pie.
+4. `AppTranscriptor.aplicar_guardado` pone la configuración nueva, cambia en el panel lateral solo los controles de las
+   claves guardadas (`valores_laterales`), repone el selector del modelo de IA si cambió, avanza `_epoca_ia` si cambió
+   el dominio de Enterprise y olvida el asistente si cambió algo con lo que se crea
+   (`GestorDocumentos.olvidar_asistente`). Un cambio de `historial.ruta` no reabre el historial: se aplica al reiniciar.
+5. «Restablecer valores del proyecto» pide confirmación y llama a `restablecer_formulario`, que borra de
+   `preferencias.json` `configuracion` y `modelo_ia` (el resto se conserva) y aplica la configuración del YAML igual
+   que el paso 4. El panel lateral no se toca salvo en las claves que cambian.
+6. La CLI no participa: sigue leyendo solo `config/settings.yaml`.
 
 ### Transcribir desde la interfaz
 
@@ -83,10 +132,28 @@ Sin diagrama: los caminos se describen como pasos, cada uno con el símbolo que 
 3. `copilot.esperar_login` consulta `/login/oauth/access_token` hasta recibir el token y `copilot.guardar_token` lo
    escribe en `~/.local/share/transcriptor-audio/copilot.json`.
 
+El diálogo se abre desde «Generar» o «↻» sin sesión y desde el botón «Iniciar sesión» de la vista Configuración
+(`AppTranscriptor.iniciar_sesion_desde_la_vista`); al terminar bien desde la vista, la sección de sesión se repinta, se
+avanza `_epoca_ia` y se olvida el asistente.
+
+### La sesión de Copilot en la vista Configuración
+
+1. Al mostrar la vista, `PanelConfiguracion.refrescar_sesion` llama a `copilot.estado_sesion(dominio)`, que lee del
+   disco (variable de entorno, archivo propio y archivo de opencode) de dónde saldría la sesión (`EstadoSesion.origen`:
+   ninguna, la variable, la app u opencode) y si hay un token propio guardado, sin red y sin escribir.
+   `copilot.describir_sesion` lo convierte en el texto y los botones de la sección, sin mostrar nunca el token.
+2. La sección no comprueba la sesión contra GitHub: dice que se comprueba al usarla. Si el dominio escrito en el campo
+   de Enterprise no es el guardado, `ui_configuracion.seccion_de_sesion` deshabilita los dos botones hasta que se guarde.
+3. «Cerrar sesión» (`AppTranscriptor._cerrar_sesion_copilot`) rechaza durante un proceso, pide confirmación y llama a
+   `copilot.cerrar_sesion_propia`, que borra solo `copilot.json` y devuelve el estado resultante: no toca el archivo de
+   opencode ni la variable de entorno. Si va bien, avanza `_epoca_ia`, olvida el asistente y repone los selectores de
+   modelo; si el borrado falla, avisa y no cambia nada.
+
 ### Transcribir desde la CLI
 
-`main.main` valida el archivo, carga la configuración con `configuracion.cargar_configuracion` y comprueba que `srt` y
-`vtt` tengan un archivo de salida (`-o`), todo antes de cargar Whisper. Después transcribe con
+`main.main` valida el archivo, carga la configuración con `configuracion.cargar_configuracion` (solo el YAML: no lee
+`preferencias.json`, así que lo guardado desde la vista Configuración no le afecta) y comprueba que `srt` y `vtt`
+tengan un archivo de salida (`-o`), todo antes de cargar Whisper. Después transcribe con
 `TranscriptorAudio.transcribir` y escribe en `stdout` (solo `txt` y `json`) o en el archivo de `-o`, con el mismo
 serializador (`utils.serializar_transcripcion`). No genera resumen ni minuta y no guarda en el historial.
 
@@ -138,6 +205,12 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   parte falla, un `Event` (`abortar`) y la cancelación de los futuros evitan enviar las que aún no empezaron.
 - **Otros hilos.** La consulta del catálogo de modelos («↻»), el inicio de sesión (`login-copilot`, con su propio
   `Event` de cancelación) y un hilo `latido` por cada operación larga, que solo registra en el log.
+- **La vista Configuración y las preferencias.** Guardar, restablecer, iniciar y cerrar sesión ocurren en el hilo
+  principal y se rechazan mientras hay una transcripción o una generación en curso (y, para guardar y restablecer,
+  una consulta de «↻» o el login abierto), así que ningún hilo de fondo lee una configuración a medio cambiar: la
+  transcripción recibe sus parámetros ya copiados y la generación conserva su asistente. `AppTranscriptor._epoca_ia`
+  sube al cambiar el dominio de Enterprise o la sesión, y una lista de modelos pedida en una época anterior se
+  descarta al llegar.
 - **SQLite.** `Historial` abre una conexión por operación (`sqlite3.connect(..., timeout=10)`) y la cierra al
   terminar, así que lo pueden usar el hilo principal y el de la transcripción sin compartir conexiones. No hay otro
   control de concurrencia: dos escrituras a la vez se serializan por el bloqueo de SQLite, que espera hasta 10 s.
@@ -150,8 +223,8 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
 
 | Dato | Dónde | Permisos y notas |
 |---|---|---|
-| Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (`token` y `enterprise_url`) | Se crea con modo `0o600` (`copilot.guardar_token`); en claro; el modo solo se fija al crear el archivo. Lo borran `--copilot-logout` y un 401 del token propio |
-| Preferencias del usuario | `~/.local/share/transcriptor-audio/preferencias.json` (`modelo_ia`) | Permisos por defecto; solo guarda un nombre de modelo |
+| Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (`token` y `enterprise_url`) | Se crea con modo `0o600` (`copilot.guardar_token`); en claro; el modo solo se fija al crear el archivo. Lo borran `--copilot-logout`, «Cerrar sesión» de la vista Configuración y un 401 del token propio |
+| Preferencias del usuario | `~/.local/share/transcriptor-audio/preferencias.json` (`modelo_ia` y el bloque `configuracion` con los valores que difieren del YAML) | Permisos por defecto, en claro; sin secretos (nombre de modelo, dominio de Enterprise, ruta del historial y ajustes). Se escribe de forma atómica (temporal más `os.replace`) y se conservan las claves ajenas. Solo la lee la ventana, no la CLI |
 | Historial | `data/historial.db` (SQLite; `historial.ruta`, relativa a la raíz del proyecto) | Permisos por defecto, sin cifrar. Guarda el texto completo, los segmentos con marcas de tiempo, el resumen, la minuta, los títulos, la ruta absoluta del audio y los modelos usados |
 | Resultados junto al audio | `<archivo>.<ext>_transcripcion.<formato>`, `<archivo>.<ext>_resumen.md`, `<archivo>.<ext>_minuta.md` en la carpeta del audio | Permisos por defecto. Regenerar la misma grabación las sobrescribe sin preguntar |
 | Caché de modelos de Whisper | `~/.cache/faster-whisper` | Solo modelos, ningún dato del usuario |
@@ -161,7 +234,7 @@ El token se busca en este orden (`copilot.leer_token`): la variable de entorno `
 propio y la sesión de opencode (`~/.local/share/opencode/auth.json`, clave `github-copilot`, solo lectura). Los dos
 archivos solo valen si su dominio (github.com o el de GitHub Enterprise) coincide con el pedido; la variable de entorno
 no se compara. La app nunca modifica el archivo de opencode. `config/settings.yaml` no contiene secretos y la app solo
-lo lee.
+lo lee: lo que el usuario guarda desde la vista Configuración va a `preferencias.json`, nunca al YAML.
 
 ### Qué sale del equipo
 
@@ -171,8 +244,8 @@ lo lee.
   cada parte, el documento redactado cuando se pide una corrección o una revisión, y la fecha de la minuta. El token va
   en la cabecera `Authorization`. El texto solo va a modelos autorizados: los de `FAMILIAS_EXCLUIDAS` no reciben nada,
   tampoco en modo `auto` ni con un modelo escrito a mano.
-- **Cuándo hay tráfico de red.** Al abrir la ventana, ninguno: no se lee el token ni se consulta Copilot. Después, solo
-  por una acción del usuario: «↻» (una consulta `GET /models`), iniciar sesión (`POST /login/device/code` y consultas
+- **Cuándo hay tráfico de red.** Al abrir la ventana, ninguno: no se lee el token ni se consulta Copilot. Mostrar la
+  vista Configuración lee la sesión del disco (sin red). Después, solo por una acción del usuario: «↻» (una consulta `GET /models`), iniciar sesión (`POST /login/device/code` y consultas
   a `/login/oauth/access_token`), generar un documento (`/chat/completions`; en modo `auto`, también
   `POST /models/session` y `GET /models`; un documento de varias partes cuya redacción supera unos 32 000 tokens
   estimados añade un `GET /models`: una vez por asistente si responde, y en cada generación mientras falle) y la primera carga de cada modelo de Whisper
@@ -194,9 +267,9 @@ comprobado que los commits anteriores estén libres de secretos.
 
 - Comando: `./venv/bin/python -m pytest -q`, **desde la raíz del repositorio**: el paquete `src` debe poder
   importarse.
-- Estado al 2026-11-22: **330 tests en verde** con Python 3.14.10 en Linux (`pytest` 9.2.0, fijado en
+- Estado al 2026-11-22: **501 tests en verde** con Python 3.14.10 en Linux (`pytest` 9.2.0, fijado en
   `requirements-dev.txt`; instalar con `pip install -r requirements-dev.txt`).
-- Hay 277 funciones de test (el resto son casos parametrizados) en trece archivos `test_*.py` de `tests/`, más
+- Hay 376 funciones de test (el resto son casos parametrizados) en trece archivos `test_*.py` de `tests/`, más
   `conftest.py`. No hacen llamadas reales a la red (`httpx` se simula), no cargan ningún modelo de Whisper (el doble
   `modelo_whisper_falso` sustituye al modelo) ni abren ventanas. Las rutas del token y las preferencias se aíslan en
   carpetas temporales (`rutas_aisladas` en `tests/test_copilot.py`, `preferencias_aisladas` en `tests/conftest.py`).
@@ -232,10 +305,13 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
 - **La exclusión de familias es por nombre.** `FAMILIAS_EXCLUIDAS` (`kimi`, `mistral`, `codestral`, `devstral`, `ministral`,
   `pixtral`, `magistral`) se reconoce porque el id del modelo contiene el nombre; un modelo nuevo de Mistral AI cuyo
   nombre no contenga ninguno de esos textos no se excluye, y la lista se amplía a mano en `copilot.py`.
-- **Solo el pintado de la ventana no tiene tests automáticos.** Ningún test instancia `AppTranscriptor`: `_recibir_documento_ia`,
-  la cancelación y el cierre de la ventana solo se verifican a mano. Los flujos de transcripción y de documentos
-  (`flujo_transcripcion.py`, `flujo_documentos.py`, con `GestorDocumentos.recibir`) y `AsistenteIA` se prueban sin ventana, y
-  también `persistencia.py`.
+- **Solo el pintado de la ventana no tiene tests automáticos.** Ningún test instancia `AppTranscriptor` ni abre una
+  ventana: `tests/test_ui.py` llama a sus métodos (`guardar_configuracion`, `aplicar_guardado`, las acciones de sesión,
+  `_mostrar_modelos_ia`…) y a los de `PanelConfiguracion` sobre dobles, y prueba sin Tk las decisiones de la vista
+  (`motivo_para_no_guardar`, `seccion_de_sesion`, `aviso_modelo`); `_recibir_documento_ia`, la cancelación, el cierre de
+  la ventana y cómo se ve la vista Configuración solo se verifican a mano. Los flujos de transcripción y de documentos
+  (`flujo_transcripcion.py`, `flujo_documentos.py`, con `GestorDocumentos.recibir`), `AsistenteIA`, `configuracion.py` y
+  `persistencia.py` se prueban sin ventana.
 - **La orquestación ya no vive en la clase Tk.** Transcribir y generar están en `flujo_transcripcion.py` y
   `flujo_documentos.py`, con su estado en `GestorDocumentos`; `AppTranscriptor` solo lanza, pinta y entrega. `historial.py` importa `transcriber.py` (solo las dataclasses; `faster_whisper`
   se carga al construir el modelo, historia 08). Backlog, Salud del código #5.
@@ -249,9 +325,13 @@ Lo que sigue es cierto hoy y se conoce; cada riesgo indica, si lo hay, el punto 
 ## Huecos conocidos
 
 - **Tests solo verificados en Python 3.14.** Pasan con 3.14.10 en Linux; el README dice «probado con 3.12» y no se ha comprobado con otras versiones.
-- **Comportamiento real de la API de Copilot.** Lo documentado sale del código, no de llamadas reales: no se probó
-  el login, el catálogo de modelos, el modo `auto` ni la generación.
-- **Interfaz gráfica sin ejecutar.** Los atajos, los estados de los botones y el diseño se leyeron en el código.
+- **Comportamiento real de la API de Copilot.** Solo hay cuatro peticiones reales con texto sintético
+  (2026-11-22, `docs/integracion-copilot.md` §«Comprobado con peticiones reales»): corte por `length`, `[DONE]` y
+  los límites del catálogo. El login, el modo `auto` y `content_filter` no se han probado contra el servicio.
+- **Interfaz gráfica sin test automático.** Los tests llaman a los métodos de la ventana sobre dobles, sin Tk. Cada
+  cambio visible (incluidas la vista Configuración y su sección de sesión) se verificó a mano en la ventana real con
+  scripts que interceptan la red, aíslan el token y las preferencias, y responden los diálogos; esos scripts no
+  están en el repo.
 - **Contenido de los prompts.** `PROMPT_SISTEMA` y los demás se identificaron, pero sus reglas de fidelidad no se
   contrastaron con salidas reales.
 - **Tests no documentados.** `tests/` queda fuera de los contratos por diseño del flujo.

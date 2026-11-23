@@ -1,7 +1,8 @@
 # Panel de configuración
 
 *   **Autor:** rmalanco
-*   **Estado:** Propuesto, revisado (arquitectura: «aprobar con cambios»; implementation readiness: «listo con
+*   **Estado:** Implementado el 2026-11-22 (historias 17 a 27 en `docs/historias/hechas/`; comportamiento en
+    `docs/specs/configuracion.md`). Antes: propuesto, revisado (arquitectura: «aprobar con cambios»; implementation readiness: «listo con
     ajustes»); cambios de la revisión aplicados el 2026-11-22, ver «Revisión (2026-11-22)». Las seis decisiones de
     producto las tomó el usuario el 2026-11-22 («Decisiones tomadas»).
 *   **Fecha:** 2026-11-22

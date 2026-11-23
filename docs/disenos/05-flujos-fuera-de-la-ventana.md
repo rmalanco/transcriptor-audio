@@ -1,8 +1,9 @@
 # Flujos fuera de la ventana
 
 *   **Autor:** rmalanco
-*   **Estado:** Propuesto, revisado (arquitectura: «aprobar con cambios»; implementation readiness: «listo con
-    ajustes»); cambios de la revisión aplicados el 2026-11-22, ver «Revisión (2026-11-22)»
+*   **Estado:** Implementado el 2026-11-22 (historias 08 a 14 de `docs/historias/hechas/`). Antes: propuesto y
+    revisado (arquitectura: «aprobar con cambios»; implementation readiness: «listo con ajustes»), ver «Revisión
+    (2026-11-22)»
 *   **Fecha:** 2026-11-22
 *   **Origen:** `BACKLOG.md`, «Salud del código» #5 (carril L), hallazgo A-15 de `audit_report.md`, aceptado en
     `goldfish_review_report.md` (fila 5: «Desbloquea los tests de A-01 y A-02»).

@@ -22,6 +22,8 @@
 ## Interfaz gráfica
 
 - Los widgets solo se tocan desde el hilo principal; un hilo de fondo llama a `_en_ui(funcion, *args)`.
+- Guardar y restablecer la configuración, y iniciar o cerrar la sesión de Copilot desde la vista Configuración, corren
+  en el hilo principal y se rechazan con una transcripción o una generación en curso.
 - El trabajo largo va en hilos `daemon`; la cancelación es un `threading.Event` (uno para la transcripción y uno por
   cada generación de IA).
 
@@ -36,7 +38,7 @@
 
 ## Git
 
-- La rama de trabajo actual es `tandem/salud-del-codigo`; `main` sigue en el último estado publicado. Los commits
+- La rama de trabajo actual es `tandem/ronda-2`; `main` sigue en el último estado publicado. Los commits
   recientes llevan el asunto en español y en presente (`Quita código y dependencias sin uso…`); los primeros mezclan
   inglés. No hay un formato fijado.
 - El usuario hace los commits; un agente no hace commit sin que se lo pidan.

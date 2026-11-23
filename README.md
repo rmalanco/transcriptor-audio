@@ -6,7 +6,8 @@ reunión con los modelos de **GitHub Copilot**.
 
 - El audio nunca sale de tu equipo: la transcripción se hace en local. Solo el texto transcrito se envía a
   Copilot, y únicamente cuando pides un resumen o una minuta.
-- Interfaz gráfica (CustomTkinter) con arrastrar y soltar, historial con búsqueda y línea de comandos.
+- Interfaz gráfica (CustomTkinter) con arrastrar y soltar, historial con búsqueda, una vista de configuración y
+  línea de comandos.
 - Salida en `txt`, `srt`, `vtt` o `json`.
 
 ## Requisitos
@@ -55,6 +56,9 @@ La interfaz permite:
 - Seleccionar modelo, idioma y formato de salida
 - Ver progreso en tiempo real
 - Guardar transcripciones automáticamente
+- Moverse entre las tres vistas de la barra del encabezado: **Transcribir** (`Ctrl+1`), **Historial** (`Ctrl+2`) y
+  **⚙ Configuración** (`Ctrl+3`)
+- Cambiar los valores por defecto sin editar ningún archivo (ver [Configuración](#configuración))
 
 ### Línea de comandos
 
@@ -72,19 +76,21 @@ python -m src.main --listar-modelos
 ## Resumen y minuta con IA
 
 Tras transcribir, las pestañas **Resumen** y **Minuta** generan esos documentos con los modelos de
-**GitHub Copilot** (sección `ia:` de `config/settings.yaml`). Se guardan automáticamente junto al audio como
+**GitHub Copilot** (sección `ia:` de `config/settings.yaml`, que puedes ajustar en la vista Configuración). Se guardan automáticamente junto al audio como
 `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (por ejemplo `reunion.m4a_minuta.md`).
 
 La transcripción se envía a GitHub Copilot; el audio nunca sale de tu equipo. Al arrancar, la app no se conecta a
 Copilot ni lee el token: solo lo hace al pulsar «↻» junto al selector de modelo (una consulta al catálogo), al
-iniciar sesión y al generar un resumen o una minuta.
+iniciar sesión y al generar un resumen o una minuta. Mostrar la vista Configuración lee la sesión guardada en el disco
+(para decir de dónde sale), pero no hace ninguna petición de red.
 
 La integración replica la de [opencode](https://opencode.ai): inicio de sesión con el *device flow* de OAuth
 de GitHub y llamadas a la API de Copilot (`api.githubcopilot.com`, compatible con OpenAI). Detalles técnicos,
 hallazgos y fuentes en [docs/integracion-copilot.md](docs/integracion-copilot.md).
 
 - **Iniciar sesión:** al pulsar «Generar» por primera vez se abre un diálogo con un código; se introduce en
-  github.com/login/device y la sesión se detecta sola. Desde la terminal: `python -m src.main --copilot-login`.
+  github.com/login/device y la sesión se detecta sola. También con el botón «Iniciar sesión» de la vista
+  Configuración, o desde la terminal: `python -m src.main --copilot-login`.
 - **Modelos disponibles** para tu cuenta: `python -m src.main --copilot-modelos`. El modelo que eliges en el selector
   se recuerda en `~/.local/share/transcriptor-audio/preferencias.json`, no en `settings.yaml`; `ia.modelo` es solo el
   valor por defecto.
@@ -97,19 +103,23 @@ hallazgos y fuentes en [docs/integracion-copilot.md](docs/integracion-copilot.md
   guarda en el historial como `auto → <modelo>`. La sesión dura 1 h y se renueva sola.
 - **Token:** se guarda en `~/.local/share/transcriptor-audio/copilot.json` (permisos 600). Orden de búsqueda: variable
   `COPILOT_GITHUB_TOKEN`, sesión propia de la app (`copilot.json`) y sesión de Copilot de opencode
-  (`~/.local/share/opencode/auth.json`). Cerrar sesión: `python -m src.main --copilot-logout`.
-- **GitHub Enterprise** con dominio propio (`empresa.ghe.com`): indícalo en `ia.copilot_enterprise_url`.
+  (`~/.local/share/opencode/auth.json`). Cerrar sesión: botón «Cerrar sesión» de la vista Configuración o
+  `python -m src.main --copilot-logout`; las dos formas solo borran la sesión guardada por la app (`copilot.json`).
+- **GitHub Enterprise** con dominio propio (`empresa.ghe.com`): indícalo en `ia.copilot_enterprise_url` o en el campo
+  «Dominio de GitHub Enterprise» de la vista Configuración.
 
 ## Historial
 
 Cada transcripción terminada se guarda automáticamente en una base de datos SQLite
-(`data/historial.db`, configurable en la sección `historial:` de `config/settings.yaml`) con:
+(`data/historial.db`, configurable en la sección `historial:` de `config/settings.yaml` o en la vista
+Configuración) con:
 título, nombre y ruta del archivo, fecha, duración, idioma, modelo de Whisper, texto con marcas
 de tiempo, y el resumen y la minuta con el modelo de IA que los generó.
 
 - **Título:** por defecto es el nombre del archivo; al generar la minuta se toma el suyo.
   Se puede editar en la pestaña Texto o en el historial (un título editado a mano ya no se reemplaza).
-- **Vista 📚 Historial** (barra de navegación del encabezado, o `Ctrl+2`; `Ctrl+1` vuelve a Transcribir):
+- **Vista 📚 Historial** (barra de navegación del encabezado, que tiene tres vistas, o `Ctrl+2`; `Ctrl+1` vuelve a
+  Transcribir):
   buscar (sin distinguir mayúsculas ni acentos) en títulos, archivos, textos, resúmenes y minutas;
   ver el detalle; abrir una entrada (doble clic) para seguir trabajando con ella; o eliminarla.
   Todo ocurre dentro de la misma ventana.
@@ -148,16 +158,57 @@ versión. La lista completa la muestra `python -m src.main --listar-modelos`.
 
 ## Configuración
 
-Edita `config/settings.yaml` para ajustar los parámetros por defecto (modelo de Whisper, idioma, formato de
-salida, modelo de Copilot, etc.). Cada opción está comentada en el propio archivo. La CLI y la ventana leen ese mismo
-archivo desde cualquier carpeta; en la CLI, las opciones de la línea de órdenes (`-l`, `-f`, `--no-timestamps`…) ganan
-a lo que diga el YAML. Si el YAML tiene un error, la CLI lo muestra en la terminal y no transcribe; la ventana lo
-muestra en un diálogo y no arranca.
+Los valores por defecto salen de dos sitios:
+
+- **`config/settings.yaml`** (el del proyecto, versionado): modelo de Whisper, idioma, formato de salida, modelo de
+  Copilot, etc. Cada opción está comentada en el propio archivo. La CLI y la ventana leen ese mismo archivo desde
+  cualquier carpeta; en la CLI, las opciones de la línea de órdenes (`-l`, `-f`, `--no-timestamps`…) ganan a lo que
+  diga el YAML. Si el YAML tiene un error, la CLI lo muestra en la terminal y no transcribe; la ventana lo muestra en
+  un diálogo y no arranca.
+- **Vista «⚙ Configuración»** (barra del encabezado o `Ctrl+3`): cambia esos valores sin editar el YAML. Lo que
+  guardas va a `~/.local/share/transcriptor-audio/preferencias.json`, fuera del repositorio, y al abrir la ventana
+  gana a lo que diga el YAML. `config/settings.yaml` no se modifica nunca.
+
+La vista tiene cuatro grupos; debajo de cada campo se ve la clave del YAML que cambia:
+
+| Grupo | Campos |
+|---|---|
+| Transcripción | Modelo de Whisper, idioma, dispositivo y precisión; un bloque plegado «▶ Avanzado» con los parámetros de decodificación (haz de búsqueda, candidatos, temperatura, umbrales…) |
+| Salida | Formato de salida, marcas de tiempo y marcas por palabra |
+| IA | Sesión de GitHub Copilot (ver abajo), modelo de IA, dominio de GitHub Enterprise y revisión de fidelidad; un «▶ Avanzado» con la temperatura de la IA, los caracteres por parte y las partes a la vez |
+| Historial | Archivo del historial |
+
+- **Guardar** valida los campos que has cambiado: si alguno no es válido, no se guarda nada, cada error aparece bajo
+  su campo (con un «Avanzado» plegado, se despliega solo) y la vista va al primero. Si todo está bien, solo se guarda
+  lo que difiere del YAML. Los valores del panel tienen topes que el YAML no tiene (por ejemplo, «Haz de búsqueda» va
+  de 1 a 20); un valor del YAML fuera de esos topes no impide guardar otro campo.
+- **Los cambios valen para la ventana, no para la CLI**, que sigue leyendo solo el YAML y las opciones de la línea de
+  órdenes.
+- **No se puede guardar ni restablecer** mientras hay una transcripción o una generación en curso, una consulta de
+  «↻» o el diálogo de inicio de sesión abierto: el pie de la vista dice cuál es el motivo.
+- **Restablecer valores del proyecto** vuelve a lo que dice `config/settings.yaml` tras pedir confirmación: borra lo
+  guardado desde la vista y también el modelo de IA elegido. El resto de lo que pudiera haber en `preferencias.json`
+  se conserva.
+- **El archivo del historial se aplica al reiniciar la app**: hasta entonces la ventana sigue usando el historial
+  anterior.
+- **El panel lateral «Opciones» sigue siendo para esta transcripción**: lo que cambias ahí (modelo de Whisper,
+  idioma, formato…) no se guarda ni modifica los valores por defecto; la excepción es el selector del modelo de IA, que
+  se recuerda. Al guardar desde la vista Configuración, solo cambian en el panel lateral los controles de los ajustes
+  que cambiaste.
+- **Preferencias con errores:** si un valor de `preferencias.json` no es válido (editado a mano, por ejemplo), la
+  ventana abre igual con el valor del YAML y muestra un recuadro de avisos arriba de la vista y en Registro.
+- **Modelo de IA:** es el mismo que el selector «Modelo de IA» del panel lateral (con su «↻») y se guarda en la misma
+  preferencia (`modelo_ia`). Un modelo de una familia no autorizada por la empresa se avisa en rojo y no se puede guardar.
+- **Sesión de GitHub Copilot:** el primer elemento del grupo IA dice de dónde sale la sesión (ninguna, la de esta
+  app, la de opencode o la variable `COPILOT_GITHUB_TOKEN`) sin conectarse a la red ni mostrar el token. «Iniciar
+  sesión» abre el mismo diálogo que al generar; «Cerrar sesión» pide confirmación y **solo borra la sesión guardada
+  por la app** (`copilot.json`): no toca la sesión de opencode ni la variable de entorno. Si cambias el dominio de
+  GitHub Enterprise sin guardarlo, los dos botones se deshabilitan hasta que guardes.
 
 ## Privacidad y datos locales
 
 Nada de lo siguiente se sube al repositorio. El historial y los archivos exportados junto al audio están en
-`.gitignore`; el token y los modelos de Whisper se guardan fuera de la carpeta del proyecto:
+`.gitignore`; el token, las preferencias y los modelos de Whisper se guardan fuera de la carpeta del proyecto:
 
 | Dato | Dónde se guarda |
 |---|---|
@@ -165,6 +216,7 @@ Nada de lo siguiente se sube al repositorio. El historial y los archivos exporta
 | Transcripciones exportadas | junto al archivo de audio (`.txt`, `.srt`, `.vtt`, `.json`; en `.gitignore`) |
 | Resumen y minuta exportados | junto al archivo de audio (`<archivo>.<ext>_resumen.md`, `<archivo>.<ext>_minuta.md`; en `.gitignore`) |
 | Token de GitHub Copilot | `~/.local/share/transcriptor-audio/copilot.json` (permisos 600, fuera del repo) |
+| Preferencias (lo guardado en la vista Configuración y el modelo de IA elegido) | `~/.local/share/transcriptor-audio/preferencias.json` (fuera del repo) |
 | Modelos de Whisper | `~/.cache/faster-whisper` (fuera del repo) |
 
 ## Tests
