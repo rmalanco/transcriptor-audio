@@ -366,12 +366,21 @@ class _Documento:
     cortes_partes: dict = field(default_factory=dict)  # parte -> motivo, de las notas que Copilot cortó
     revision_descartada: Optional[str] = None  # motivo si la revisión se descartó y se conservó el documento anterior
     repuestas: list[str] = field(default_factory=list)  # tareas que la revisión quitó y que la app repuso marcadas
+    fuente_revision: str = "notas"  # con qué se revisó: "transcripcion" o "notas"
 
 
 @dataclass
 class _ConsultaDeLimite:
     """Estado de la consulta al catálogo en una generación: si falló, no se repite en esa generación."""
     error: Optional[str] = None  # motivo del fallo; None si no se consultó o salió bien
+
+
+@dataclass
+class FuenteRevision:
+    """Lo que la revisión de fidelidad recibe como fuente: la transcripción completa o las notas de las partes."""
+    tipo: str  # "transcripcion" o "notas"
+    texto: str  # lo que va en {texto} de PROMPT_REVISION
+    motivo: Optional[tuple[int, int, str]] = None  # (estimado, límite, modelo) si la transcripción no cupo
 
 
 def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
@@ -466,11 +475,14 @@ def normalizar_tabla_tareas(minuta: str) -> str:
     return "\n".join(lineas)
 
 
-def _cita_de_partes(partes: int, revisado: bool) -> str:
+def _cita_de_partes(partes: int, revisado: bool, *, fuente_revision: str = "notas") -> str:
     cita = (f"> Nota de la aplicación: la transcripción se procesó en {partes} partes y este documento se "
             "redactó a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
             "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
-    if revisado:
+    if revisado and fuente_revision == "transcripcion":
+        cita += (" La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no "
+                 "sustituye a esa comprobación.")
+    elif revisado:
         cita += " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción."
     return cita
 
@@ -519,7 +531,8 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
                            error_secciones: Optional[str] = None, error_revision: Optional[str] = None,
                            corte: Optional[str] = None, cortes_partes: Optional[dict] = None, *,
                            revision_descartada: Optional[str] = None,
-                           repuestas: Optional[list[str]] = None) -> str:
+                           repuestas: Optional[list[str]] = None,
+                           fuente_revision: str = "notas") -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
     (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
     `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
@@ -549,16 +562,16 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
     if repuestas:
         citas.append(_cita_de_lo_repuesto(repuestas))
     if partes >= 2:
-        citas.append(_cita_de_partes(partes, revisado))
+        citas.append(_cita_de_partes(partes, revisado, fuente_revision=fuente_revision))
     if not citas:
         return ""
     return "\n---\n\n" + "\n\n".join(citas)
 
 
-def nota_de_notas(partes: int, revisado: bool) -> str:
+def nota_de_notas(partes: int, revisado: bool, *, fuente_revision: str = "notas") -> str:
     """Bloque que la app añade al final de un documento redactado a partir de notas (2 o más partes).
     Lo añade la app, no el modelo: ningún prompt lo contiene y el post-proceso no lo toca."""
-    return notas_de_la_aplicacion([], partes, revisado)
+    return notas_de_la_aplicacion([], partes, revisado, fuente_revision=fuente_revision)
 
 
 def _frase_de_partes_conservadas(n: int) -> str:
@@ -913,6 +926,7 @@ class AsistenteIA:
         texto = texto.strip()
         if not texto:
             raise ErrorAsistenteIA("La transcripción está vacía")
+        original = texto  # la transcripción completa; `texto` pasa a ser las notas si hay varias partes
         with self._cerrojo_iniciador:
             self._pendiente_iniciador_usuario = True
 
@@ -962,13 +976,18 @@ class AsistenteIA:
         error_revision = None
         revision_descartada = None
         repuestas: list[str] = []
+        fuente_revision = "notas"
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
-            if on_progreso:
-                fuente = "la transcripción" if len(bloques) == 1 else f"las notas de las {len(bloques)} partes"
-                on_progreso(f"Revisando fidelidad con {fuente}…")
             try:
-                revisado = _sin_cortar(self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar))
+                fuente = self._fuente_de_revision(original, texto, documento, len(bloques), consulta, cancelar)
+                fuente_revision = fuente.tipo
+                if on_progreso:
+                    quien = ("la transcripción" if len(bloques) == 1 else "la transcripción completa"
+                             if fuente.tipo == "transcripcion" else f"las notas de las {len(bloques)} partes")
+                    on_progreso(f"Revisando fidelidad con {quien}…")
+                revisado = _sin_cortar(self._completar(PROMPT_REVISION.format(texto=fuente.texto, documento=documento),
+                                                       cancelar))
             except ErrorAsistenteIA as e:
                 if cancelar and cancelar.is_set():
                     raise InterruptedError from e  # cancelada: el documento sin revisar no se entrega
@@ -995,7 +1014,8 @@ class AsistenteIA:
         # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
         return _Documento(documento, len(bloques), faltan_al_final,
                           error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes,
-                          revision_descartada=revision_descartada, repuestas=repuestas)
+                          revision_descartada=revision_descartada, repuestas=repuestas,
+                          fuente_revision=fuente_revision)
 
     def _limite_del_modelo(self, consulta: _ConsultaDeLimite,
                            cancelar: Optional[threading.Event]) -> tuple[str, Optional[int]]:
@@ -1039,6 +1059,31 @@ class AsistenteIA:
                 "con más contexto y vuelve a generar; con otro modelo se pedirán de nuevo las notas de todas las "
                 "partes.")
 
+    def _fuente_de_revision(self, original: str, notas: str, documento: str, partes: int,
+                            consulta: _ConsultaDeLimite, cancelar: Optional[threading.Event]) -> FuenteRevision:
+        """Qué recibe la revisión: la transcripción completa si cabe en el modelo, y las notas si no. Con varias partes
+        se estima la petición con la transcripción y solo se consulta el límite si pasa del umbral (con la misma
+        consulta de la redacción). Sin dato del límite se revisa con la transcripción, y el registro lo dice."""
+        if partes == 1:
+            return FuenteRevision("transcripcion", original)
+        estimado = estimar_tokens(PROMPT_SISTEMA + PROMPT_REVISION.format(texto=original, documento=documento))
+        if estimado <= UMBRAL_COMPROBAR_LIMITE:
+            return FuenteRevision("transcripcion", original)
+        modelo, limite = self._limite_del_modelo(consulta, cancelar)
+        if limite is None:
+            if consulta.error is not None:
+                log.warning("No se pudo comprobar el límite de entrada de «%s» para la revisión (%s); se revisa con la "
+                            "transcripción completa.", modelo, consulta.error)
+            else:
+                log.warning("No se pudo comprobar el límite de entrada de «%s» para la revisión: el catálogo no lo "
+                            "informa; se revisa con la transcripción completa.", modelo)
+            return FuenteRevision("transcripcion", original)
+        if estimado <= limite:
+            return FuenteRevision("transcripcion", original)
+        log.info("La revisión con la transcripción completa suma unos %d tokens y «%s» admite %d; se revisa con las "
+                 "notas de las %d partes.", estimado, modelo, limite, partes)
+        return FuenteRevision("notas", notas, (estimado, limite, modelo))
+
     def _con_nota(self, d: _Documento) -> str:
         """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del
         post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
@@ -1046,7 +1091,7 @@ class AsistenteIA:
         revisado = self.revision_fidelidad and not d.error_revision and not d.revision_descartada
         nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision, d.corte,
                                       d.cortes_partes, revision_descartada=d.revision_descartada,
-                                      repuestas=d.repuestas)
+                                      repuestas=d.repuestas, fuente_revision=d.fuente_revision)
         return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:

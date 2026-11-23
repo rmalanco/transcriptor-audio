@@ -959,6 +959,14 @@ def test_nota_de_notas_con_revision_anade_la_frase_de_la_revision():
     assert nota.endswith("bueno. La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
 
 
+def test_nota_de_notas_con_revision_contra_la_transcripcion():
+    from src.asistente_ia import nota_de_notas
+    assert nota_de_notas(2, True, fuente_revision="transcripcion").endswith(
+        "bueno. La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no "
+        "sustituye a esa comprobación.")
+    assert nota_de_notas(2, False, fuente_revision="transcripcion") == nota_de_notas(2, False)
+
+
 class _StreamConTexto(_Stream):
     """Respuesta de chat simulada con el contenido indicado."""
     def __init__(self, contenido):
@@ -1066,23 +1074,54 @@ def test_resumen_con_notas_reutilizadas_tambien_lleva_la_nota(monkeypatch):
                             "Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
 
 
-def test_revision_con_varias_partes_dice_que_revisa_contra_las_notas(monkeypatch):
+TEXTO2 = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))  # 2 partes con max 900
+BASE_DOS_PARTES = ("> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó a "
+                   "partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
+                   "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+
+
+def test_revision_con_varias_partes_usa_la_transcripcion_completa(monkeypatch):
     _prohibir_red(monkeypatch)
-    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
-    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Ana enviará las cifras de octubre." if _es_prompt_de_notas(cuerpo)
+    assert len(dividir_texto(TEXTO2, 900)) == 2
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
                             else MINUTA_MODELO)
     progreso = []
     asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
-    minuta = asistente.generar_minuta(texto, on_progreso=progreso.append)
-    assert "Revisando fidelidad con las notas de las 2 partes…" in progreso
+    minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
+    assert "Revisando fidelidad con la transcripción completa…" in progreso
     revision = cuerpos[-1]["messages"][-1]["content"]
     assert "DOCUMENTO:" in revision  # es la petición de revisión
-    assert "Notas de la parte 1" in revision
-    assert not any(linea in revision for linea in texto.splitlines())  # ninguna línea de la transcripción original
-    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento "
-                           "se redactó a partir de notas extraídas de cada parte, no de la transcripción completa. "
-                           "Contrasta nombres, fechas, cifras y condiciones con la transcripción antes de darlo por bueno. "
-                           "La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
+    assert all(linea in revision for linea in TEXTO2.splitlines())  # la transcripción entera
+    assert "Notas de la parte" not in revision
+    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES + " La revisión de fidelidad lo contrastó después con la "
+                           "transcripción completa, pero es automática: no sustituye a esa comprobación.")
+
+
+def test_resumen_con_notas_reutilizadas_revisa_contra_la_transcripcion(monkeypatch):
+    _prohibir_red(monkeypatch)
+
+    def respuesta(cuerpo):  # la revisión lleva «DOCUMENTO:» y se decide antes que la redacción del resumen
+        ultimo = cuerpo["messages"][-1]["content"]
+        if "DOCUMENTO:" in ultimo:
+            return RESUMEN_MODELO if "## Resumen" in ultimo.split("DOCUMENTO:")[1] else MINUTA_MODELO
+        if _es_prompt_de_notas(cuerpo):
+            return "- Nota de una parte"
+        return RESUMEN_MODELO if "Redacta un resumen" in ultimo else MINUTA_MODELO
+
+    cuerpos = _simular_chat(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+    asistente.generar_minuta(TEXTO2)
+    peticiones_minuta = len(cuerpos)
+    resumen = asistente.generar_resumen(TEXTO2)
+    nuevas = cuerpos[peticiones_minuta:]
+    assert len(nuevas) == 2  # el resumen y su revisión: las notas se reutilizan
+    assert not any(_es_prompt_de_notas(cuerpo) for cuerpo in nuevas)
+    revision = nuevas[-1]["messages"][-1]["content"]
+    assert "DOCUMENTO:" in revision
+    assert all(linea in revision for linea in TEXTO2.splitlines())
+    assert "Notas de la parte" not in revision
+    assert resumen.endswith("\n\n---\n\n" + BASE_DOS_PARTES + " La revisión de fidelidad lo contrastó después con la "
+                            "transcripción completa, pero es automática: no sustituye a esa comprobación.")
 
 
 def test_una_sola_parte_no_lleva_nota_y_revisa_contra_la_transcripcion(monkeypatch):
@@ -1972,6 +2011,72 @@ def test_notas_que_caben_consultan_el_catalogo_una_vez_y_redactan(monkeypatch):
     assert len(consultas) == 1  # una sola consulta del catálogo para la minuta y el resumen
     assert len(cuerpos) == 3 + 2  # 3 notas, y después la minuta y el resumen, que sí se envían
     assert minuta.startswith("# Minuta") and resumen.startswith("## Resumen")
+
+
+def _responder_minuta_o_notas(cuerpo):
+    return "- Nota de una parte" if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO
+
+
+def test_revision_que_cabe_consulta_el_catalogo_una_sola_vez(monkeypatch):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # redacción (1 021) y revisión (1 676) pasan
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 100_000))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    asistente.generar_minuta(TEXTO2)
+    assert len(consultas) == 1  # la revisión reutiliza el límite de la redacción
+    revision = cuerpos[-1]["messages"][-1]["content"]
+    assert all(linea in revision for linea in TEXTO2.splitlines())
+
+
+def test_revision_que_no_cabe_vuelve_a_las_notas(monkeypatch, caplog):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # revisión con la transcripción: 1 676 > 1 300
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 1300))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    progreso = []
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    with caplog.at_level("INFO", logger="transcriptor.ia"):
+        minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
+    assert len(consultas) == 1
+    assert "Revisando fidelidad con las notas de las 2 partes…" in progreso
+    revision = cuerpos[-1]["messages"][-1]["content"]
+    assert "Notas de la parte 1" in revision
+    assert not any(linea in revision for linea in TEXTO2.splitlines())
+    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES
+                           + " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
+    estimado = asistente_ia.estimar_tokens(asistente_ia.PROMPT_SISTEMA + asistente_ia.PROMPT_REVISION.format(
+        texto=TEXTO2, documento=MINUTA_MODELO))
+    assert ("La revisión con la transcripción completa suma unos " f"{estimado} tokens y «gpt-4.1» admite 1300; "
+            "se revisa con las notas de las 2 partes.") in caplog.text
+
+
+def test_catalogo_caido_se_consulta_una_vez_y_se_revisa_con_la_transcripcion(monkeypatch, caplog):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)
+    consultas = _simular_catalogo(monkeypatch, asistente_ia.httpx.ConnectError("sin conexión"))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    with caplog.at_level("WARNING", logger="transcriptor.ia"):
+        asistente.generar_minuta(TEXTO2)
+    assert len(consultas) == 1  # la redacción y la revisión comparten el fallo
+    revision = cuerpos[-1]["messages"][-1]["content"]
+    assert all(linea in revision for linea in TEXTO2.splitlines())
+    assert ("No se pudo comprobar el límite de entrada de «gpt-4.1» para la revisión (No se pudo conectar con GitHub "
+            "Copilot: sin conexión); se revisa con la transcripción completa.") in caplog.text
+    asistente.generar_resumen(TEXTO2)  # otra generación sí vuelve a consultar
+    assert len(consultas) == 2
+
+
+def test_catalogo_sin_el_modelo_revisa_con_la_transcripcion(monkeypatch, caplog):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("otro-modelo", 64000))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    with caplog.at_level("WARNING", logger="transcriptor.ia"):
+        asistente.generar_minuta(TEXTO2)
+    assert len(consultas) == 1
+    revision = cuerpos[-1]["messages"][-1]["content"]
+    assert all(linea in revision for linea in TEXTO2.splitlines())
+    assert ("No se pudo comprobar el límite de entrada de «gpt-4.1» para la revisión: el catálogo no lo informa; se "
+            "revisa con la transcripción completa.") in caplog.text
 
 
 @pytest.mark.parametrize("respuesta", [
