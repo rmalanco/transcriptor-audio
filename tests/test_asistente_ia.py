@@ -189,7 +189,24 @@ def test_revision_que_pierde_secciones_se_descarta(monkeypatch):
     respuestas = iter([completo, "## Resumen\nsolo esto"])
     asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
     monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
-    assert asistente.generar_resumen("texto") == completo
+    resumen = asistente.generar_resumen("texto")
+    assert resumen.startswith(completo)
+    assert ("\n---\n\n> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones "
+            "obligatorias; este documento no está revisado.") in resumen
+
+
+def test_revision_que_pierde_secciones_lo_dice_y_no_cuenta_como_revisada(monkeypatch):
+    completo = "## Resumen\nt\n### Puntos clave\n- a\n### Conclusiones\n- b"
+    respuestas = iter([completo, "## Resumen\nsolo esto"])
+    prompts = []
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar",
+                        lambda prompt, cancelar=None: prompts.append(prompt) or next(respuestas))
+    resumen = asistente.generar_resumen("texto")
+    assert resumen.startswith(completo)
+    assert ("\n---\n\n> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones "
+            "obligatorias; este documento no está revisado.") in resumen
+    assert not any("Nota de la aplicación" in prompt for prompt in prompts)
 
 
 def _minuta(tareas=("Enviar el informe",), acuerdos=("Se aprueba el presupuesto",), frase="Revisar el plan"):
@@ -265,6 +282,69 @@ def test_revision_de_resumen_no_aplica_la_regla_de_tareas(monkeypatch):
     resumen = asistente.generar_resumen("texto")
 
     assert "- b" not in resumen  # la revisión sin el punto «b» se acepta
+
+
+def test_revision_aceptada_no_lleva_nota_de_descartada(monkeypatch):
+    redaccion = _minuta(frase="la entrega está sujeta a validación")
+    revision = _minuta(frase="la entrega llega si me llegan los datos")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "la entrega llega si me llegan los datos" in minuta
+    assert "se descartó" not in minuta
+
+
+def test_revision_descartada_con_varias_partes_no_dice_que_se_reviso(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    revision = MINUTA_MODELO.split("## Próximos pasos")[0].rstrip()  # pierde una sección obligatoria
+    _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                  else revision if "DOCUMENTO:" in cuerpo["messages"][-1]["content"] else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+
+    minuta = asistente.generar_minuta(texto, fecha="29 de septiembre de 2026")
+
+    descartada = ("> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias; "
+                  "este documento no está revisado.")
+    partes = "> Nota de la aplicación: la transcripción se procesó en 2 partes"
+    assert descartada in minuta
+    assert minuta.index(descartada) < minuta.index(partes)
+    assert minuta.count("\n---\n") == 1  # las dos notas bajo una sola línea horizontal
+    assert minuta.endswith("antes de darlo por bueno.")
+    assert "La revisión de fidelidad se hizo" not in minuta
+
+
+def test_revision_que_pierde_secciones_y_tareas_da_el_motivo_de_secciones(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor"))
+    revision = _minuta(tareas=("Enviar el informe",)).split("## Próximos pasos")[0].rstrip()  # pierde sección y tarea
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert ("la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está "
+            "revisado.") in minuta
+    assert "quitaba tareas o acuerdos" not in minuta
+
+
+def test_revision_descartada_por_tareas_lo_dice(monkeypatch):
+    # Provisional: R4 sustituye este caso por la reposición marcada con «[comprobar]»
+    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor", "Revisar el contrato"))
+    revision = _minuta(tareas=("Enviar el informe", "Pagar el proveedor"))
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "Revisar el contrato" in minuta  # la fila sigue: la revisión se descarta entera
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba "
+                           "tareas o acuerdos; este documento no está revisado.")
 
 
 class _RespuestaFalsa:

@@ -156,14 +156,15 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 
 ### Notas de la aplicación juntas
 - Given un documento que lleva varias notas de la aplicación (respuesta cortada, notas de partes cortadas, secciones que
-  no se pudieron pedir de nuevo o que faltan, revisión no completada y, si está redactado a partir de notas de varias
-  partes, la de las partes), when termina la generación, then todas van bajo una sola línea horizontal, separadas por
-  una línea en blanco, en este orden: respuesta cortada, notas de partes cortadas, secciones que no se pudieron pedir
-  de nuevo, secciones que faltan, revisión no completada y, la última, la de las partes («> Nota de la aplicación: la
-  transcripción se procesó en N partes…»); el título y la fecha no cambian.
+  no se pudieron pedir de nuevo o que faltan, revisión no completada o descartada y, si está redactado a partir de notas
+  de varias partes, la de las partes), when termina la generación, then todas van bajo una sola línea horizontal,
+  separadas por una línea en blanco, en este orden: respuesta cortada, notas de partes cortadas, secciones que no se
+  pudieron pedir de nuevo, secciones que faltan, revisión no completada o descartada y, la última, la de las partes
+  («> Nota de la aplicación: la transcripción se procesó en N partes…»); el título y la fecha no cambian.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
+Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
 
 ### Fallo de una parte
 - Given una transcripción que se procesa en 8 partes y la parte 7 falla (por ejemplo, Copilot responde 429 en todos sus
@@ -209,18 +210,32 @@ Origen: docs/historias/hechas/2026-11-22-16-limite-de-entrada.md
 
 ### Revisión de fidelidad contra las notas
 - Given la revisión de fidelidad activada y una transcripción procesada en N partes, when se genera el documento, then
-  durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y la nota añade «La
-  revisión de fidelidad se hizo contra esas notas, no contra la transcripción.».
+  durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y, si la revisión se
+  aceptó, la nota añade «La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.»; si la
+  revisión se descartó, la nota no lo dice.
 - Given la revisión de fidelidad activada y una transcripción que cabe en una sola parte, when se genera el documento,
   then la línea de estado dice «Revisando fidelidad con la transcripción…».
+- Given la revisión de fidelidad activada, una transcripción de 2 partes y una revisión de minuta que pierde «## Próximos
+  pasos», when se genera la minuta, then la minuta lleva la nota «> Nota de la aplicación: la revisión de fidelidad se
+  descartó porque quitaba secciones obligatorias; este documento no está revisado.» antes que la de las partes, bajo una
+  sola línea horizontal; la de las partes termina en «…antes de darlo por bueno.» y la minuta no contiene «La revisión
+  de fidelidad se hizo». La línea de estado sigue diciendo «Revisando fidelidad con las notas de las 2 partes…».
 
 Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
+Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
 
 ### Revisión de fidelidad que borra tareas o acuerdos
-- Given la revisión de fidelidad activada, when la revisión de una minuta deja la tabla de tareas con menos filas o la sección de acuerdos con menos viñetas, then se descarta y se conserva la minuta anterior a la revisión.
-- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta mientras conserve las secciones.
+- Given la revisión de fidelidad activada y una minuta de una parte, when la revisión pierde una sección y una fila de la tabla de tareas, then se descarta, se conserva la minuta anterior a la revisión y la nota dice «… se descartó porque quitaba secciones obligatorias; este documento no está revisado.» (gana el motivo de secciones).
+- Given la revisión de fidelidad activada y una minuta de una parte, when la revisión de una minuta deja la tabla de tareas con menos filas o la sección de acuerdos con menos viñetas, then se descarta, se conserva la minuta anterior a la revisión, con esa fila, y la nota dice «… se descartó porque quitaba tareas o acuerdos; este documento no está revisado.». Este motivo es provisional: lo sustituye la reposición marcada con «[comprobar]».
+- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta mientras conserve las secciones, también si quita una viñeta de «### Puntos clave».
 
 Origen: carril S, 2026-11-22: una revisión de minuta que deja menos tareas o acuerdos se descarta y se conserva la anterior (decisión del usuario, punto #24)
+Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
+
+### Revisión que pierde secciones
+- Given la revisión de fidelidad activada, una transcripción de una sola parte y una revisión de resumen que devuelve el documento sin «### Puntos clave» ni «### Conclusiones», when genero el resumen, then el resumen empieza por el redactado, con todas sus secciones y sin ninguna corrección de la revisión, y contiene, tras «\n---\n\n», «> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está revisado.». La nota no se envía a Copilot.
+
+Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
 
 ### Sesión rechazada por Copilot
 - Given que Copilot rechaza el token (401) al generar o al abrir la sesión del modo `auto`, when el token es el de la sesión guardada por la app o el de opencode, then se abre el inicio de sesión, sin borrar el token de opencode ni un token propio distinto del rechazado.

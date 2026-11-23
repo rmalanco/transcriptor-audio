@@ -203,6 +203,7 @@ class _Documento:
     error_revision: Optional[str] = None  # motivo si la revisión de fidelidad no se pudo completar
     corte: Optional[str] = None  # motivo si Copilot cortó la respuesta que quedó en el documento
     cortes_partes: dict = field(default_factory=dict)  # parte -> motivo, de las notas que Copilot cortó
+    revision_descartada: Optional[str] = None  # motivo si la revisión se descartó y se conservó el documento anterior
 
 
 def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
@@ -326,7 +327,8 @@ def _nota_de_cortes_de_partes(cortes: dict, total: int) -> str:
 
 def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
                            error_secciones: Optional[str] = None, error_revision: Optional[str] = None,
-                           corte: Optional[str] = None, cortes_partes: Optional[dict] = None) -> str:
+                           corte: Optional[str] = None, cortes_partes: Optional[dict] = None, *,
+                           revision_descartada: Optional[str] = None) -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
     (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
     `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
@@ -349,6 +351,9 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
                          "o complétalo con la transcripción.")
     if error_revision:
         citas.append(f"> Nota de la aplicación: la revisión de fidelidad no se pudo completar ({error_revision}); "
+                     "este documento no está revisado.")
+    if revision_descartada:
+        citas.append(f"> Nota de la aplicación: la revisión de fidelidad se descartó porque {revision_descartada}; "
                      "este documento no está revisado.")
     if partes >= 2:
         citas.append(_cita_de_partes(partes, revisado))
@@ -761,6 +766,7 @@ class AsistenteIA:
                     corte = _corte(reintento)  # el motivo es el de la respuesta que quedó
 
         error_revision = None
+        revision_descartada = None
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
             if on_progreso:
@@ -785,12 +791,17 @@ class AsistenteIA:
                 if conserva_secciones and not pierde_tareas_o_acuerdos:
                     documento = revisado
                     corte = _corte(revisado)  # el motivo es el de la respuesta que quedó
+                elif not conserva_secciones:
+                    revision_descartada = "quitaba secciones obligatorias"  # gana si pierde secciones y tareas
+                else:
+                    revision_descartada = "quitaba tareas o acuerdos"  # provisional: R4 lo sustituye
         if postproceso:
             documento = postproceso(documento)
         faltan_al_final = secciones_faltantes(documento, secciones or [])
         # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
         return _Documento(documento, len(bloques), faltan_al_final,
-                          error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes)
+                          error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes,
+                          revision_descartada=revision_descartada)
 
     def _comprobar_limite_de_entrada(self, prompt: str, partes: int, cancelar: Optional[threading.Event]) -> None:
         """Antes de redactar a partir de notas: si la petición entera supera el límite de entrada del modelo que se
@@ -825,9 +836,10 @@ class AsistenteIA:
     def _con_nota(self, d: _Documento) -> str:
         """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del
         post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
-        revisado = self.revision_fidelidad and not d.error_revision  # sin revisión, no se dice que se revisó
+        # sin revisión, o con una revisión que no se completó o se descartó, no se dice que se revisó
+        revisado = self.revision_fidelidad and not d.error_revision and not d.revision_descartada
         nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision, d.corte,
-                                      d.cortes_partes)
+                                      d.cortes_partes, revision_descartada=d.revision_descartada)
         return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:
