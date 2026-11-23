@@ -121,17 +121,20 @@ Dependencias entre módulos (quién importa a quién):
 
 ### Acceso a GitHub Copilot — `copilot.py`
 
-- Sesión y token: `leer_token(enterprise_url=None) -> Optional[Sesion]`, `guardar_token`, `cerrar_sesion`,
-  `invalidar_token`.
+- Sesión y token: `leer_token(enterprise_url=None) -> Optional[Sesion]` (un archivo propio mal formado —no JSON, no UTF-8,
+  token o dominio que no son texto— cuenta como ausente), `guardar_token`, `cerrar_sesion`, `invalidar_token`.
+- Origen de la sesión, sin red y sin escribir: `estado_sesion(enterprise_url=None) -> EstadoSesion` (origen
+  `ORIGEN_VARIABLE`, `ORIGEN_APP`, `ORIGEN_OPENCODE` o `None`, y `hay_token_propio`) y
+  `describir_sesion(estado) -> DescripcionSesion` (`texto`, `puede_iniciar`, `texto_iniciar`, `puede_cerrar`).
 - Login: `iniciar_login(enterprise_url=None) -> CodigoDispositivo`, `esperar_login(codigo, …) -> str`.
 - Modelos: `listar_modelos(sesion)`, `limites_de_entrada(sesion) -> dict[str, int]`, `precio_entrada(modelo)`, `modelos_economicos(sesion)`,
   `familia_excluida(id_modelo) -> Optional[str]`, `opciones_de_modelo(modelos, configurado)`,
   `cargar_opciones_de_modelo(sesion, actual) -> list[str]` (una sola consulta a `/models`, sin sesión `auto`) y
   `abrir_sesion_auto(sesion) -> SesionAuto`.
 - HTTP: `url_api(enterprise_url=None)`, `cabeceras(token, iniciador="user")`, `normalizar_dominio(url)`.
-- Tipos: `Sesion(token, enterprise_url, origen)`, `CodigoDispositivo`, `SesionAuto` (con `.vigente()`), `ErrorCopilot` y sus subclases `ErrorSesionCopilot` (401 de GitHub: hay que iniciar
+- Tipos: `Sesion(token, enterprise_url, origen)` (el `token` no sale en el `repr`), `EstadoSesion`, `DescripcionSesion`, `CodigoDispositivo`, `SesionAuto` (con `.vigente()`), `ErrorCopilot` y sus subclases `ErrorSesionCopilot` (401 de GitHub: hay que iniciar
   sesión) y `ErrorModeloCopilot` (el modo `auto` no ofrece ningún modelo utilizable).
-- Constantes: `RUTA_TOKEN` (`~/.local/share/transcriptor-audio/copilot.json`), `RUTA_AUTH_OPENCODE`
+- Constantes: `ORIGEN_VARIABLE`, `ORIGEN_APP`, `ORIGEN_OPENCODE`, `RUTA_TOKEN` (`~/.local/share/transcriptor-audio/copilot.json`), `RUTA_AUTH_OPENCODE`
   (`~/.local/share/opencode/auth.json`), `VARIABLE_ENTORNO = "COPILOT_GITHUB_TOKEN"`, `CLIENT_ID`, `API_VERSION`,
   `USER_AGENT`, `ESPERA_EXTRA`, `PRECIO_MAX_ECONOMICO = 50`, `FAMILIAS_EXCLUIDAS = ("kimi", "mistral", "codestral", "devstral", "ministral", "pixtral", "magistral")`,
   `MODELO_AUTO = "auto"`, `MARGEN_RENOVACION_AUTO` (300 s).

@@ -270,3 +270,13 @@ Origen: carril S, 2026-11-22: la ventana no consulta Copilot al arrancar y «↻
 - Given que la fecha no se puede leer (el archivo desaparece mientras se lee su fecha o la fecha guardada en el historial no es válida), when se genera la minuta, then la línea `**Fecha:**` dice «No especificada» y la minuta se genera igual.
 
 Origen: docs/historias/hechas/2026-11-22-10-texto-ruta-y-fecha-de-documentos.md
+
+### Archivo propio de sesión mal formado
+- Given un archivo propio de sesión de Copilot que no es JSON, que no es UTF-8, o cuyo token o dominio no son texto, when la app busca la sesión, then lo trata como si no hubiera sesión propia: usa la sesión de opencode si la hay, y la app no falla.
+
+Origen: docs/historias/hechas/2026-11-22-25-origen-de-la-sesion.md
+
+### Token de Copilot fuera de las representaciones
+- Given una sesión de Copilot guardada con un token, when se representa la sesión o se describe su estado, then el token no aparece en el texto que se obtiene.
+
+Origen: docs/historias/hechas/2026-11-22-25-origen-de-la-sesion.md

@@ -15,7 +15,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -33,6 +33,8 @@ RUTA_TOKEN = Path("~/.local/share/transcriptor-audio/copilot.json").expanduser()
 RUTA_AUTH_OPENCODE = Path("~/.local/share/opencode/auth.json").expanduser()
 VARIABLE_ENTORNO = "COPILOT_GITHUB_TOKEN"
 
+ORIGEN_VARIABLE, ORIGEN_APP, ORIGEN_OPENCODE = "variable", "app", "opencode"
+
 
 class ErrorCopilot(Exception):
     pass
@@ -48,7 +50,7 @@ class ErrorModeloCopilot(ErrorCopilot):
 
 @dataclass
 class Sesion:
-    token: str
+    token: str = field(repr=False)  # el token no debe salir en logs ni en trazas
     enterprise_url: Optional[str] = None  # dominio de GitHub Enterprise (p. ej. "empresa.ghe.com"); None = github.com
     origen: str = ""
 
@@ -140,12 +142,76 @@ def leer_token(enterprise_url: Optional[str] = None) -> Optional[Sesion]:
             continue
         try:
             token, dominio_guardado = extraer(json.loads(ruta.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, OSError, AttributeError):
+        except (ValueError, OSError, AttributeError):  # ValueError: JSON inválido o texto que no es UTF-8
             continue
+        if not isinstance(dominio_guardado, (str, type(None))):
+            continue  # archivo mal formado: cuenta como «sin sesión», igual que un JSON inválido
         # Un token de github.com no sirve para GitHub Enterprise, ni al revés
-        if token and normalizar_dominio(dominio_guardado) == dominio:
+        if isinstance(token, str) and token and normalizar_dominio(dominio_guardado) == dominio:
             return Sesion(token.strip(), dominio, str(ruta))
     return None
+
+
+@dataclass(frozen=True)
+class EstadoSesion:
+    origen: Optional[str]  # ORIGEN_VARIABLE, ORIGEN_APP, ORIGEN_OPENCODE o None
+    hay_token_propio: bool  # el archivo propio tiene un token de texto, aunque la variable lo tape o sea de otro dominio
+
+
+def _hay_token_propio() -> bool:
+    """El archivo propio se puede leer, es un objeto y su token es texto no vacío (antes de quitar espacios, como
+    `leer_token`). Cualquier fallo de lectura o de forma cuenta como «no»."""
+    try:
+        datos = json.loads(RUTA_TOKEN.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    token = datos.get("token") if isinstance(datos, dict) else None
+    return isinstance(token, str) and token != ""
+
+
+def estado_sesion(enterprise_url: Optional[str] = None) -> EstadoSesion:
+    """De dónde sale la sesión que usaría la app y si hay una sesión propia guardada. Sin red y sin escribir."""
+    sesion = leer_token(enterprise_url)
+    origenes = {VARIABLE_ENTORNO: ORIGEN_VARIABLE, str(RUTA_TOKEN): ORIGEN_APP,
+                str(RUTA_AUTH_OPENCODE): ORIGEN_OPENCODE}
+    origen = origenes.get(sesion.origen) if sesion else None
+    return EstadoSesion(origen, _hay_token_propio())
+
+
+_FRASE_ORIGEN = {
+    None: "No has iniciado sesión en GitHub Copilot.",
+    ORIGEN_APP: "Sesión iniciada con la app.",
+    ORIGEN_OPENCODE: "Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode.",
+    ORIGEN_VARIABLE: "Se usa el token de la variable de entorno COPILOT_GITHUB_TOKEN. La app no puede cerrarlo: quita "
+                     "la variable para usar otra sesión.",
+}
+
+
+@dataclass(frozen=True)
+class DescripcionSesion:
+    texto: str
+    puede_iniciar: bool
+    texto_iniciar: str  # «Iniciar sesión» o «Iniciar sesión con la app»
+    puede_cerrar: bool  # igual que hay_token_propio
+
+
+def describir_sesion(estado: EstadoSesion) -> DescripcionSesion:
+    """Textos y botones de la sección de sesión, según el origen y si hay una sesión propia guardada."""
+    frases = [_FRASE_ORIGEN[estado.origen]]
+    if estado.hay_token_propio and estado.origen != ORIGEN_APP:
+        if estado.origen == ORIGEN_VARIABLE:
+            frases.append("Hay además una sesión guardada por la app que ahora no se usa.")
+        else:
+            frases.append("Hay una sesión guardada por la app para otro dominio de GitHub.")
+    if estado.origen is not None:
+        frases.append("La sesión se comprueba al usarla.")
+    puede_iniciar = estado.origen in (None, ORIGEN_OPENCODE)
+    return DescripcionSesion(
+        texto=" ".join(frases),
+        puede_iniciar=puede_iniciar,
+        texto_iniciar="Iniciar sesión con la app" if estado.origen == ORIGEN_OPENCODE else "Iniciar sesión",
+        puede_cerrar=estado.hay_token_propio,
+    )
 
 
 def guardar_token(token: str, enterprise_url: Optional[str] = None) -> None:

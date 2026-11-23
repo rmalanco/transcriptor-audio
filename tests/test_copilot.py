@@ -68,6 +68,123 @@ def test_el_origen_del_token_se_informa(monkeypatch):
     assert copilot.leer_token().origen == copilot.VARIABLE_ENTORNO  # la variable gana a todo
 
 
+def _solo_opencode(_monkeypatch):
+    copilot.RUTA_AUTH_OPENCODE.parent.mkdir(parents=True)
+    copilot.RUTA_AUTH_OPENCODE.write_text(json.dumps({"github-copilot": {"refresh": "gho_oc"}}))
+
+
+def _app_y_opencode(monkeypatch):
+    _solo_opencode(monkeypatch)
+    copilot.guardar_token("gho_app")
+
+
+def _variable_y_app(monkeypatch):
+    copilot.guardar_token("gho_app")
+    monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_env")
+
+
+def _json_invalido(_monkeypatch):
+    copilot.RUTA_TOKEN.parent.mkdir(parents=True)
+    copilot.RUTA_TOKEN.write_text("{no es json")
+
+
+def _app_de_otro_dominio(_monkeypatch):
+    copilot.guardar_token("gho_ghe", "empresa.ghe.com")
+
+
+def _instantanea(raiz):
+    """Rutas de `raiz` con su contenido y su fecha de modificación, para ver si algo se crea o cambia."""
+    return {ruta: (ruta.read_bytes() if ruta.is_file() else None, ruta.stat().st_mtime_ns)
+            for ruta in raiz.rglob("*")}
+
+
+@pytest.mark.parametrize("preparar, origen, hay_token_propio", [
+    (None, None, False),
+    (_solo_opencode, "opencode", False),
+    (_app_y_opencode, "app", True),
+    (_variable_y_app, "variable", True),
+    (_json_invalido, None, False),
+    (_app_de_otro_dominio, None, True),
+])
+def test_estado_sesion_segun_el_origen_sin_red_ni_escritura(monkeypatch, tmp_path, preparar, origen, hay_token_propio):
+    def sin_red(*args, **kwargs):
+        raise AssertionError("no debe haber peticiones de red")
+    monkeypatch.setattr(copilot.httpx, "get", sin_red)
+    monkeypatch.setattr(copilot.httpx, "post", sin_red)
+    if preparar:
+        preparar(monkeypatch)
+    antes = _instantanea(tmp_path)
+
+    estado = copilot.estado_sesion(None)
+
+    assert estado == copilot.EstadoSesion(origen, hay_token_propio)
+    assert _instantanea(tmp_path) == antes
+    if preparar is None:
+        assert not (tmp_path / "app").exists() and not (tmp_path / "opencode").exists()
+
+
+@pytest.mark.parametrize("token_guardado", [5, ["gho_x"]])
+def test_archivo_propio_con_token_que_no_es_texto_no_lanza(token_guardado):
+    copilot.RUTA_TOKEN.parent.mkdir(parents=True)
+    copilot.RUTA_TOKEN.write_text(json.dumps({"token": token_guardado}))
+    assert copilot.leer_token() is None
+    assert copilot.estado_sesion(None) == copilot.EstadoSesion(None, False)
+    # Igual que un JSON inválido: si hay sesión de opencode, se usa esa
+    copilot.RUTA_AUTH_OPENCODE.parent.mkdir(parents=True)
+    copilot.RUTA_AUTH_OPENCODE.write_text(json.dumps({"github-copilot": {"refresh": "gho_oc"}}))
+    assert copilot.estado_sesion(None) == copilot.EstadoSesion("opencode", False)
+
+
+@pytest.mark.parametrize("contenido", [b"\xff\xfe\x00", json.dumps({"token": "gho_x", "enterprise_url": 5}).encode()],
+                         ids=["no_utf8", "dominio_no_texto"])
+def test_archivo_propio_mal_formado_no_lanza(contenido):
+    """Un archivo propio que no es UTF-8 o con un dominio que no es texto cuenta como «sin sesión», igual que un JSON
+    inválido: ni leer_token ni estado_sesion lanzan."""
+    copilot.RUTA_TOKEN.parent.mkdir(parents=True)
+    copilot.RUTA_TOKEN.write_bytes(contenido)
+    assert copilot.leer_token() is None
+    assert copilot.estado_sesion(None).origen is None
+
+
+@pytest.mark.parametrize("origen, hay_token_propio, texto, puede_iniciar, texto_iniciar, puede_cerrar", [
+    (None, False, "No has iniciado sesión en GitHub Copilot.", True, "Iniciar sesión", False),
+    (None, True, "No has iniciado sesión en GitHub Copilot. Hay una sesión guardada por la app para otro dominio de "
+                 "GitHub.", True, "Iniciar sesión", True),
+    ("app", True, "Sesión iniciada con la app. La sesión se comprueba al usarla.", False, None, True),
+    ("opencode", False, "Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode. La sesión se "
+                        "comprueba al usarla.", True, "Iniciar sesión con la app", False),
+    ("opencode", True, "Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode. Hay una sesión "
+                       "guardada por la app para otro dominio de GitHub. La sesión se comprueba al usarla.",
+     True, "Iniciar sesión con la app", True),
+    ("variable", False, "Se usa el token de la variable de entorno COPILOT_GITHUB_TOKEN. La app no puede cerrarlo: quita "
+                        "la variable para usar otra sesión. La sesión se comprueba al usarla.", False, None, False),
+    ("variable", True, "Se usa el token de la variable de entorno COPILOT_GITHUB_TOKEN. La app no puede cerrarlo: quita "
+                       "la variable para usar otra sesión. Hay además una sesión guardada por la app que ahora no se "
+                       "usa. La sesión se comprueba al usarla.", False, None, True),
+])
+def test_describir_sesion_texto_y_botones(origen, hay_token_propio, texto, puede_iniciar, texto_iniciar, puede_cerrar):
+    descripcion = copilot.describir_sesion(copilot.EstadoSesion(origen, hay_token_propio))
+    assert descripcion.texto == texto
+    assert descripcion.puede_iniciar is puede_iniciar
+    if puede_iniciar:  # el texto del botón solo importa cuando el botón existe
+        assert descripcion.texto_iniciar == texto_iniciar
+    assert descripcion.puede_cerrar is puede_cerrar
+
+
+@pytest.mark.parametrize("por_variable", [False, True])
+def test_el_token_no_aparece_en_repr_ni_en_los_textos(monkeypatch, por_variable):
+    if por_variable:
+        monkeypatch.setenv(copilot.VARIABLE_ENTORNO, "gho_secreto")
+    else:
+        copilot.guardar_token("gho_secreto")
+    sesion = copilot.leer_token()
+    estado = copilot.estado_sesion(None)
+    descripcion = copilot.describir_sesion(estado)
+    assert sesion.token == "gho_secreto"  # quien lo pide por su nombre sigue teniéndolo
+    for texto in (repr(sesion), repr(estado), descripcion.texto, descripcion.texto_iniciar):
+        assert "gho_secreto" not in texto
+
+
 class _RespuestaSinJSON:
     """Respuesta 200 que no es JSON (p. ej. una página de un portal cautivo)."""
     status_code = 200
