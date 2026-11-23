@@ -25,7 +25,8 @@ MODELO_POR_DEFECTO = "gpt-4.1"
 LIMITE_NOTAS_EN_CACHE = 64  # partes; equivale a unas 8 transcripciones de 8 partes
 # Límite de entrada: solo se consulta el catálogo si la redacción estimada supera este umbral (historia 16)
 UMBRAL_COMPROBAR_LIMITE = 32_000  # tokens estimados
-CARACTERES_POR_TOKEN = 4  # estimación sin margen: con tokenizadores de Claude suele quedarse corta
+# Relación medida (diseño 07, «Comprobación real», 2026-11-22): 164 993 caracteres = 70 318 tokens en claude-haiku-5.5, ≈ 2,35
+CARACTERES_POR_TOKEN = 2.3
 
 PROMPT_SISTEMA = """Eres un asistente experto en redactar documentos en español a partir de transcripciones \
 automáticas de audio. Las transcripciones pueden contener errores de reconocimiento, muletillas y \
@@ -131,6 +132,12 @@ Fragmento:
 SECCIONES_RESUMEN = ["## Resumen", "### Puntos clave", "### Conclusiones"]
 SECCIONES_MINUTA = ["# Minuta", "## Objetivo", "## Temas tratados", "## Acuerdos",
                     "## Tareas y pendientes", "## Próximos pasos"]
+
+
+def estimar_tokens(texto: str) -> int:
+    """Tokens estimados de un texto: caracteres entre CARACTERES_POR_TOKEN, redondeado hacia arriba. La división es
+    entera para que no haya error de coma flotante (230 caracteres son 100 tokens y 231, 101)."""
+    return -(-len(texto) * 10 // round(CARACTERES_POR_TOKEN * 10))
 
 
 def secciones_faltantes(documento: str, secciones: list[str]) -> list[str]:
@@ -987,7 +994,7 @@ class AsistenteIA:
         """Antes de redactar a partir de notas: si la petición entera supera el límite de entrada del modelo que se
         usará, no se envía (Copilot la rechazaría con un error poco claro). Solo se consulta el catálogo si la
         estimación supera el umbral."""
-        estimado = math.ceil((len(PROMPT_SISTEMA) + len(prompt)) / CARACTERES_POR_TOKEN)
+        estimado = estimar_tokens(PROMPT_SISTEMA + prompt)
         if estimado <= UMBRAL_COMPROBAR_LIMITE:
             return
         if cancelar and cancelar.is_set():

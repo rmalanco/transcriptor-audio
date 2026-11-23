@@ -114,9 +114,10 @@ Dependencias entre módulos (quién importa a quién):
 - `asistente_ia.py:ErrorAsistenteIA` y sus subclases `ErrorSinSesionCopilot` (hay que iniciar sesión) y `ErrorModeloIA`
   (modelo vacío, de una familia no autorizada o sin ninguno válido en `auto`: no se envía nada).
 - Funciones de apoyo: `dividir_texto`, `limpiar_respuesta`, `normalizar_tabla_tareas`, `secciones_faltantes`,
-  `notas_de_la_aplicacion`, `nota_de_notas`, `reponer_lo_quitado`.
+  `notas_de_la_aplicacion`, `nota_de_notas`, `reponer_lo_quitado`, `estimar_tokens(texto) -> int` (caracteres entre
+  `CARACTERES_POR_TOKEN`, redondeado hacia arriba).
 - Constantes: `NOMBRE_PROVEEDOR = "GitHub Copilot"`, `MODELO_POR_DEFECTO = "gpt-4.1"`, `LIMITE_NOTAS_EN_CACHE = 64`,
-  `TOPE_RETRY_AFTER = 60`, `MAX_MOTIVO_NOTA = 120`, `MARCA_REPUESTA = "[comprobar]"`, `PROMPT_SISTEMA`, `PROMPT_RESUMEN`, `PROMPT_MINUTA`,
+  `TOPE_RETRY_AFTER = 60`, `MAX_MOTIVO_NOTA = 120`, `MARCA_REPUESTA = "[comprobar]"`, `CARACTERES_POR_TOKEN = 2.3`, `PROMPT_SISTEMA`, `PROMPT_RESUMEN`, `PROMPT_MINUTA`,
   `PROMPT_REVISION`, `PROMPT_NOTAS_BLOQUE`, `SECCIONES_RESUMEN`, `SECCIONES_MINUTA`.
 
 ### Acceso a GitHub Copilot — `copilot.py`
@@ -296,7 +297,7 @@ Dependencias entre módulos (quién importa a quién):
 - Una transcripción vacía lanza `ErrorAsistenteIA` (`asistente_ia.py:AsistenteIA._generar`).
 - Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad compara
   contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Si la estimación de la petición
-  de redacción (caracteres / 4) supera 32 000 tokens, antes de redactar se consulta una vez por asistente
+  de redacción (caracteres / 2,3, `asistente_ia.py:estimar_tokens`) supera 32 000 tokens, antes de redactar se consulta una vez por asistente
   `copilot.py:limites_de_entrada`; si la estimación supera el límite del modelo, se lanza `ErrorAsistenteIA` y la redacción
   no se envía. Un fallo del catálogo, o un modelo sin límite, no bloquea: se redacta como hoy
   (`asistente_ia.py:AsistenteIA._comprobar_limite_de_entrada`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`). Si Copilot corta la redacción, la minuta o el resumen llevan la nota del corte con su motivo, primero bajo la línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`).

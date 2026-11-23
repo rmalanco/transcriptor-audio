@@ -1880,6 +1880,13 @@ def _catalogo_con_limite(modelo: str, limite) -> _Respuesta:
     return _Respuesta({"data": [{"id": modelo, "capabilities": {"limits": {"max_prompt_tokens": limite}}}]})
 
 
+def test_estimar_tokens_usa_la_relacion_medida():
+    assert asistente_ia.CARACTERES_POR_TOKEN == 2.3
+    assert asistente_ia.estimar_tokens("x" * 230) == 100  # sin error de coma flotante: 230 / 2,3 es exacto
+    assert asistente_ia.estimar_tokens("x" * 231) == 101  # y lo que pasa de 100 tokens cuenta como uno más
+    assert asistente_ia.estimar_tokens("") == 0
+
+
 def test_notas_cortas_o_una_sola_parte_no_consultan_el_catalogo(monkeypatch):
     _prohibir_red(monkeypatch)  # ni catálogo ni sesión: el test falla si se llama
     cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
@@ -1908,7 +1915,25 @@ def test_notas_que_superan_el_limite_no_envian_la_redaccion(monkeypatch):
     with pytest.raises(ErrorAsistenteIA) as error:
         asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)
     estimado = int(re.search(r"unos (\d+) tokens", str(error.value)).group(1))
-    assert 74_000 <= estimado <= 78_000  # el criterio dice unos 76 000 tokens
+    assert 129_000 <= estimado <= 134_000  # el criterio dice unos 131 000 tokens
+    assert str(error.value) == (
+        f"las notas de las 3 partes suman unos {estimado} tokens y el modelo «gpt-4.1» admite como máximo 64000 "
+        "tokens de entrada, así que no se envió la redacción. Elige en el selector un modelo con más contexto y vuelve "
+        "a generar; con otro modelo se pedirán de nuevo las notas de todas las partes.")
+    assert len(cuerpos) == 3 and all(_es_prompt_de_notas(cuerpo) for cuerpo in cuerpos)  # ninguna redacción
+    assert len(consultas) == 1
+
+
+def test_notas_que_cabian_con_cuatro_caracteres_por_token_ya_no_se_envian(monkeypatch):
+    import re
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(60_000) if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)
+    estimado = int(re.search(r"unos (\d+) tokens", str(error.value)).group(1))
+    assert 78_000 <= estimado <= 81_000
     assert str(error.value) == (
         f"las notas de las 3 partes suman unos {estimado} tokens y el modelo «gpt-4.1» admite como máximo 64000 "
         "tokens de entrada, así que no se envió la redacción. Elige en el selector un modelo con más contexto y vuelve "
@@ -1938,11 +1963,11 @@ def test_repetir_con_el_mismo_modelo_no_pide_nada_y_repite_el_error(monkeypatch)
 
 def test_notas_que_caben_consultan_el_catalogo_una_vez_y_redactan(monkeypatch):
     consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
-    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(60_000) if _es_prompt_de_notas(cuerpo)
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(40_000) if _es_prompt_de_notas(cuerpo)
                             else RESUMEN_MODELO if "Redacta un resumen" in cuerpo["messages"][-1]["content"]
                             else MINUTA_MODELO)
     asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
-    minuta = asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)  # notas de 60 000 caracteres: unos 46 000 tokens
+    minuta = asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)  # notas de 40 000 caracteres: unos 53 000 tokens
     resumen = asistente.generar_resumen(TEXTO_TRES_PARTES_LARGO)
     assert len(consultas) == 1  # una sola consulta del catálogo para la minuta y el resumen
     assert len(cuerpos) == 3 + 2  # 3 notas, y después la minuta y el resumen, que sí se envían
