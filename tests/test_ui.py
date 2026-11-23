@@ -56,3 +56,20 @@ def test_auto_sigue_siendo_autodetectar():
 
     assert "Auto-detectar" in opciones_de_idioma("auto")
     assert codigo_de_idioma("Auto-detectar") == "auto"
+
+
+def test_el_hilo_de_transcripcion_no_lee_la_configuracion():
+    """Guardia (C0): el hilo de fondo recibe sus parámetros y no lee `self.configuracion`."""
+    import inspect
+    codigo = inspect.getsource(AppTranscriptor._procesar_transcripcion)
+    assert "self.configuracion" not in codigo
+    parametros = inspect.signature(AppTranscriptor._procesar_transcripcion).parameters
+    assert list(parametros)[1:] == ["opciones", "parametros"]
+
+
+def test_los_parametros_se_capturan_en_el_hilo_principal():
+    """C0: `_iniciar_transcripcion` captura `self.configuracion["transcripcion"]` y lanza el hilo con esos parámetros."""
+    import inspect
+    codigo = inspect.getsource(AppTranscriptor._iniciar_transcripcion)
+    assert 'self.configuracion["transcripcion"]' in codigo
+    assert "args=(opciones, parametros)" in codigo

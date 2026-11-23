@@ -74,7 +74,9 @@ Dependencias entre módulos (quién importa a quién):
   cancelar) -> TranscripcionPersistida`: avisa de `FASE_CARGANDO_MODELO` y `FASE_TRANSCRIBIENDO`, transcribe y guarda con
   `persistencia.py:persistir_transcripcion`. Lanza `InterruptedError` si se cancela (no guarda nada) y deja salir las
   excepciones del modelo; los fallos de guardado van en `TranscripcionPersistida.persistencia`. La ventana la llama desde
-  el hilo de fondo (`ui.py:AppTranscriptor._procesar_transcripcion`) y solo pinta el resultado.
+  el hilo de fondo (`ui.py:AppTranscriptor._procesar_transcripcion`) y solo pinta el resultado. Los parámetros de
+  decodificación llegan como argumento: `ui.py:AppTranscriptor._iniciar_transcripcion` los copia de
+  `self.configuracion["transcripcion"]` antes de lanzar el hilo, y el hilo no lee `self.configuracion`.
 
 ### Resumen y minuta — `asistente_ia.py`
 

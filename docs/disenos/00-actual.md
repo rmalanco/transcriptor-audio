@@ -116,8 +116,9 @@ a él. Los hilos de trabajo que crea la app son `daemon`: no impiden cerrar el p
   generación. Regla de oro 9: un hilo de fondo no llama a un widget, sino a `AppTranscriptor._en_ui(funcion, *args)`,
   que usa `self.after(0, …)` y no hace nada si la ventana se está cerrando (`_cerrando`). `_log` y `_actualizar_estado`
   ya pasan por ahí. El diálogo de login tiene su propio `_en_ui`.
-- **Hilo de la transcripción.** Uno solo a la vez (`_transcribiendo` mira si sigue vivo). Las opciones se leen en el
-  hilo principal antes de lanzarlo. Llama a `flujo_transcripcion.py:transcribir_y_persistir`, que elige el transcriptor (`transcriptor_para`), carga el
+- **Hilo de la transcripción.** Uno solo a la vez (`_transcribiendo` mira si sigue vivo). Las opciones y los parámetros de
+  decodificación (`configuracion["transcripcion"]`) se capturan en el hilo principal, en `_iniciar_transcripcion`, y se
+  pasan al hilo como argumentos; el hilo no lee `self.configuracion`. Llama a `flujo_transcripcion.py:transcribir_y_persistir`, que elige el transcriptor (`transcriptor_para`), carga el
   modelo, transcribe (`transcribir`) y, todavía en ese hilo, llama a `persistir_transcripcion`; después entrega el
   resultado con `_en_ui`. Se cancela con un `threading.Event`
   (`cancelar_flag`) que `TranscriptorAudio.transcribir` revisa tras cada segmento aceptado.

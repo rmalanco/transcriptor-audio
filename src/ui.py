@@ -632,8 +632,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.progress.set(0)
         self.tabs.set(TAB_TEXTO)
 
+        # Los parámetros del hilo de fondo también se capturan aquí: el hilo no lee la configuración (C0)
+        parametros = dict(self.configuracion["transcripcion"])
         self.transcripcion_thread = threading.Thread(
-            target=self._procesar_transcripcion, args=(opciones,), daemon=True
+            target=self._procesar_transcripcion, args=(opciones, parametros), daemon=True
         )
         self.transcripcion_thread.start()
         self._tick_tiempo()
@@ -644,7 +646,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
                        self.combo_dispositivo, self.combo_compute):
             widget.configure(state=estado)
 
-    def _procesar_transcripcion(self, opciones: OpcionesTranscripcion):
+    def _procesar_transcripcion(self, opciones: OpcionesTranscripcion, parametros: dict):
         try:
             self._log(f"Iniciando transcripción con modelo: {opciones.modelo}")
             anterior = self._transcriptor
@@ -663,7 +665,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
             try:
                 transcripcion = transcribir_y_persistir(
-                    transcriptor, opciones, self.configuracion["transcripcion"], self.historial,
+                    transcriptor, opciones, parametros, self.historial,
                     on_fase=on_fase, on_segmento=on_segmento, cancelar=self.cancelar_flag,
                 )
             finally:
