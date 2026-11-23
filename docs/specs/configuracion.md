@@ -120,8 +120,8 @@ Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
 
 ### Vista Configuración
-La vista de hoy tiene los grupos Transcripción y Salida; el resto (opciones avanzadas, Historial, IA y la sesión de
-GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
+La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida e Historial; el resto (IA y la
+sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
 vista solo cambia los controles del lateral de las claves guardadas.
 
 - Given el YAML del proyecto (`salida.formato: "txt"`, `modelo.nombre: "large-v3-turbo"`), sin `preferencias.json` y con
@@ -129,9 +129,9 @@ vista solo cambia los controles del lateral de las claves guardadas.
   botón de la barra), se elige `srt` en «Formato de salida» y se pulsa «Guardar», then el pie de la vista dice
   «Configuración guardada», `preferencias.json` queda exactamente `{"configuracion": {"salida": {"formato": "srt"}}}`,
   `config/settings.yaml` no cambia (mismos bytes y misma fecha de modificación), y al volver con `Ctrl+1` el selector de
-  formato del lateral muestra `srt` y el de modelo sigue en `tiny`. La vista muestra dos grupos, «Transcripción» (Modelo
+  formato del lateral muestra `srt` y el de modelo sigue en `tiny`. La vista muestra los grupos «Transcripción» (Modelo
   de Whisper, Idioma, Dispositivo, Precisión) y «Salida» (Formato de salida, Incluir marcas de tiempo, Marcas por
-  palabra), cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
+  palabra); desde la historia 22, también «Historial» y «Avanzado»; cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
   ninguna petición de red ni lee el token.
 - Given «Idioma» con `nl` escrito a mano, when se pulsa «Guardar», then `preferencias.json` guarda `transcripcion.idioma`
   = `nl` y el selector de idioma del lateral muestra `nl` y lo ofrece al final de su lista; y si después se cambia
@@ -141,5 +141,32 @@ vista solo cambia los controles del lateral de las claves guardadas.
   aparece el diálogo «Configuración» con «Espera a que termine el proceso en curso.», el pie de la vista muestra ese mismo
   texto, `preferencias.json` no cambia (ni se crea) y los controles del lateral conservan sus valores. Al terminar el
   proceso, «Guardar» funciona como en el primer criterio.
+- Given el YAML del proyecto (`transcripcion.beam_size: 5`, `transcripcion.no_speech_threshold: 0.6`) y sin
+  `preferencias.json`, when se abre «⚙ Configuración», then el grupo «Transcripción» muestra sus cuatro campos y un
+  «▸ Avanzado» plegado que oculta los siete de decodificación (Haz de búsqueda, Candidatos, Temperatura de Whisper,
+  Usar el texto anterior como contexto, Umbral de compresión, Umbral de probabilidad, Umbral de silencio); y si se
+  despliega, se escribe `cinco` en «Haz de búsqueda» y `0,5` en «Umbral de silencio» y se pulsa «Guardar», bajo «Haz de
+  búsqueda» aparece «`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»).», bajo «Umbral de
+  silencio» no hay error, el pie dice «No se guardó nada: corrige 1 valor.» y `preferencias.json` no se crea; al
+  corregir a `3` y guardar, el pie dice «Configuración guardada» y el archivo es exactamente `{"configuracion":
+  {"transcripcion": {"beam_size": 3, "no_speech_threshold": 0.5}}}`.
+- Given el grupo «Historial» con «Archivo del historial (relativo a la carpeta del proyecto)» en `data/historial.db` y
+  la nota «Se aplica al reiniciar la app.», when se cambia a otra ruta válida (por ejemplo `data/otro.db` o una ruta
+  absoluta fuera del proyecto) y se pulsa «Guardar», then el pie dice «Configuración guardada · el historial nuevo se
+  abrirá al reiniciar la app», la vista Historial (`Ctrl+2`) sigue mostrando las mismas entradas de la base de antes y lo
+  que se transcriba o genere hasta reiniciar se guarda en ella, y el archivo nuevo no se crea; al cerrar y abrir la
+  ventana, el Historial usa la ruta nueva.
+- Given un `preferencias.json` con `{"x": 1, "modelo_ia": "claude-sonnet-5.5", "configuracion": {"salida": {"formato":
+  "srt"}, "transcripcion": {"beam_size": 50}}}` (la vista muestra arriba el aviso de `beam_size` inválido), el modelo de
+  Whisper del lateral cambiado a mano a `tiny` y una generación anterior que dejó notas conservadas, when se pulsa
+  «Restablecer valores del proyecto» y se confirma el diálogo «Restablecer configuración», then el archivo queda `{"x":
+  1}`, el pie dice «Se restablecieron los valores de config/settings.yaml», desaparece el recuadro de avisos, los campos
+  muestran los valores del YAML, en el lateral el formato vuelve a `txt` y el modelo de Whisper sigue en `tiny`, el
+  selector de modelo de IA y la línea de estado de las pestañas Resumen y Minuta muestran `claude-haiku-5.5` (el del
+  YAML), y la siguiente generación vuelve a pedir todas las partes (las notas conservadas se pierden, como al cambiar de
+  modelo). Si se responde «No», nada cambia; y si la escritura falla (carpeta de preferencias sin permiso de escritura),
+  aparece el diálogo «Configuración» con «No se pudo restablecer la configuración: <motivo>.», el archivo no cambia y no
+  cambia nada en la vista, el lateral ni el selector de modelo de IA.
 
 Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md
+Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md

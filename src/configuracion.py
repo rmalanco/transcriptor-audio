@@ -489,15 +489,32 @@ def guardar_formulario(proyecto: dict, anterior: dict, valores_widget: dict, mod
     except OSError as e:
         return ResultadoGuardado({}, None, None, [], set(),
                                  f"No se pudo guardar la configuración: {e.strerror or str(e)}.")
+    return _resultado_tras_escribir(proyecto, anterior, preferido_anterior, descartes, "Configuración guardada")
+
+
+def restablecer_formulario(proyecto: dict, anterior: dict, preferido_anterior: Optional[str]) -> ResultadoGuardado:
+    """Borra la configuración y el modelo de IA guardados (lo que deja el YAML) y devuelve el resultado para la vista.
+    Si la escritura falla, no devuelve configuración efectiva."""
+    try:
+        restablecer_ajustes()
+    except OSError as e:
+        return ResultadoGuardado({}, None, None, [], set(),
+                                 f"No se pudo restablecer la configuración: {e.strerror or str(e)}.")
+    return _resultado_tras_escribir(proyecto, anterior, preferido_anterior, [],
+                                    "Se restablecieron los valores de config/settings.yaml")
+
+
+def _resultado_tras_escribir(proyecto: dict, anterior: dict, preferido_anterior: Optional[str], avisos_previos: list,
+                             mensaje: str) -> ResultadoGuardado:
+    """Relee los ajustes ya escritos y arma el resultado: claves cambiadas, modelo de IA y nota de reinicio."""
     efectiva, avisos = combinar(proyecto, leer_ajustes())
     preferido = leer_modelo_preferido()
     cambiadas = claves_cambiadas(anterior, efectiva)
     if modelo_ia_efectivo(anterior, preferido_anterior) != modelo_ia_efectivo(efectiva, preferido):
         cambiadas.add(("ia", "modelo"))
-    mensaje = "Configuración guardada"
     if cambiadas & REQUIEREN_REINICIO:
         mensaje += " · el historial nuevo se abrirá al reiniciar la app"
-    return ResultadoGuardado({}, efectiva, preferido, descartes + avisos, cambiadas, mensaje)
+    return ResultadoGuardado({}, efectiva, preferido, avisos_previos + avisos, cambiadas, mensaje)
 
 
 def resumen_errores(n: int) -> str:

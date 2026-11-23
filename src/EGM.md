@@ -71,6 +71,10 @@ Dependencias entre módulos (quién importa a quién):
   valida el formulario y, si hay errores, no escribe nada. Si no, guarda con `guardar_ajustes`, relee y combina las preferencias
   y devuelve `ResultadoGuardado(errores, efectiva, modelo_preferido, avisos, cambiadas, mensaje)` (`efectiva` es `None` si no se
   guardó; un `OSError` al escribir da solo el mensaje). Es un dataclass inmutable que la vista solo lee.
+- `configuracion.py:restablecer_formulario(proyecto, anterior, preferido_anterior) -> ResultadoGuardado`: llama a `restablecer_ajustes()`
+  (borra `configuracion` y `modelo_ia` de `preferencias.json`, conservando las claves ajenas) y devuelve lo del YAML con la misma forma
+  que el guardado, sin modelo preferido y con la nota de reinicio si `historial.ruta` cambió. Si la escritura falla, `efectiva` es `None`
+  y solo hay mensaje. El cálculo de cambios y del mensaje lo comparte con el guardado (`_resultado_tras_escribir`).
 - `configuracion.py:claves_cambiadas(anterior, nueva) -> set`: claves de la tabla de configuración cuyo valor cambió.
 - `configuracion.py:valores_laterales(cambiadas, configuracion) -> dict`: valores de los controles del panel lateral de las
   claves cambiadas, con las claves nombradas como las variables de la ventana (`var_modelo`, `var_formato`…); el idioma añade `opciones_idioma`. No toca Tk.
@@ -148,11 +152,11 @@ Dependencias entre módulos (quién importa a quién):
   `configuracion.py:combinar`) y guarda la del proyecto en `configuracion_proyecto`; los avisos de las preferencias van a
   Registro. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
   `historial_eliminado(id_historial)`, el atributo `id_historial` y los métodos privados `_configurar_estilos_markdown`,
-  `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las tres vistas de la barra de navegación (Transcribir, Historial y Configuración). `guardar_configuracion(valores_widget)` guarda lo que pide la vista Configuración (no escribe si hay un proceso en curso) y `aplicar_guardado(resultado)` pone la configuración nueva y cambia en el lateral solo las claves guardadas.
+  `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las tres vistas de la barra de navegación (Transcribir, Historial y Configuración). `guardar_configuracion(valores_widget)` guarda lo que pide la vista Configuración (no escribe si hay un proceso en curso) y `restablecer_configuracion()` (pulsación de «Restablecer valores del proyecto»: rechaza con un proceso en curso, pide confirmación, muestra el error si la escritura falla y, si va bien, aplica el resultado) y `aplicar_guardado(resultado)` pone la configuración nueva y cambia en el lateral solo las claves guardadas; si cambió `("ia", "modelo")` en `cambiadas`, repone el selector de modelo de IA y sus opciones, la línea de estado de las pestañas que mostraban el modelo anterior, y olvida el asistente (`GestorDocumentos.olvidar_asistente`).
 - `ui.py:_VistaPreviaIA` — lo que tenían los controles de IA antes de una generación; `_restaurar_controles_ia` lo devuelve al recibir el resultado o al cancelar.
 - `ui_copilot.py:DialogoLoginCopilot(master, enterprise_url, al_terminar)` — diálogo modal de login.
 - `ui_historial.py:PanelHistorial(master, app, historial)` con `refrescar()`; `LIMITE_LISTA = 200`.
-- `ui_configuracion.py:CAMPOS` — los siete campos de Transcripción y Salida. `ui_configuracion.py:PanelConfiguracion(master, app)` con `refrescar()`; `ui_configuracion.py:motivo_para_no_guardar(transcribiendo, generando)` decide si no se puede guardar ahora.
+- `ui_configuracion.py:CAMPOS` — los quince campos: cuatro de Transcripción, los siete de «Avanzado» (`avanzado=True`, plegados; se despliegan solos si uno trae un error), tres de Salida y `historial.ruta` (control `texto`, con `Campo.nota`). `ui_configuracion.py:PanelConfiguracion(master, app)` con `refrescar()` (repinta el recuadro de avisos de las preferencias), `_restablecer()` (pie de «Restablecer valores del proyecto») y `ui_configuracion.py:motivo_para_no_guardar(transcribiendo, generando)` decide si no se puede guardar ahora.
 - `ui.py:DOCUMENTOS_IA` — define los sufijos `_resumen.md` y `_minuta.md`.
 
 ### Registro — `registro.py`

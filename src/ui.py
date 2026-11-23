@@ -29,7 +29,7 @@ from src.idiomas import (IDIOMAS_DISPONIBLES, codigo_de_idioma, nombre_de_idioma
 from src.registro import configurar_logging
 from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, ResultadoGuardado, cargar_configuracion,
                                combinar, guardar_formulario, guardar_modelo_preferido, leer_ajustes,
-                               leer_modelo_preferido, modelo_ia_efectivo, valores_laterales)
+                               leer_modelo_preferido, modelo_ia_efectivo, restablecer_formulario, valores_laterales)
 from src.ui_configuracion import PanelConfiguracion, motivo_para_no_guardar
 from src.transcriber import TranscriptorAudio
 from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, OpcionesTranscripcion,
@@ -50,6 +50,11 @@ TEMAS = {"Sistema": "System", "Claro": "Light", "Oscuro": "Dark"}
 VISTA_TRANSCRIBIR = "🎙  Transcribir"
 VISTA_HISTORIAL = "📚  Historial"
 VISTA_CONFIGURACION = "⚙  Configuración"
+
+
+def _etiqueta_modelo_ia(modelo: str) -> str:
+    """Texto de la línea de estado de las pestañas de IA para un modelo."""
+    return f"Modelo: {NOMBRE_PROVEEDOR} · {modelo}"
 TAB_TEXTO = "Texto"  # nombre corto: las pestañas se recortan en ventanas estrechas
 DOCUMENTOS_IA = {
     "resumen": {"pestana": "Resumen", "sufijo": SUFIJOS_DOCUMENTO["resumen"], "genitivo": "del resumen",
@@ -947,7 +952,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         return modelo_ia_efectivo(self.configuracion, self._modelo_preferido)
 
     def _texto_modelo_ia(self) -> str:
-        return f"Modelo: {NOMBRE_PROVEEDOR} · {self._modelo_ia_configurado()}"
+        return _etiqueta_modelo_ia(self._modelo_ia_configurado())
 
     def _cargar_modelos_ia(self):
         """Pulsación de «↻»: consulta una vez el catálogo de Copilot, en segundo plano, y lo muestra en el selector.
@@ -1121,16 +1126,49 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             self._log("Configuración guardada: " + ", ".join(sorted(f"{s}.{c}" for s, c in resultado.cambiadas)))
         return resultado
 
+    def restablecer_configuracion(self) -> Optional[ResultadoGuardado]:
+        """Pulsación de «Restablecer valores del proyecto» (solo en el hilo principal). Con un proceso en curso no
+        hace nada; si se responde «No», devuelve None. Si la escritura falla, no aplica nada."""
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        if motivo is not None:
+            messagebox.showwarning("Configuración", motivo)
+            return ResultadoGuardado({}, None, None, [], set(), motivo)
+        if not messagebox.askyesno("Restablecer configuración",
+                                   "¿Volver a los valores de config/settings.yaml? Se borrarán los cambios guardados "
+                                   "en este panel y el modelo de IA elegido."):
+            return None
+        resultado = restablecer_formulario(self.configuracion_proyecto, self.configuracion, self._modelo_preferido)
+        if resultado.efectiva is None:
+            messagebox.showerror("Configuración", resultado.mensaje)
+            return resultado
+        self.aplicar_guardado(resultado)
+        return resultado
+
     def aplicar_guardado(self, resultado: ResultadoGuardado):
-        """Aplica un guardado correcto. La configuración nueva sustituye a la de la ventana (sin mutarla) y el panel
-        lateral solo cambia en los controles de las claves que cambiaron, para no pisar lo ajustado a mano."""
+        """Aplica un guardado o restablecimiento correcto. La configuración nueva sustituye a la de la ventana (sin
+        mutarla) y el panel lateral solo cambia en los controles de las claves que cambiaron, para no pisar lo
+        ajustado a mano. Si cambió el modelo de IA efectivo, el selector, las pestañas que lo mostraban y el asistente
+        se reponen."""
+        modelo_cambia = ("ia", "modelo") in resultado.cambiadas
+        if modelo_cambia:
+            etiqueta_anterior = _etiqueta_modelo_ia(modelo_ia_efectivo(self.configuracion, self._modelo_preferido))
         self.configuracion = resultado.efectiva
         self.avisos_preferencias = resultado.avisos
+        self._modelo_preferido = resultado.modelo_preferido
         for nombre, valor in valores_laterales(resultado.cambiadas, resultado.efectiva).items():
             if nombre == "opciones_idioma":
                 self.combo_idioma.configure(values=valor)
             else:
                 getattr(self, nombre).set(valor)
+        if modelo_cambia:
+            modelo = modelo_ia_efectivo(self.configuracion, self._modelo_preferido)
+            self.var_modelo_ia.set(modelo)
+            opciones = copilot.opciones_de_modelo(list(self.combo_modelo_ia.cget("values")), modelo)
+            self.combo_modelo_ia.configure(values=opciones)
+            for tab in self.tabs_ia.values():
+                if tab["estado"].cget("text") == etiqueta_anterior:
+                    tab["estado"].configure(text=_etiqueta_modelo_ia(modelo))
+            self._documentos.olvidar_asistente()  # se recrea con el modelo nuevo en la próxima generación
 
     def _refrescar_historial(self):
         if self.panel_historial is not None:

@@ -1036,3 +1036,89 @@ def test_guardar_formulario_devuelve_cambiadas_avisos_y_mensaje(tmp_path, monkey
 
     assert repetido.cambiadas == set()
     assert (yaml.read_bytes(), yaml.stat().st_mtime_ns) == antes_yaml
+
+
+# --- Historia 22 (C2): restablecer desde la vista, sin ventana ---
+
+YAML_RESTABLECER_C2 = """\
+salida:
+  formato: "txt"
+transcripcion:
+  beam_size: 5
+  no_speech_threshold: 0.6
+ia:
+  modelo: "claude-haiku-5.5"
+historial:
+  ruta: "data/historial.db"
+"""
+
+
+def test_restablecer_formulario_devuelve_el_yaml_y_sin_modelo(tmp_path, monkeypatch):
+    """C2, criterio 3: restablecer borra «configuracion» y «modelo_ia», devuelve lo del YAML con su mensaje y deja el
+    YAML intacto; con `historial.ruta` guardado el mensaje añade la nota de reinicio; sin nada guardado no cambia nada."""
+    import json
+
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes, restablecer_formulario
+
+    yaml_ = tmp_path / "settings.yaml"
+    yaml_.write_text(YAML_RESTABLECER_C2, encoding="utf-8")
+    proyecto = cargar_configuracion(yaml_)
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({
+        "x": 1, "modelo_ia": "claude-sonnet-5.5",
+        "configuracion": {"salida": {"formato": "srt"}, "transcripcion": {"beam_size": 50}},
+    }))
+    anterior, _ = combinar(proyecto, leer_ajustes())
+    antes_yaml = (yaml_.read_bytes(), yaml_.stat().st_mtime_ns)
+
+    resultado = restablecer_formulario(proyecto, anterior, "claude-sonnet-5.5")
+
+    assert resultado.errores == {}
+    assert resultado.efectiva == proyecto
+    assert resultado.modelo_preferido is None
+    assert resultado.avisos == []
+    assert resultado.cambiadas == {("salida", "formato"), ("ia", "modelo")}
+    assert resultado.mensaje == "Se restablecieron los valores de config/settings.yaml"
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"x": 1}
+    assert (yaml_.read_bytes(), yaml_.stat().st_mtime_ns) == antes_yaml
+
+    ruta.write_text(json.dumps({"configuracion": {"historial": {"ruta": str(tmp_path / "otro.db")}}}),
+                    encoding="utf-8")
+    con_ruta, _ = combinar(proyecto, leer_ajustes())
+    resultado = restablecer_formulario(proyecto, con_ruta, None)
+
+    assert ("historial", "ruta") in resultado.cambiadas
+    assert resultado.mensaje == ("Se restablecieron los valores de config/settings.yaml · el historial nuevo "
+                                 "se abrirá al reiniciar la app")
+
+    ruta.write_text("{}", encoding="utf-8")
+    resultado = restablecer_formulario(proyecto, proyecto, None)
+
+    assert resultado.cambiadas == set()
+
+
+def test_restablecer_formulario_con_fallo_no_devuelve_efectiva(tmp_path, monkeypatch):
+    """C2, criterio 3: si no se puede escribir, no hay configuración efectiva que aplicar; el archivo no cambia."""
+    import errno
+    import json
+
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, restablecer_formulario
+
+    yaml_ = tmp_path / "settings.yaml"
+    yaml_.write_text(YAML_RESTABLECER_C2, encoding="utf-8")
+    proyecto = cargar_configuracion(yaml_)
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"modelo_ia": "claude-sonnet-5.5"}))
+    antes = ruta.read_bytes()
+
+    def fallar():
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(configuracion, "restablecer_ajustes", fallar)
+
+    resultado = restablecer_formulario(proyecto, proyecto, "claude-sonnet-5.5")
+
+    assert resultado.efectiva is None
+    assert resultado.modelo_preferido is None
+    assert resultado.cambiadas == set()
+    assert resultado.mensaje == "No se pudo restablecer la configuración: Permission denied."
+    assert ruta.read_bytes() == antes

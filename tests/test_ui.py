@@ -81,19 +81,48 @@ def test_campos_de_transcripcion_y_salida():
     from src.configuracion import DISPOSITIVOS, FORMATOS, MODELOS_WHISPER, TIPOS_COMPUTO
     from src.ui_configuracion import CAMPOS
 
-    assert [(c.seccion, c.clave) for c in CAMPOS] == [
+    basicos = [c for c in CAMPOS if not c.avanzado and c.grupo in ("Transcripción", "Salida")]
+    assert [(c.seccion, c.clave) for c in basicos] == [
         ("modelo", "nombre"), ("transcripcion", "idioma"), ("modelo", "dispositivo"), ("modelo", "compute_type"),
         ("salida", "formato"), ("salida", "incluir_timestamps"), ("salida", "palabra_por_palabra"),
     ]
-    assert all(not c.avanzado for c in CAMPOS)
-    assert [c.grupo for c in CAMPOS] == ["Transcripción"] * 4 + ["Salida"] * 3
+    assert [c.grupo for c in basicos] == ["Transcripción"] * 4 + ["Salida"] * 3
     tabla = configuracion._tabla()
     assert all((c.seccion, c.clave) in tabla for c in CAMPOS)
-    opciones = {c.clave: c.opciones for c in CAMPOS}
+    opciones = {c.clave: c.opciones for c in basicos}
     assert opciones["nombre"] == MODELOS_WHISPER
     assert opciones["dispositivo"] == DISPOSITIVOS
     assert opciones["compute_type"] == TIPOS_COMPUTO
     assert opciones["formato"] == FORMATOS
+
+
+def test_campos_avanzados_e_historial():
+    """C2, criterios 1 y 2: las 15 claves fuera de «ia», en su orden; las siete de decodificación plegadas dentro de
+    Transcripción, y `historial.ruta` con su nota."""
+    from src import configuracion
+    from src.ui_configuracion import CAMPOS
+
+    assert [(c.seccion, c.clave) for c in CAMPOS] == [
+        ("modelo", "nombre"), ("transcripcion", "idioma"), ("modelo", "dispositivo"), ("modelo", "compute_type"),
+        ("transcripcion", "beam_size"), ("transcripcion", "best_of"), ("transcripcion", "temperature"),
+        ("transcripcion", "condition_on_previous_text"), ("transcripcion", "compression_ratio_threshold"),
+        ("transcripcion", "logprob_threshold"), ("transcripcion", "no_speech_threshold"),
+        ("salida", "formato"), ("salida", "incluir_timestamps"), ("salida", "palabra_por_palabra"),
+        ("historial", "ruta"),
+    ]
+    fuera_de_ia = {clave for clave in configuracion._tabla() if clave[0] != "ia"}
+    assert {(c.seccion, c.clave) for c in CAMPOS} == fuera_de_ia
+    assert [c.avanzado for c in CAMPOS] == [False] * 4 + [True] * 7 + [False] * 4
+
+    decodificacion = CAMPOS[4:11]
+    assert all(c.grupo == "Transcripción" for c in decodificacion)
+    assert decodificacion[3].control == "interruptor"
+    assert all(c.control == "texto" for i, c in enumerate(decodificacion) if i != 3)
+
+    historial = CAMPOS[-1]
+    assert (historial.grupo, historial.control, historial.avanzado) == ("Historial", "texto", False)
+    assert historial.nota == "Se aplica al reiniciar la app."
+    assert all(c.nota == "" for c in CAMPOS[:-1])
 
 
 def test_motivo_para_no_guardar_durante_un_proceso():
@@ -175,3 +204,117 @@ def test_aplicar_guardado_solo_toca_las_claves_cambiadas():
     assert app.combo_idioma.opciones[-1][-1] == "nl"
     for sin_cambios in (app.var_modelo, app.var_dispositivo, app.var_compute, app.var_timestamps):
         assert sin_cambios.valores == []
+
+
+@pytest.mark.parametrize("transcribiendo", [True, False])
+def test_restablecer_configuracion_rechazado_o_cancelado_no_escribe(monkeypatch, transcribiendo):
+    """C2, criterio 3: con un proceso en curso se avisa y no se pregunta; si se responde «No», no se restablece nada."""
+    from types import SimpleNamespace
+
+    from src import configuracion, ui
+
+    avisos, preguntas = [], []
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        showwarning=lambda titulo, texto: avisos.append((titulo, texto)),
+        showerror=lambda titulo, texto: avisos.append((titulo, texto)),
+        askyesno=lambda titulo, texto: preguntas.append((titulo, texto)) or False,
+    ))
+
+    def no_debe_llamarse(*args, **kwargs):
+        raise AssertionError("no se debe restablecer")
+
+    monkeypatch.setattr(ui, "restablecer_formulario", no_debe_llamarse)
+    app = SimpleNamespace(_transcribiendo=lambda: transcribiendo, _generando_ia=lambda: False)
+
+    resultado = AppTranscriptor.restablecer_configuracion(app)
+
+    assert not configuracion.RUTA_PREFERENCIAS.exists()
+    if transcribiendo:
+        espera = "Espera a que termine el proceso en curso."
+        assert resultado.efectiva is None
+        assert resultado.mensaje == espera
+        assert avisos == [("Configuración", espera)]
+        assert preguntas == []
+    else:
+        assert resultado is None
+        assert avisos == []
+        assert preguntas == [("Restablecer configuración",
+                              "¿Volver a los valores de config/settings.yaml? Se borrarán los cambios guardados en "
+                              "este panel y el modelo de IA elegido.")]
+
+
+def test_aplicar_guardado_repone_el_modelo_de_ia_y_olvida_el_asistente():
+    """C2, criterio 3: si el modelo de IA efectivo cambió, el selector, la línea de estado de las pestañas que lo
+    mostraban y el asistente se reponen; si no cambió, nada de eso se toca."""
+    import copy
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado, cargar_configuracion
+
+    class Valor:
+        def __init__(self, valor):
+            self.valor = valor
+
+        def set(self, valor):
+            self.valor = valor
+
+    class Combo:
+        def __init__(self, valores):
+            self.valores = list(valores)
+
+        def cget(self, atributo):
+            assert atributo == "values"
+            return list(self.valores)
+
+        def configure(self, values):
+            self.valores = list(values)
+
+    class Etiqueta:
+        def __init__(self, texto):
+            self.texto = texto
+
+        def cget(self, atributo):
+            return self.texto
+
+        def configure(self, text):
+            self.texto = text
+
+    class Documentos:
+        def __init__(self):
+            self.olvidados = 0
+
+        def olvidar_asistente(self):
+            self.olvidados += 1
+
+    def app_con_sonnet_preferido():
+        return SimpleNamespace(
+            configuracion=cargar_configuracion(), _modelo_preferido="claude-sonnet-5.5", avisos_preferencias=["aviso"],
+            var_modelo_ia=Valor("claude-sonnet-5.5"), combo_modelo_ia=Combo(["auto", "claude-sonnet-5.5"]),
+            tabs_ia={"resumen": {"estado": Etiqueta("Modelo: GitHub Copilot · claude-sonnet-5.5")},
+                     "minuta": {"estado": Etiqueta("Listo en 12 s con …")}},
+            _documentos=Documentos(),
+        )
+
+    proyecto = cargar_configuracion()
+    app = app_con_sonnet_preferido()
+    resultado = ResultadoGuardado({}, copy.deepcopy(proyecto), None, [], {("ia", "modelo")},
+                                  "Se restablecieron los valores de config/settings.yaml")
+
+    AppTranscriptor.aplicar_guardado(app, resultado)
+
+    assert app._modelo_preferido is None
+    assert app.var_modelo_ia.valor == "claude-haiku-5.5"
+    assert "claude-haiku-5.5" in app.combo_modelo_ia.valores
+    assert app.tabs_ia["resumen"]["estado"].texto == "Modelo: GitHub Copilot · claude-haiku-5.5"
+    assert app.tabs_ia["minuta"]["estado"].texto == "Listo en 12 s con …"
+    assert app._documentos.olvidados == 1
+
+    app = app_con_sonnet_preferido()
+    sin_modelo = ResultadoGuardado({}, copy.deepcopy(proyecto), "claude-sonnet-5.5", [], set(), "Configuración guardada")
+
+    AppTranscriptor.aplicar_guardado(app, sin_modelo)
+
+    assert app.var_modelo_ia.valor == "claude-sonnet-5.5"
+    assert app.combo_modelo_ia.valores == ["auto", "claude-sonnet-5.5"]
+    assert app.tabs_ia["resumen"]["estado"].texto == "Modelo: GitHub Copilot · claude-sonnet-5.5"
+    assert app._documentos.olvidados == 0
