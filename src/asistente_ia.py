@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import httpx
@@ -161,6 +161,26 @@ class ErrorAsistenteIA(Exception):
     pass
 
 
+class _TextoDeCopilot(str):
+    """Texto de una respuesta de Copilot. `corte` es el motivo por el que Copilot la cortó (None si terminó bien).
+    Va en el propio resultado y no en el asistente: las partes se piden en paralelo y no deben compartir estado."""
+    corte: Optional[str] = None
+
+
+def _corte(texto) -> Optional[str]:
+    """Motivo del corte de una respuesta; None si no se cortó (o si es un texto sin esa información)."""
+    return getattr(texto, "corte", None)
+
+
+def _sin_cortar(texto: str) -> str:
+    """Una pasada posterior a la redacción no puede mejorar el documento con una respuesta incompleta: si Copilot la
+    cortó, falla como cualquier error recuperable de esa pasada (y su motivo va en la nota)."""
+    motivo = _corte(texto)
+    if motivo:
+        raise ErrorAsistenteIA(f"Copilot cortó la respuesta: {motivo}")
+    return texto
+
+
 class ErrorSinSesionCopilot(ErrorAsistenteIA):
     """No hay sesión de GitHub Copilot o fue rechazada: hay que iniciar sesión."""
 
@@ -178,12 +198,28 @@ class _Documento:
     faltan: list[str]
     error_secciones: Optional[str] = None  # motivo si no se pudieron pedir de nuevo las secciones que faltaban
     error_revision: Optional[str] = None  # motivo si la revisión de fidelidad no se pudo completar
+    corte: Optional[str] = None  # motivo si Copilot cortó la respuesta que quedó en el documento
+    cortes_partes: dict = field(default_factory=dict)  # parte -> motivo, de las notas que Copilot cortó
 
 
 def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
     """Si una pasada posterior a la redacción falla con esto, se entrega lo ya redactado con una nota. No lo es la falta
     de sesión (hay que iniciar sesión) ni un modelo no autorizado o vacío (no se envía nada a ningún modelo)."""
     return not isinstance(error, (ErrorSinSesionCopilot, ErrorModeloIA))
+
+
+MOTIVOS_DE_CORTE = {"length": "límite de longitud del modelo",  # finish_reason de Copilot -> motivo para el usuario
+                   "content_filter": "filtro de contenido de Copilot"}
+
+
+def _motivo_de_corte(fin: Optional[str], cerrado: bool) -> Optional[str]:
+    """Por qué Copilot cortó la respuesta, o None si terminó bien. Sin `finish_reason` y sin [DONE] el stream se cortó;
+    con `stop` (con o sin [DONE]) o con [DONE] sin `finish_reason` terminó, aunque no conste el motivo."""
+    if fin in MOTIVOS_DE_CORTE:
+        return MOTIVOS_DE_CORTE[fin]
+    if fin is None and not cerrado:
+        return "la respuesta terminó sin la marca de cierre"
+    return None
 
 
 MAX_MOTIVO_NOTA = 120  # caracteres: el motivo se incrusta en una nota que se guarda y se exporta
@@ -267,12 +303,35 @@ def _cita_de_partes(partes: int, revisado: bool) -> str:
     return cita
 
 
+def _nota_de_corte(motivo: str) -> str:
+    return (f"> Nota de la aplicación: Copilot cortó su respuesta antes de terminarla ({motivo}); este documento puede "
+            "estar incompleto. No lo des por completo: vuelve a generarlo o "
+            "complétalo con la transcripción.")
+
+
+def _nota_de_cortes_de_partes(cortes: dict, total: int) -> str:
+    ordenadas = sorted(cortes.items())
+    if len(ordenadas) == 1:
+        parte, motivo = ordenadas[0]
+        return (f"> Nota de la aplicación: Copilot cortó antes de terminarlas las notas de la parte {parte} de {total} "
+                f"({motivo}); lo que se dijo en esa parte puede faltar en este documento.")
+    detalle = [f"{parte} ({motivo})" for parte, motivo in ordenadas]
+    lista = ", ".join(detalle[:-1]) + " y " + detalle[-1]
+    return (f"> Nota de la aplicación: Copilot cortó antes de terminarlas las notas de las partes {lista} de {total}; "
+            "lo que se dijo en esas partes puede faltar en este documento.")
+
+
 def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
-                           error_secciones: Optional[str] = None, error_revision: Optional[str] = None) -> str:
+                           error_secciones: Optional[str] = None, error_revision: Optional[str] = None,
+                           corte: Optional[str] = None, cortes_partes: Optional[dict] = None) -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
     (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
     `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
     citas = []
+    if corte:
+        citas.append(_nota_de_corte(corte))
+    if cortes_partes:
+        citas.append(_nota_de_cortes_de_partes(cortes_partes, partes))
     if error_secciones:
         citas.append(f"> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban "
                      f"({error_secciones}).")
@@ -462,7 +521,7 @@ class AsistenteIA:
                     if respuesta.status_code >= 400:
                         respuesta.read()
                     else:
-                        partes, fin, uso = self._leer_stream(respuesta, recibido, cancelar)
+                        partes, fin, uso, cerrado = self._leer_stream(respuesta, recibido, cancelar)
             except httpx.HTTPError as e:
                 log.warning("Fallo de conexión con %s tras %.1f s (%s): %r", self.nombre_proveedor,
                             time.monotonic() - inicio, estado(), e)
@@ -519,19 +578,22 @@ class AsistenteIA:
                      self.nombre_proveedor, segundos, len(contenido), uso.get("prompt_tokens", "?"),
                      uso.get("completion_tokens", "?"),
                      (uso.get("completion_tokens_details") or {}).get("reasoning_tokens", "?"), fin)
-            if fin == "length":
-                log.warning("%s cortó la respuesta por límite de longitud; el documento puede estar incompleto",
-                            self.nombre_proveedor)
+            motivo = _motivo_de_corte(fin, cerrado)
+            if motivo:
+                log.warning("%s cortó la respuesta (%s); el documento puede estar incompleto",
+                            self.nombre_proveedor, motivo)
             if not contenido.strip():
                 raise ErrorAsistenteIA(f"{self.nombre_proveedor} devolvió una respuesta vacía")
-            return limpiar_respuesta(contenido)
+            resultado = _TextoDeCopilot(limpiar_respuesta(contenido))
+            resultado.corte = motivo
+            return resultado
 
         raise ErrorAsistenteIA(f"{self.nombre_proveedor} no respondió tras varios intentos")
 
     @staticmethod
     def _leer_stream(respuesta, recibido: dict, cancelar: Optional[threading.Event]):
-        """Lee los eventos SSE (`data: {...}`) y devuelve (partes del contenido, finish_reason, usage)."""
-        partes, fin, uso = [], None, {}
+        """Lee los eventos SSE (`data: {...}`) y devuelve (partes del contenido, finish_reason, usage, si llegó [DONE])."""
+        partes, fin, uso, cerrado = [], None, {}, False
         for linea in respuesta.iter_lines():
             if cancelar and cancelar.is_set():
                 raise InterruptedError
@@ -539,6 +601,7 @@ class AsistenteIA:
                 continue
             dato = linea[5:].strip()
             if dato == "[DONE]":
+                cerrado = True
                 break
             evento = json.loads(dato)
             uso = evento.get("usage") or uso
@@ -551,15 +614,16 @@ class AsistenteIA:
                     recibido["contenido"] += len(delta["content"])
                 fin = opcion.get("finish_reason") or fin
                 uso = opcion.get("usage") or uso
-        return partes, fin, uso
+        return partes, fin, uso, cerrado
 
     def _clave_nota(self, n: int, total: int, bloque: str) -> str:
         """Identifica las notas de una parte: el modelo, su posición y el total (el prompt los nombra) y su texto."""
         return hashlib.sha256("\x00".join([str(self.modelo), str(n), str(total), bloque]).encode()).hexdigest()
 
-    def _notas_por_bloque(self, bloques: list[str], on_progreso, cancelar) -> str:
+    def _notas_por_bloque(self, bloques: list[str], on_progreso, cancelar) -> tuple[str, dict[int, str]]:
         """Extrae las notas de cada parte en paralelo. Cada parte guarda sus notas en cuanto termina: si una falla,
-        las que terminaron se conservan y, al volver a generar, solo se piden las que faltan."""
+        las que terminaron se conservan y, al volver a generar, solo se piden las que faltan. Devuelve también las
+        partes cuya respuesta cortó Copilot (parte -> motivo). Esas notas se usan en el documento, pero no se conservan."""
         total = len(bloques)
         claves = [self._clave_nota(n, total, b) for n, b in enumerate(bloques, 1)]
         notas: dict[int, str] = {}
@@ -583,35 +647,38 @@ class AsistenteIA:
         abortar = threading.Event()  # si una parte falla, las que aún no empezaron no se envían
         claves_en_curso = set(claves)
 
-        def analizar(n: int) -> None:
+        def analizar(n: int) -> Optional[str]:
             if abortar.is_set():
-                return
+                return None
             try:
                 texto = self._completar(PROMPT_NOTAS_BLOQUE.format(n=n, total=total, texto=bloques[n - 1]), cancelar)
             except BaseException:
                 abortar.set()
                 raise
             with self._cerrojo_cache:
-                # Al menos una generación entera cabe en la caché, y nunca se expulsan notas de la generación en curso
-                limite = max(LIMITE_NOTAS_EN_CACHE, total)
-                while len(self._cache_notas) >= limite:
-                    expulsable = next((k for k in self._cache_notas if k not in claves_en_curso), None)
-                    if expulsable is None:
-                        break
-                    del self._cache_notas[expulsable]
-                self._cache_notas[claves[n - 1]] = texto
+                if not _corte(texto):  # unas notas cortadas no se conservan: al volver a generar se piden otra vez
+                    # Al menos una generación entera cabe en la caché, y nunca se expulsan notas de la generación en curso
+                    limite = max(LIMITE_NOTAS_EN_CACHE, total)
+                    while len(self._cache_notas) >= limite:
+                        expulsable = next((k for k in self._cache_notas if k not in claves_en_curso), None)
+                        if expulsable is None:
+                            break
+                        del self._cache_notas[expulsable]
+                    self._cache_notas[claves[n - 1]] = texto
                 notas[n] = texto
                 if on_progreso:
                     on_progreso(f"Analizadas {len(notas)} de {total} partes…")
+            return texto
 
         fallo = None
+        cortes: dict[int, str] = {}
         if pendientes:
             with ThreadPoolExecutor(max_workers=min(self.peticiones_paralelas, len(pendientes)),
                                     thread_name_prefix="ia-parte") as ejecutor:
                 futuros = {n: ejecutor.submit(analizar, n) for n in pendientes}
                 for n in pendientes:
                     try:
-                        futuros[n].result()
+                        texto = futuros[n].result()
                     except BaseException as e:
                         for f in futuros.values():
                             f.cancel()  # las partes que aún no empezaron ya no se envían
@@ -619,11 +686,13 @@ class AsistenteIA:
                             fallo = (n, e)
                             break
                         raise
+                    if _corte(texto):
+                        cortes[n] = _corte(texto)
         if fallo:  # el bloque anterior ya ha esperado a las partes en curso: todas las que terminaron están contadas
             n, e = fallo
             raise ErrorAsistenteIA(f"falló la parte {n} de {total}: {str(e).rstrip('.')}. "
                                    f"{_frase_de_partes_conservadas(len(notas))}") from e
-        return "\n\n".join(f"Notas de la parte {n}:\n{notas[n]}" for n in range(1, total + 1))
+        return "\n\n".join(f"Notas de la parte {n}:\n{notas[n]}" for n in range(1, total + 1)), cortes
 
     def _generar(
         self,
@@ -646,15 +715,17 @@ class AsistenteIA:
         bloques = dividir_texto(texto, self.max_caracteres_bloque)
         log.info("Generando documento: %d caracteres de transcripción en %d bloque(s) de %s caracteres",
                  len(texto), len(bloques), ", ".join(str(len(b)) for b in bloques))
+        cortes_partes: dict[int, str] = {}
         if len(bloques) > 1:
             # Transcripciones muy largas: primero notas por bloque, luego el documento final sobre las notas
-            texto = self._notas_por_bloque(bloques, on_progreso, cancelar)
+            texto, cortes_partes = self._notas_por_bloque(bloques, on_progreso, cancelar)
 
         if on_progreso:
             on_progreso("Redactando documento…")
         prompt = plantilla.format(texto=texto)
         documento = self._completar(prompt, cancelar)
 
+        corte = _corte(documento)
         error_secciones = None
         faltan = secciones_faltantes(documento, secciones or [])
         if faltan:
@@ -663,12 +734,12 @@ class AsistenteIA:
             if on_progreso:
                 on_progreso("Completando secciones faltantes…")
             try:
-                reintento = self._completar([
+                reintento = _sin_cortar(self._completar([
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": documento},
                     {"role": "user", "content": "Faltan estas secciones obligatorias: " + ", ".join(faltan)
                      + ". Devuelve el documento completo con todas las secciones, aplicando las mismas reglas."},
-                ], cancelar)
+                ], cancelar))
             except ErrorAsistenteIA as e:
                 if cancelar and cancelar.is_set():
                     raise InterruptedError from e  # cancelada: el borrador no se entrega
@@ -679,6 +750,7 @@ class AsistenteIA:
             else:
                 if len(secciones_faltantes(reintento, secciones)) < len(faltan):
                     documento = reintento
+                    corte = _corte(reintento)  # el motivo es el de la respuesta que quedó
 
         error_revision = None
         if self.revision_fidelidad:
@@ -687,7 +759,7 @@ class AsistenteIA:
                 fuente = "la transcripción" if len(bloques) == 1 else f"las notas de las {len(bloques)} partes"
                 on_progreso(f"Revisando fidelidad con {fuente}…")
             try:
-                revisado = self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar)
+                revisado = _sin_cortar(self._completar(PROMPT_REVISION.format(texto=texto, documento=documento), cancelar))
             except ErrorAsistenteIA as e:
                 if cancelar and cancelar.is_set():
                     raise InterruptedError from e  # cancelada: el documento sin revisar no se entrega
@@ -704,18 +776,20 @@ class AsistenteIA:
                     or contar_vinetas_acuerdos(revisado) < contar_vinetas_acuerdos(documento))
                 if conserva_secciones and not pierde_tareas_o_acuerdos:
                     documento = revisado
+                    corte = _corte(revisado)  # el motivo es el de la respuesta que quedó
         if postproceso:
             documento = postproceso(documento)
         faltan_al_final = secciones_faltantes(documento, secciones or [])
         # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
         return _Documento(documento, len(bloques), faltan_al_final,
-                          error_secciones if faltan_al_final else None, error_revision)
+                          error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes)
 
     def _con_nota(self, d: _Documento) -> str:
         """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del
         post-proceso, así ningún prompt la contiene y el post-proceso no la toca."""
         revisado = self.revision_fidelidad and not d.error_revision  # sin revisión, no se dice que se revisó
-        nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision)
+        nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision, d.corte,
+                                      d.cortes_partes)
         return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:

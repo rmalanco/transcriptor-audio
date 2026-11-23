@@ -132,13 +132,38 @@ Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 
+### Respuesta cortada por Copilot
+- Given una transcripción que cabe en una sola parte y una redacción que Copilot corta (`finish_reason` `length` o
+  `content_filter`, o un stream que termina sin `[DONE]` ni `finish_reason`), when se genera la minuta o el resumen,
+  then el documento que se muestra, se guarda en el historial y se exporta termina, tras una línea horizontal, con «>
+  Nota de la aplicación: Copilot cortó su respuesta antes de terminarla (<motivo>); este documento puede estar
+  incompleto. No lo des por completo: vuelve a generarlo o complétalo con la transcripción.», donde <motivo> es «límite
+  de longitud del modelo», «filtro de contenido de Copilot» o «la respuesta terminó sin la marca de cierre», según
+  corresponda. La nota no se envía a Copilot.
+- Given una transcripción que se procesa en varias partes y una petición de notas de una o varias partes que Copilot
+  corta, when se genera el documento, then el documento termina, tras la línea horizontal, con «> Nota de la
+  aplicación: Copilot cortó antes de terminarlas las notas de la parte N de M (<motivo>); lo que se dijo en esa parte
+  puede faltar en este documento.» si corta una parte, o con «> Nota de la aplicación: Copilot cortó antes de
+  terminarlas las notas de las partes X (<motivo>) y Y (<motivo>) de M; lo que se dijo en esas partes puede faltar en
+  este documento.» si corta varias. Las notas de esas partes no se guardan: when después se genera el resumen con el
+  mismo modelo y sin cerrar la app, then Copilot recibe otra vez las peticiones de notas de esas partes y la redacción.
+- Given una respuesta completa (`finish_reason` `stop`, con o sin `[DONE]`, o `[DONE]` sin `finish_reason`), when
+  termina la generación, then el documento no lleva nota de respuesta cortada ni de notas de partes cortadas.
+- Given una redacción cortada a la que una petición de completar las secciones que faltaban devuelve una respuesta
+  completa que sustituye al borrador, when termina la generación, then el documento no lleva nota de respuesta cortada.
+
+Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
+
 ### Notas de la aplicación juntas
-- Given un documento redactado a partir de notas de varias partes al que además le falta una sección, when termina la
-  generación, then las dos notas van bajo una sola línea horizontal, primero la de secciones que faltan y después la de
-  las partes («> Nota de la aplicación: la transcripción se procesó en N partes…»), separadas por una línea en blanco; el
-  título y la fecha no cambian.
+- Given un documento que lleva varias notas de la aplicación (respuesta cortada, notas de partes cortadas, secciones que
+  no se pudieron pedir de nuevo o que faltan, revisión no completada y, si está redactado a partir de notas de varias
+  partes, la de las partes), when termina la generación, then todas van bajo una sola línea horizontal, separadas por
+  una línea en blanco, en este orden: respuesta cortada, notas de partes cortadas, secciones que no se pudieron pedir
+  de nuevo, secciones que faltan, revisión no completada y, la última, la de las partes («> Nota de la aplicación: la
+  transcripción se procesó en N partes…»); el título y la fecha no cambian.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
+Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 
 ### Fallo de una parte
 - Given una transcripción que se procesa en 8 partes y la parte 7 falla (por ejemplo, Copilot responde 429 en todos sus
@@ -190,10 +215,19 @@ Origen: carril S, 2026-11-22: los 429 y 5xx respetan `Retry-After`, con un tope 
 - Given que la redacción del documento terminó y falla la pasada de completar las secciones que faltaban, por un error que no es cancelación, falta de sesión ni modelo no autorizado, when termina la generación, then el documento se muestra, se guarda y se exporta con la nota «> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban (<motivo>).» tras una línea horizontal; si además siguen faltando secciones, la nota de secciones que faltan es «> Nota de la aplicación: a este documento le faltan secciones obligatorias: <secciones>. No lo des por completo: vuelve a generarlo o complétalo con la transcripción.» (sin la frase «que Copilot no devolvió ni al pedírselas de nuevo»).
 - Given que la redacción del documento terminó y falla la revisión de fidelidad, por el mismo tipo de error, when termina la generación, then el documento se muestra, se guarda y se exporta con la nota «> Nota de la aplicación: la revisión de fidelidad no se pudo completar (<motivo>); este documento no está revisado.», y si el documento es de varias partes, su nota de las partes no dice que se revisó.
 - Given una pasada posterior fallida, when el motivo se escribe en la nota, then va en una sola línea, recortado a 120 caracteres más «…» si es más largo.
+- Given una redacción que terminó y una revisión de fidelidad o una petición de completar las secciones que faltaban que
+  Copilot corta (`finish_reason` `length` o `content_filter`, o sin marca de cierre), when termina la generación, then
+  esa pasada cuenta como fallo con el motivo «Copilot cortó la respuesta: <motivo>»: la revisión se descarta y el
+  documento se entrega con la nota «> Nota de la aplicación: la revisión de fidelidad no se pudo completar (Copilot
+  cortó la respuesta: <motivo>); este documento no está revisado.»; el borrador de la petición de secciones se entrega
+  con la nota «> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban (Copilot
+  cortó la respuesta: <motivo>).». Si la redacción también se cortó, el documento lleva además la nota de respuesta
+  cortada.
 - Given que al final no falta ninguna sección, when termina la generación, then no hay nota de secciones, aunque la pasada de completar haya fallado.
 - Given que se cancela la generación durante una pasada posterior, when la cancelación se produce, then no se entrega ningún documento.
 
 Origen: carril S, 2026-11-22: si falla la pasada de completar secciones o la revisión de fidelidad, el documento se entrega con una nota en vez de perderse (A-11)
+Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 
 ### Lista de modelos bajo demanda
 - Given que se abre la ventana, when se abre, then no se conecta a GitHub Copilot ni se lee el token, y el selector ofrece

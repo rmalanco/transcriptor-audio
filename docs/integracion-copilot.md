@@ -88,6 +88,20 @@ otra `claude-haiku-4.5`.
   fieles en reuniones largas. Para minutas conviene fijar un modelo potente (`claude-sonnet-5.5` o `gpt-5.4`).
 - Los modelos disponibles dependen del plan de Copilot de cada cuenta (`--copilot-modelos`).
 
+## Comprobado con peticiones reales (2026-11-22)
+
+Cuatro peticiones con texto sintético (nunca una transcripción), con la sesión propia de la app:
+
+- **Límites en el catálogo.** `GET /models` devuelve en `capabilities.limits` de cada modelo: `max_prompt_tokens`,
+  `max_output_tokens`, `max_context_window_tokens` y `max_non_streaming_output_tokens`. Ejemplos de ese día:
+  `claude-haiku-5.5` y `claude-sonnet-5.5`, 936 000 tokens de entrada y 128 000 de salida; `gpt-4.1`, 64 000 de
+  entrada y 16 384 de salida; `claude-haiku-4.5`, 128 000 y 32 000.
+- **Respuesta cortada.** En `/chat/completions` con `stream: true`, una respuesta que llega al límite de salida
+  (forzado con `max_tokens: 20`, en `claude-haiku-5.5` y en `gpt-4.1`) termina con `finish_reason: "length"` y
+  después `data: [DONE]`. Una respuesta normal termina con `finish_reason: "stop"` y `[DONE]`.
+- **No comprobado:** `finish_reason: "content_filter"` (no se forzó a propósito) ni un stream que se corte sin
+  `[DONE]`.
+
 ## Fuentes
 
 - [Auto model selection en VS Code (GitHub Changelog)](https://github.blog/changelog/2025-09-15-auto-model-selection-for-copilot-in-vs-code-in-public-preview/)

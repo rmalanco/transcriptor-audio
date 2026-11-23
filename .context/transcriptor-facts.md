@@ -61,3 +61,8 @@ Fuente: `docs/integracion-copilot.md`.
 - Que los tests pasen en otros equipos o versiones de Python: solo se ejecutaron con Python 3.14.10 en Linux (2026-11-22).
 - El comportamiento real de la API de Copilot y de la interfaz gráfica: la auditoría y la sincronización de la documentación fueron por lectura del código.
 - Que no haya secretos en commits anteriores.
+
+- **Copilot, comprobado con peticiones reales el 2026-11-22:** una respuesta cortada por longitud termina con
+  `finish_reason: "length"` y `[DONE]`; una normal, con `"stop"` y `[DONE]`. El catálogo (`GET /models`) trae
+  `capabilities.limits.max_prompt_tokens` y `max_output_tokens` por modelo. Detalle en
+  `docs/integracion-copilot.md` §«Comprobado con peticiones reales».

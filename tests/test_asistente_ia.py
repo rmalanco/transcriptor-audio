@@ -1459,3 +1459,202 @@ def test_modelo_no_autorizado_tras_terminar_una_parte_no_se_envuelve(monkeypatch
     assert str(error.value) == ("El modo auto no ofrece ningún modelo autorizado y compatible con /chat/completions "
                                 "(kimi-k3). Elige un modelo concreto en `ia.modelo`.")
     assert enviados == ["gpt-5.4"]  # solo la parte 1 llegó a enviarse
+
+
+class _StreamConCierre(_Stream):
+    """Respuesta de chat con el contenido, el `finish_reason` (None: ninguno) y si llega la marca [DONE]."""
+    def __init__(self, contenido, fin="stop", done=True):
+        super().__init__()
+        self._contenido, self._fin, self._done = contenido, fin, done
+    def iter_lines(self):
+        import json
+        opcion = {"delta": {"content": self._contenido}}
+        if self._fin:
+            opcion["finish_reason"] = self._fin
+        yield "data: " + json.dumps({"choices": [opcion]})
+        if self._done:
+            yield "data: [DONE]"
+
+
+def _simular_chat_con_cierre(monkeypatch, respuesta):
+    """Chat simulado: `respuesta(cuerpo)` devuelve el contenido (cierre normal) o una tupla (contenido, fin, done).
+    Devuelve los cuerpos enviados."""
+    cuerpos = []
+    def stream(metodo, url, json, headers, timeout):
+        cuerpos.append(json)
+        valor = respuesta(json)
+        return _StreamConCierre(valor) if isinstance(valor, str) else _StreamConCierre(*valor)
+    monkeypatch.setattr(asistente_ia.httpx, "stream", stream)
+    return cuerpos
+
+
+def test_redaccion_cortada_por_longitud_lleva_la_nota_de_respuesta_cortada(monkeypatch):
+    import json
+    _prohibir_red(monkeypatch)
+    cuerpos = _simular_chat_con_cierre(monkeypatch, lambda cuerpo: (MINUTA_MODELO, "length", True))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.", fecha="29 de septiembre de 2026")
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: Copilot cortó su respuesta antes de terminarla "
+                           "(límite de longitud del modelo); este documento puede estar incompleto. "
+                           "No lo des por completo: vuelve a generarlo o complétalo con la transcripción.")
+    assert minuta.startswith("# Minuta: Revisión del presupuesto\n")
+    assert "**Fecha:** 29 de septiembre de 2026" in minuta
+    assert len(cuerpos) == 1
+    assert not any("Nota de la aplicación" in json.dumps(cuerpo, ensure_ascii=False) for cuerpo in cuerpos)
+
+
+def test_redaccion_cortada_por_el_filtro_de_contenido_lo_dice(monkeypatch):
+    _prohibir_red(monkeypatch)
+    _simular_chat_con_cierre(monkeypatch, lambda cuerpo: (MINUTA_MODELO, "content_filter", True))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: Copilot cortó su respuesta antes de terminarla "
+                           "(filtro de contenido de Copilot); este documento puede estar incompleto. "
+                           "No lo des por completo: vuelve a generarlo o complétalo con la transcripción.")
+
+
+def test_stream_sin_done_ni_finish_reason_cuenta_como_cortado(monkeypatch):
+    _prohibir_red(monkeypatch)
+    _simular_chat_con_cierre(monkeypatch, lambda cuerpo: (MINUTA_MODELO, None, False))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: Copilot cortó su respuesta antes de terminarla "
+                           "(la respuesta terminó sin la marca de cierre); este documento puede estar incompleto. "
+                           "No lo des por completo: vuelve a generarlo o complétalo con la "
+                           "transcripción.")
+
+
+@pytest.mark.parametrize("fin, cerrado", [("stop", True), ("stop", False), (None, True)])
+def test_respuesta_completa_no_lleva_nota_de_corte(monkeypatch, fin, cerrado):
+    _prohibir_red(monkeypatch)
+    _simular_chat_con_cierre(monkeypatch, lambda cuerpo: (RESUMEN_MODELO, fin, cerrado)
+                             if "Redacta un resumen" in cuerpo["messages"][-1]["content"] else (MINUTA_MODELO, fin, cerrado))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    assert asistente.generar_resumen("Texto corto de la reunión.") == RESUMEN_MODELO
+    assert asistente.generar_minuta("Texto corto de la reunión.").endswith("- Próxima reunión, si se menciona.")
+
+
+def test_notas_de_una_parte_cortadas_llevan_la_nota_y_no_se_conservan(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 600)) == 3
+    cortar = {"activa": True}
+    def respuesta(cuerpo):
+        parte = _numero_de_parte(cuerpo)
+        if parte == 2 and cortar["activa"]:
+            cortar["activa"] = False  # solo la primera vez: la segunda petición de la parte 2 llega completa
+            return (f"- Nota de la parte {parte}", "length", True)
+        if parte:
+            return f"- Nota de la parte {parte}"
+        return RESUMEN_MODELO if "Redacta un resumen" in cuerpo["messages"][-1]["content"] else MINUTA_MODELO
+    cuerpos = _simular_chat_con_cierre(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=600, peticiones_paralelas=1, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto)
+    nota_de_partes = ("> Nota de la aplicación: la transcripción se procesó en 3 partes y este documento se redactó a "
+                      "partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
+                      "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
+    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: Copilot cortó antes de terminarlas las notas de la parte 2 "
+                           "de 3 (límite de longitud del modelo); lo que se dijo en esa parte puede faltar en este "
+                           "documento.\n\n" + nota_de_partes)
+    peticiones_minuta = len(cuerpos)
+    resumen = asistente.generar_resumen(texto)
+    nuevas = cuerpos[peticiones_minuta:]
+    assert len(nuevas) == 2  # la parte 2 otra vez, y la redacción: las partes 1 y 3 se reutilizan
+    assert _numero_de_parte(nuevas[0]) == 2 and "Redacta un resumen" in nuevas[1]["messages"][-1]["content"]
+    assert "Copilot cortó antes de terminarlas" not in resumen
+    assert resumen.endswith("\n\n---\n\n" + nota_de_partes)
+
+
+def test_varias_partes_cortadas_se_nombran_en_una_sola_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    assert len(dividir_texto(TEXTO_OCHO_PARTES, 1800)) == 8
+    motivos = {2: "length", 5: "content_filter"}
+    def respuesta(cuerpo):
+        parte = _numero_de_parte(cuerpo)
+        if parte in motivos:
+            return (f"- Nota de la parte {parte}", motivos[parte], True)
+        if parte:
+            return f"- Nota de la parte {parte}"
+        return MINUTA_MODELO
+    _simular_chat_con_cierre(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=1800, peticiones_paralelas=1, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(TEXTO_OCHO_PARTES)
+    assert minuta.endswith(
+        "\n\n---\n\n> Nota de la aplicación: Copilot cortó antes de terminarlas las notas de las partes 2 "
+        "(límite de longitud del modelo) y 5 (filtro de contenido de Copilot) de 8; lo que se dijo en esas partes puede "
+        "faltar en este documento.\n\n> Nota de la aplicación: la transcripción se procesó en 8 partes y este documento "
+        "se redactó a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, "
+        "cifras y condiciones con la transcripción antes de darlo por bueno.")
+
+
+@pytest.mark.parametrize("fin, cerrado, motivo", [
+    ("length", True, "límite de longitud del modelo"),
+    ("content_filter", True, "filtro de contenido de Copilot"),
+    (None, False, "la respuesta terminó sin la marca de cierre"),
+])
+def test_revision_cortada_se_descarta_y_lo_dice(monkeypatch, fin, cerrado, motivo):
+    _prohibir_red(monkeypatch)
+    def respuesta(cuerpo):
+        if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]:  # la revisión conserva las secciones, pero llega cortada
+            return (RESUMEN_MODELO + "\n- Revisado.", fin, cerrado)
+        return RESUMEN_MODELO
+    _simular_chat_con_cierre(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    resumen = asistente.generar_resumen("Texto corto de la reunión.")
+    assert resumen == (RESUMEN_MODELO + "\n\n---\n\n> Nota de la aplicación: la revisión de fidelidad no se pudo "
+                       f"completar (Copilot cortó la respuesta: {motivo}); este documento no está revisado.")
+
+
+def test_reintento_de_secciones_cortado_entrega_el_borrador_con_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    borrador = "## Resumen\nt\n### Puntos clave\n- a"  # le falta "### Conclusiones"
+    def respuesta(cuerpo):
+        if len(cuerpo["messages"]) == 4:  # la petición de completar secciones: llega cortada
+            return ("## Resumen\nt\n### Puntos clave\n- a\n### Conclusiones\n- b", "length", True)
+        return borrador
+    _simular_chat_con_cierre(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    resumen = asistente.generar_resumen("Texto corto de la reunión.")
+    assert resumen == (borrador + "\n\n---\n\n"
+                       "> Nota de la aplicación: no se pudieron pedir de nuevo a Copilot las secciones que faltaban "
+                       "(Copilot cortó la respuesta: límite de longitud del modelo).\n\n"
+                       "> Nota de la aplicación: a este documento le faltan secciones obligatorias: Conclusiones. "
+                       "No lo des por completo: vuelve a generarlo o complétalo con la transcripción.")
+
+
+def test_notas_de_corte_van_primero_bajo_una_sola_linea_horizontal(monkeypatch):
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    def respuesta(cuerpo):
+        if _numero_de_parte(cuerpo) == 2:
+            return ("- Nota de la parte 2", "length", True)
+        if _numero_de_parte(cuerpo):
+            return "- Nota de la parte 1"
+        return (MINUTA_MODELO, "length", True)  # la redacción también se corta
+    _simular_chat_con_cierre(monkeypatch, respuesta)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(texto, fecha="29 de septiembre de 2026")
+    assert [linea for linea in minuta.splitlines() if linea.strip() == "---"] == ["---"]
+    assert minuta.startswith("# Minuta: Revisión del presupuesto\n\n**Fecha:** 29 de septiembre de 2026\n")
+    assert minuta.endswith(
+        "\n\n---\n\n"
+        "> Nota de la aplicación: Copilot cortó su respuesta antes de terminarla (límite de longitud del modelo); este "
+        "documento puede estar incompleto. No lo des por completo: vuelve a generarlo o "
+        "complétalo con la transcripción.\n\n"
+        "> Nota de la aplicación: Copilot cortó antes de terminarlas las notas de la parte 2 de 2 (límite de longitud del "
+        "modelo); lo que se dijo en esa parte puede faltar en este documento.\n\n"
+        "> Nota de la aplicación: la transcripción se procesó en 2 partes y este documento se redactó a partir de notas "
+        "extraídas de cada parte, no de la transcripción completa. Contrasta nombres, fechas, cifras y condiciones con la "
+        "transcripción antes de darlo por bueno.")
+
+
+def test_reintento_completo_sustituye_a_la_redaccion_cortada_y_no_lleva_nota(monkeypatch):
+    _prohibir_red(monkeypatch)
+    sin_tareas = MINUTA_MODELO.split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Próxima reunión, si se menciona."
+    respuestas = iter([(sin_tareas, "length", True), (MINUTA_MODELO, "stop", True)])  # redacción cortada; reintento entero
+    _simular_chat_con_cierre(monkeypatch, lambda cuerpo: next(respuestas))
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=False)
+    minuta = asistente.generar_minuta("Texto corto de la reunión.")
+    assert "Nota de la aplicación" not in minuta  # el documento que queda es el del reintento, completo
+    assert minuta.endswith("- Próxima reunión, si se menciona.")
