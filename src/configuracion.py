@@ -7,6 +7,8 @@ import copy
 import json
 import logging
 import math
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -26,6 +28,25 @@ TIPOS_COMPUTO = ("int8", "int16", "float16", "float32")
 FORMATOS = ("txt", "srt", "vtt", "json")
 # Única lista de modelos de Whisper: la usan la CLI, la ventana y la validación de `modelo.nombre`.
 MODELOS_WHISPER = ("tiny", "base", "small", "medium", "large-v3-turbo", "large-v1", "large-v2", "large-v3")
+# Topes solo del panel y de las preferencias (no del YAML): (mínimo, máximo, cómo se describe lo permitido).
+TOPES_PANEL = {
+    ("transcripcion", "beam_size"): (1, 20, "un número entero entre 1 y 20"),
+    ("transcripcion", "best_of"): (1, 20, "un número entero entre 1 y 20"),
+    ("transcripcion", "temperature"): (0, 2, "un número entre 0 y 2"),
+    ("transcripcion", "no_speech_threshold"): (0, 1, "un número entre 0 y 1"),
+    ("ia", "temperatura"): (0, 2, "un número entre 0 y 2"),
+    ("ia", "peticiones_paralelas"): (1, 8, "un número entero entre 1 y 8"),
+    ("ia", "max_caracteres_bloque"): (5000, 500000, "un número entero entre 5000 y 500000"),
+}
+# Cómo se describe en el panel lo permitido cuando la clave no tiene tope (el YAML sigue con la tabla de _tabla()).
+_ESPERADO_PANEL = {
+    ("ia", "copilot_enterprise_url"):
+        "un nombre de dominio sin https:// ni barras, como empresa.ghe.com, o estar vacío",
+}
+# Formas que el formulario acepta antes de convertir (sin «nan», «inf» ni «3.0» para enteros).
+_ENTERO_FORMULARIO = re.compile(r"-?[0-9]+")
+_NOMBRE_DE_HOST = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
+_NUMERO_FORMULARIO = re.compile(r"[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?")
 
 
 class ErrorConfiguracion(Exception):
@@ -187,8 +208,14 @@ class AjustesLeidos:
 CLAVE_AJUSTES = "configuracion"
 
 
-def _mensaje_invalido(seccion: str, clave: str, valor) -> str:
-    return f"`{seccion}.{clave}` debe ser {_tabla()[(seccion, clave)].esperado} (vale «{valor}»)"
+def _mensaje_invalido(seccion: str, clave: str, valor, panel: bool = False) -> str:
+    """Mensaje de un valor no válido. En el panel y las preferencias, el tope (si lo tiene) manda sobre la tabla."""
+    esperado = _tabla()[(seccion, clave)].esperado
+    if panel and (seccion, clave) in TOPES_PANEL:
+        esperado = TOPES_PANEL[(seccion, clave)][2]
+    elif panel and (seccion, clave) in _ESPERADO_PANEL:
+        esperado = _ESPERADO_PANEL[(seccion, clave)]
+    return f"`{seccion}.{clave}` debe ser {esperado} (vale «{valor}»)"
 
 
 def leer_ajustes() -> AjustesLeidos:
@@ -233,9 +260,110 @@ def combinar(proyecto: dict, ajustes: AjustesLeidos) -> tuple[dict, list]:
             avisos.append(f"En {RUTA_PREFERENCIAS}, `{seccion}.{clave}` no es una clave de la configuración; "
                           "se ignora.")
             continue
-        if (isinstance(valor, float) and not math.isfinite(valor)) or not entrada.valida(valor):
-            avisos.append(f"En {RUTA_PREFERENCIAS}, {_mensaje_invalido(seccion, clave, valor)}; "
-                          "se usa el valor de config/settings.yaml.")
+        motivo = _motivo_de_rechazo(seccion, clave, valor, con_disco=False)
+        if motivo is not None:
+            avisos.append(f"En {RUTA_PREFERENCIAS}, {motivo}; se usa el valor de config/settings.yaml.")
             continue
         efectiva[seccion][clave] = valor
     return efectiva, avisos
+
+
+def valor_desde_formulario(seccion: str, clave: str, valor_widget):
+    """Convierte el valor de un campo del formulario al tipo del valor por defecto de su clave y lo comprueba.
+
+    Lanza ErrorConfiguracion con el mensaje para el usuario (con punto final). Una clave desconocida lanza KeyError.
+    """
+    defecto = _tabla()[(seccion, clave)].defecto
+    if isinstance(defecto, bool):
+        if isinstance(valor_widget, bool):
+            return valor_widget
+        raise ErrorConfiguracion(_mensaje_invalido(seccion, clave, valor_widget, panel=True) + ".")
+    if not isinstance(valor_widget, str):
+        raise ErrorConfiguracion(_mensaje_invalido(seccion, clave, valor_widget, panel=True) + ".")
+    texto = valor_widget.strip()
+    convertido = texto
+    if isinstance(defecto, int):
+        convertido = int(texto) if _ENTERO_FORMULARIO.fullmatch(texto) else None
+    elif isinstance(defecto, float):
+        numero = texto.replace(",", ".")
+        convertido = float(numero) if _NUMERO_FORMULARIO.fullmatch(numero) else None
+    if convertido is None:
+        raise ErrorConfiguracion(_mensaje_invalido(seccion, clave, texto, panel=True) + ".")
+    motivo = _motivo_de_rechazo(seccion, clave, convertido, mostrado=texto)
+    if motivo is not None:
+        raise ErrorConfiguracion(motivo + ".")
+    return convertido
+
+
+def _motivo_de_rechazo(seccion: str, clave: str, valor, mostrado: Optional[str] = None,
+                       con_disco: bool = True) -> Optional[str]:
+    """Qué falla en un valor ya convertido, sin punto final; None si vale. Lo usan el formulario y las preferencias.
+
+    `mostrado` es el texto que va en «vale» (por defecto, `str(valor)`). `con_disco=False` omite la comprobación de
+    que la carpeta de `historial.ruta` se puede crear o escribir (las preferencias al abrir no miran el disco).
+    """
+    texto = str(valor) if mostrado is None else mostrado
+    if isinstance(valor, float) and not math.isfinite(valor):
+        return _mensaje_invalido(seccion, clave, texto, panel=True)
+    tope = TOPES_PANEL.get((seccion, clave))
+    if not _tabla()[(seccion, clave)].valida(valor) or (tope is not None and not tope[0] <= valor <= tope[1]):
+        return _mensaje_invalido(seccion, clave, texto, panel=True)
+    if (seccion, clave) == ("ia", "copilot_enterprise_url") and valor and not _NOMBRE_DE_HOST.fullmatch(valor):
+        return _mensaje_invalido(seccion, clave, texto, panel=True)
+    if (seccion, clave) == ("historial", "ruta"):
+        return _motivo_de_ruta(valor, texto, con_disco)
+    return None
+
+
+def _motivo_de_ruta(ruta_texto: str, mostrado: str, con_disco: bool) -> Optional[str]:
+    """`historial.ruta` no puede caer dentro del repo salvo en data/ (regla 8) y, si `con_disco`, su carpeta debe
+    existir y ser escribible o poder crearse. No crea ninguna carpeta."""
+    raiz = Path(RAIZ_PROYECTO).resolve()
+    ruta = Path(ruta_texto)
+    ruta = (ruta if ruta.is_absolute() else raiz / ruta).resolve()
+    if ruta.is_relative_to(raiz) and not ruta.is_relative_to((raiz / "data").resolve()):
+        return f"`historial.ruta` no puede estar dentro de la carpeta del proyecto salvo en data/ (vale «{mostrado}»)"
+    if con_disco and not _carpeta_escribible(ruta.parent):
+        return f"`historial.ruta` está en una carpeta que no se puede crear ni escribir (vale «{mostrado}»)"
+    return None
+
+
+def _carpeta_escribible(carpeta: Path) -> bool:
+    """True si `carpeta` existe y se puede escribir, o no existe y su primer antecesor existente es una carpeta
+    escribible. Mira el disco sin crear nada."""
+    existente = carpeta
+    while not existente.exists() and existente != existente.parent:
+        existente = existente.parent
+    return existente.is_dir() and os.access(existente, os.W_OK)
+
+
+def validar_formulario(valores_widget: dict, modelo_ia: Optional[str] = None) -> tuple[dict, dict]:
+    """Convierte y comprueba un subconjunto de campos del formulario. Devuelve (convertidos, errores).
+
+    Los errores van en el orden de entrada y, al final, el del modelo de IA (regla 7). Una clave desconocida o
+    `ia.modelo` entre `valores_widget` es un error de programación (ValueError), no de usuario.
+    """
+    convertidos: dict = {}
+    errores: dict = {}
+    for (seccion, clave), valor in valores_widget.items():
+        if (seccion, clave) == ("ia", "modelo"):
+            raise ValueError("`ia.modelo` no va en valores_widget: se pasa como modelo_ia")
+        if (seccion, clave) not in _tabla():
+            raise ValueError(f"`{seccion}.{clave}` no es una clave de la configuración")
+        try:
+            convertidos[(seccion, clave)] = valor_desde_formulario(seccion, clave, valor)
+        except ErrorConfiguracion as e:
+            errores[(seccion, clave)] = str(e)
+    if modelo_ia is not None:
+        # Import aquí: copilot importa httpx y esta carga no debe pagarlo al importar configuracion.
+        from src import copilot
+        familia = copilot.familia_excluida(modelo_ia)
+        if familia is not None:
+            errores[("ia", "modelo")] = (f"El modelo «{modelo_ia}» es de la familia «{familia}», que no está "
+                                         "autorizada por la empresa. Elige otro modelo.")
+    return convertidos, errores
+
+
+def resumen_errores(n: int) -> str:
+    """Texto del pie del formulario cuando hay errores: «corrige 1 valor» o «corrige N valores»."""
+    return "No se guardó nada: corrige 1 valor." if n == 1 else f"No se guardó nada: corrige {n} valores."

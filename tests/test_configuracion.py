@@ -355,7 +355,7 @@ def test_ajustes_invalidos_desconocidos_no_finitos_e_ia_modelo_se_ignoran_con_av
 
     assert efectiva == proyecto
     assert len(avisos) == 5
-    assert (f"En {ruta_pref}, `transcripcion.beam_size` debe ser un número entero mayor que 0 (vale «cinco»); "
+    assert (f"En {ruta_pref}, `transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»); "
             "se usa el valor de config/settings.yaml.") in avisos
     assert f"En {ruta_pref}, `audio.sample_rate` no es una clave de la configuración; se ignora." in avisos
     assert (f"En {ruta_pref}, `ia.modelo` no se guarda en «configuracion» (el modelo elegido va en «modelo_ia»); "
@@ -422,3 +422,181 @@ def test_preferencias_con_anidamiento_extremo_no_impiden_abrir(tmp_path, monkeyp
     monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
     ajustes = configuracion.leer_ajustes()
     assert ajustes.valores == {} and ajustes.ilegible
+
+
+@pytest.mark.parametrize("seccion, clave, valor, esperado", [
+    ("transcripcion", "beam_size", "3", 3),
+    ("transcripcion", "no_speech_threshold", " 0,6 ", 0.6),
+    ("transcripcion", "logprob_threshold", "-1", -1.0),
+    ("ia", "copilot_enterprise_url", "", ""),
+    ("ia", "copilot_enterprise_url", "empresa.ghe.com", "empresa.ghe.com"),
+    ("salida", "incluir_timestamps", True, True),
+])
+def test_valor_desde_formulario_convierte(seccion, clave, valor, esperado):
+    from src.configuracion import valor_desde_formulario
+
+    convertido = valor_desde_formulario(seccion, clave, valor)
+
+    assert convertido == esperado
+    assert type(convertido) is type(esperado)
+
+
+@pytest.mark.parametrize("seccion, clave, valor, mensaje", [
+    ("transcripcion", "beam_size", "cinco",
+     "`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»)."),
+    ("transcripcion", "beam_size", "3.0",
+     "`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «3.0»)."),
+    ("transcripcion", "beam_size", "50",
+     "`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «50»)."),
+    ("transcripcion", "temperature", "nan",
+     "`transcripcion.temperature` debe ser un número entre 0 y 2 (vale «nan»)."),
+    ("transcripcion", "temperature", "1e999",
+     "`transcripcion.temperature` debe ser un número entre 0 y 2 (vale «1e999»)."),
+    ("ia", "max_caracteres_bloque", "4000",
+     "`ia.max_caracteres_bloque` debe ser un número entero entre 5000 y 500000 (vale «4000»)."),
+    ("transcripcion", "compression_ratio_threshold", "",
+     "`transcripcion.compression_ratio_threshold` debe ser un número (vale «»)."),
+    ("transcripcion", "compression_ratio_threshold", "inf",
+     "`transcripcion.compression_ratio_threshold` debe ser un número (vale «inf»)."),
+])
+def test_valor_desde_formulario_rechaza_con_topes_y_no_finitos(seccion, clave, valor, mensaje):
+    from src.configuracion import ErrorConfiguracion, valor_desde_formulario
+
+    with pytest.raises(ErrorConfiguracion) as error:
+        valor_desde_formulario(seccion, clave, valor)
+
+    assert str(error.value) == mensaje
+
+
+def test_dominio_enterprise_debe_ser_un_nombre_de_host():
+    from src.configuracion import ErrorConfiguracion, valor_desde_formulario
+
+    for valor in ("https://empresa.ghe.com/", "empresa.ghe.com/", "empresa ghe.com"):
+        with pytest.raises(ErrorConfiguracion) as error:
+            valor_desde_formulario("ia", "copilot_enterprise_url", valor)
+        assert str(error.value) == ("`ia.copilot_enterprise_url` debe ser un nombre de dominio sin https:// ni "
+                                    f"barras, como empresa.ghe.com, o estar vacío (vale «{valor}»).")
+
+    assert valor_desde_formulario("ia", "copilot_enterprise_url", "empresa.ghe.com") == "empresa.ghe.com"
+    assert valor_desde_formulario("ia", "copilot_enterprise_url", "") == ""
+
+
+def test_historial_ruta_fuera_del_repo_salvo_data_y_escribible(tmp_path, monkeypatch):
+    from src import configuracion
+    from src.configuracion import ErrorConfiguracion, valor_desde_formulario
+
+    proyecto = tmp_path / "proyecto"
+    proyecto.mkdir()
+    monkeypatch.setattr(configuracion, "RAIZ_PROYECTO", proyecto)
+
+    for valor in ("src/historial.db", "data/../src/historial.db"):
+        with pytest.raises(ErrorConfiguracion) as error:
+            valor_desde_formulario("historial", "ruta", valor)
+        assert str(error.value) == ("`historial.ruta` no puede estar dentro de la carpeta del proyecto salvo en data/ "
+                                    f"(vale «{valor}»).")
+
+    archivo = tmp_path / "archivo"
+    archivo.write_text("contenido", encoding="utf-8")
+    bajo_archivo = str(archivo / "sub" / "historial.db")
+    with pytest.raises(ErrorConfiguracion) as error:
+        valor_desde_formulario("historial", "ruta", bajo_archivo)
+    assert str(error.value) == ("`historial.ruta` está en una carpeta que no se puede crear ni escribir "
+                                f"(vale «{bajo_archivo}»).")
+
+    nueva = str(tmp_path / "nueva" / "historial.db")
+    assert valor_desde_formulario("historial", "ruta", "data/sub/otro.db") == "data/sub/otro.db"
+    assert valor_desde_formulario("historial", "ruta", nueva) == nueva
+
+    assert not (proyecto / "data").exists()
+    assert not (tmp_path / "nueva").exists()
+
+
+def test_preferencias_aplican_los_topes_del_panel_y_las_reglas_de_ruta_y_dominio(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    monkeypatch.setattr(configuracion, "RAIZ_PROYECTO", tmp_path / "proyecto")
+    (tmp_path / "proyecto").mkdir()
+    ruta_yaml = tmp_path / "settings.yaml"
+    ruta_yaml.write_text('transcripcion:\n  beam_size: 7\n  best_of: 4\nhistorial:\n  ruta: "data/otra.db"\n'
+                         'ia:\n  copilot_enterprise_url: "empresa.ghe.com"\n', encoding="utf-8")
+    proyecto = cargar_configuracion(str(ruta_yaml))
+    ruta_pref = configuracion.RUTA_PREFERENCIAS
+    configuracion.RUTA_PREFERENCIAS.write_text(json.dumps({"configuracion": {
+        "transcripcion": {"beam_size": 50, "best_of": "cinco"},
+        "historial": {"ruta": "src/historial.db"},
+        "ia": {"copilot_enterprise_url": "https://empresa.ghe.com/"},
+    }}), encoding="utf-8")
+
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+
+    assert efectiva == proyecto
+    assert avisos == [
+        f"En {ruta_pref}, `transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «50»); "
+        "se usa el valor de config/settings.yaml.",
+        f"En {ruta_pref}, `transcripcion.best_of` debe ser un número entero entre 1 y 20 (vale «cinco»); "
+        "se usa el valor de config/settings.yaml.",
+        f"En {ruta_pref}, `historial.ruta` no puede estar dentro de la carpeta del proyecto salvo en data/ "
+        "(vale «src/historial.db»); se usa el valor de config/settings.yaml.",
+        f"En {ruta_pref}, `ia.copilot_enterprise_url` debe ser un nombre de dominio sin https:// ni barras, como "
+        "empresa.ghe.com, o estar vacío (vale «https://empresa.ghe.com/»); se usa el valor de config/settings.yaml.",
+    ]
+
+    ruta_fuera = tmp_path / "archivo"
+    ruta_fuera.write_text("contenido", encoding="utf-8")
+    ruta_bajo_archivo = str(ruta_fuera / "sub" / "historial.db")
+    configuracion.RUTA_PREFERENCIAS.write_text(json.dumps(
+        {"configuracion": {"historial": {"ruta": ruta_bajo_archivo}}}), encoding="utf-8")
+
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+
+    assert efectiva["historial"]["ruta"] == ruta_bajo_archivo
+    assert avisos == []
+    assert not (ruta_fuera / "sub").exists()
+
+
+def test_yaml_con_beam_size_alto_se_carga_sin_tope(tmp_path):
+    ruta = tmp_path / "alto.yaml"
+    ruta.write_text("transcripcion:\n  beam_size: 50\n", encoding="utf-8")
+
+    assert cargar_configuracion(str(ruta))["transcripcion"]["beam_size"] == 50
+
+
+def test_validar_formulario_subconjunto_errores_en_orden_y_regla_7():
+    from src.configuracion import validar_formulario
+
+    convertidos, errores = validar_formulario({
+        ("transcripcion", "beam_size"): "cinco",
+        ("salida", "formato"): "srt",
+        ("transcripcion", "best_of"): "x",
+    }, modelo_ia="Mistral-Large-3")
+
+    assert convertidos == {("salida", "formato"): "srt"}
+    assert list(errores) == [("transcripcion", "beam_size"), ("transcripcion", "best_of"), ("ia", "modelo")]
+    assert errores[("transcripcion", "beam_size")] == (
+        "`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»).")
+    assert errores[("transcripcion", "best_of")] == (
+        "`transcripcion.best_of` debe ser un número entero entre 1 y 20 (vale «x»).")
+    assert errores[("ia", "modelo")] == ("El modelo «Mistral-Large-3» es de la familia «mistral», que no está "
+                                         "autorizada por la empresa. Elige otro modelo.")
+
+    _, errores = validar_formulario({("salida", "formato"): "srt"}, modelo_ia="claude-sonnet-5.5")
+    assert errores == {}
+    _, errores = validar_formulario({("salida", "formato"): "srt"})
+    assert errores == {}
+
+
+def test_validar_formulario_no_acepta_ia_modelo_entre_los_valores():
+    from src.configuracion import validar_formulario
+
+    with pytest.raises(ValueError):
+        validar_formulario({("ia", "modelo"): "gpt-4.1"})
+
+
+def test_resumen_errores_singular_y_plural():
+    from src.configuracion import resumen_errores
+
+    assert resumen_errores(1) == "No se guardó nada: corrige 1 valor."
+    assert resumen_errores(3) == "No se guardó nada: corrige 3 valores."

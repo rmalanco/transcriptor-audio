@@ -57,6 +57,10 @@ Dependencias entre módulos (quién importa a quién):
   `AjustesLeidos(valores, avisos, ilegible)`: `valores` es `(sección, clave) → valor`, `avisos` son los textos para Registro,
   e `ilegible` es verdadero solo si el archivo existe y no es JSON o no es un objeto. `configuracion.py:combinar(proyecto,
   ajustes) -> tuple[dict, list]` devuelve una copia del YAML con los valores válidos encima, más los avisos; no toca el YAML.
+  `combinar` aplica los mismos topes que el formulario (`TOPES_PANEL`, dominio y `historial.ruta`), salvo la comprobación de disco.
+- `configuracion.py:TOPES_PANEL`, `valor_desde_formulario(seccion, clave, valor_widget)` (convierte el texto de un campo y lanza
+  `ErrorConfiguracion`), `validar_formulario(valores_widget, modelo_ia=None) -> tuple[dict, dict]` (convertidos y errores; `ia.modelo` va
+  aparte y aplica la regla de familias excluidas) y `resumen_errores(n)` (texto del pie).
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
 - `utils.py:formatear_duracion` (marcas de la interfaz), `formatear_tiempo`, `formatear_tiempo_srt`,

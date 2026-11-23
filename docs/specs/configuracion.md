@@ -71,7 +71,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
 - Given ajustes inválidos, no finitos, de claves que la configuración no tiene, `ia.modelo` dentro de `configuracion` o
   secciones que no son objetos, when se abre la ventana, then cada ajuste toma el valor del YAML, la ventana abre igual
   y Registro muestra un aviso por cada uno, con el texto de su caso (`<ruta>` es la de `preferencias.json`):
-  - valor inválido: «En <ruta>, `transcripcion.beam_size` debe ser un número entero mayor que 0 (vale «cinco»); se usa
+  - valor inválido: «En <ruta>, `transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»); se usa
     el valor de config/settings.yaml.» (el texto cambia con la clave, igual que en el YAML)
   - valor no finito en una clave que admite cualquier número: «En <ruta>, `transcripcion.compression_ratio_threshold`
     debe ser un número (vale «inf»); se usa el valor de config/settings.yaml.»
@@ -79,6 +79,18 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   - `ia.modelo` dentro de `configuracion`: «En <ruta>, `ia.modelo` no se guarda en «configuracion» (el modelo elegido va
     en «modelo_ia»); se ignora.»
   - sección que no es un objeto: «En <ruta>, la sección `salida` no es un objeto; se ignora.»
+- Given un `preferencias.json` cuyo `configuracion` trae un valor fuera de los topes del panel, un `historial.ruta`
+  dentro de la carpeta del proyecto (salvo `data/`) o un `ia.copilot_enterprise_url` que no es un nombre de dominio,
+  when se abre la ventana, then cada uno toma el valor del YAML, la ventana abre igual y Registro muestra un aviso por
+  cada uno. Los topes son: `transcripcion.beam_size` y `transcripcion.best_of` entre 1 y 20; `transcripcion.temperature`
+  e `ia.temperatura` entre 0 y 2; `transcripcion.no_speech_threshold` entre 0 y 1; `ia.peticiones_paralelas` entre 1 y 8;
+  `ia.max_caracteres_bloque` entre 5000 y 500000. Los avisos son, por ejemplo, «En <ruta>, `transcripcion.beam_size`
+  debe ser un número entero entre 1 y 20 (vale «50»); se usa el valor de config/settings.yaml.», «En <ruta>,
+  `historial.ruta` no puede estar dentro de la carpeta del proyecto salvo en data/ (vale «src/historial.db»); se usa el
+  valor de config/settings.yaml.» y «En <ruta>, `ia.copilot_enterprise_url` debe ser un nombre de dominio sin https://
+  ni barras, como empresa.ghe.com, o estar vacío (vale «https://empresa.ghe.com/»); se usa el valor de
+  config/settings.yaml.». `config/settings.yaml` y la CLI no tienen esos topes: un `beam_size: 50` en el YAML se carga
+  como antes.
 - Given un `preferencias.json` que no es JSON (por ejemplo `{`) o cuyo JSON no es un objeto (por ejemplo una lista), when
   se abre la ventana, then se abre con los valores del YAML y Registro muestra un único aviso: «Las preferencias <ruta>
   no son un JSON válido; se usan los valores de config/settings.yaml. Al guardar se reemplazará el archivo.»
@@ -89,6 +101,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   valores de config/settings.yaml.»
 
 Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
+Origen: docs/historias/hechas/2026-11-22-18-validar-formulario.md
 
 ### Modelo de IA elegido en la ventana
 - Given que se elige un modelo en el selector de la ventana, when se elige, then el modelo se recuerda en
