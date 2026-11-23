@@ -183,6 +183,21 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 
+### Notas que no caben en el modelo
+- Given una transcripción en varias partes cuyas notas estimadas superan el límite de entrada del modelo (del catálogo
+  de Copilot), when se genera el documento, then no se envía la redacción y aparece el error «las notas de las N partes
+  suman unos T tokens y el modelo «M» admite como máximo L tokens de entrada, así que no se envió la redacción. Elige
+  en el selector un modelo con más contexto y vuelve a generar; con otro modelo se pedirán de nuevo las notas de todas
+  las partes.» (la pestaña lo muestra tras «No se pudo generar: »), donde T es la estimación sin separador de miles y L
+  el límite del catálogo; repetir con el mismo modelo no consulta nada más y da el mismo error.
+- Given notas que caben, o una sola parte, o notas por debajo del umbral de 32 000 tokens estimados, when se genera el
+  documento, then se redacta como hoy; por debajo del umbral no se consulta el catálogo.
+- Given que el catálogo no se puede consultar o no trae el límite del modelo, when se genera el documento, then se
+  redacta como hoy y la pestaña Registro anota que no se pudo comprobar el límite de entrada; la siguiente generación
+  vuelve a consultar el catálogo.
+
+Origen: docs/historias/hechas/2026-11-22-16-limite-de-entrada.md
+
 ### Revisión de fidelidad contra las notas
 - Given la revisión de fidelidad activada y una transcripción procesada en N partes, when se genera el documento, then
   durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y la nota añade «La

@@ -96,7 +96,7 @@ Dependencias entre módulos (quién importa a quién):
 - Sesión y token: `leer_token(enterprise_url=None) -> Optional[Sesion]`, `guardar_token`, `cerrar_sesion`,
   `invalidar_token`.
 - Login: `iniciar_login(enterprise_url=None) -> CodigoDispositivo`, `esperar_login(codigo, …) -> str`.
-- Modelos: `listar_modelos(sesion)`, `precio_entrada(modelo)`, `modelos_economicos(sesion)`,
+- Modelos: `listar_modelos(sesion)`, `limites_de_entrada(sesion) -> dict[str, int]`, `precio_entrada(modelo)`, `modelos_economicos(sesion)`,
   `familia_excluida(id_modelo) -> Optional[str]`, `opciones_de_modelo(modelos, configurado)`,
   `cargar_opciones_de_modelo(sesion, actual) -> list[str]` (una sola consulta a `/models`, sin sesión `auto`) y
   `abrir_sesion_auto(sesion) -> SesionAuto`.
@@ -217,7 +217,8 @@ Dependencias entre módulos (quién importa a quién):
 - `x-initiator`: la primera petición de cada documento va con `user` y las siguientes con `agent`
   (`asistente_ia.py:AsistenteIA._cabeceras`, `asistente_ia.py:AsistenteIA._generar`).
 - `copilot.py:listar_modelos` acepta un modelo si `policy.state == "enabled"` o `model_picker_enabled`, si es de tipo
-  `chat` y, cuando declara `supported_endpoints`, si incluyen `/chat/completions`.
+  `chat` y, cuando declara `supported_endpoints`, si incluyen `/chat/completions`. Lee el catálogo con `copilot.py:_catalogo`,
+  igual que `copilot.py:limites_de_entrada` (`capabilities.limits.max_prompt_tokens` por id, sin filtrar por habilitados).
 - `copilot.py:modelos_economicos` descarta los modelos sin precio, con precio de entrada mayor que
   `PRECIO_MAX_ECONOMICO` o de `FAMILIAS_EXCLUIDAS`; deja un solo modelo por `name` (el primero) y los ordena por precio
   de entrada.
@@ -260,7 +261,11 @@ Dependencias entre módulos (quién importa a quién):
 
 - Una transcripción vacía lanza `ErrorAsistenteIA` (`asistente_ia.py:AsistenteIA._generar`).
 - Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad compara
-  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`). Si Copilot corta la redacción, la minuta o el resumen llevan la nota del corte con su motivo, primero bajo la línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`).
+  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Si la estimación de la petición
+  de redacción (caracteres / 4) supera 32 000 tokens, antes de redactar se consulta una vez por asistente
+  `copilot.py:limites_de_entrada`; si la estimación supera el límite del modelo, se lanza `ErrorAsistenteIA` y la redacción
+  no se envía. Un fallo del catálogo, o un modelo sin límite, no bloquea: se redacta como hoy
+  (`asistente_ia.py:AsistenteIA._comprobar_limite_de_entrada`). Con dos o más partes, la app añade al final del documento una nota que lo advierte, y el progreso de la revisión nombra la fuente real (`asistente_ia.py:AsistenteIA._con_nota`). Si además faltan secciones obligatorias, el documento puede terminar con una nota que las nombra, bajo la misma línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`). Si falla la pasada de completar secciones o la revisión de fidelidad, por un error que no es cancelación, falta de sesión ni modelo no autorizado, el documento se entrega con la nota del motivo (`asistente_ia.py:AsistenteIA._generar`). Si Copilot corta la redacción, la minuta o el resumen llevan la nota del corte con su motivo, primero bajo la línea horizontal (`asistente_ia.py:notas_de_la_aplicacion`).
 - Las notas de cada parte se guardan en memoria en cuanto esa parte termina, hasta 64 partes (o todas las de la generación en curso si son más). Al generar otra vez con el mismo modelo, solo se piden las que faltan (`asistente_ia.py:AsistenteIA._notas_por_bloque`). Si una parte falla, no se lanzan las que aún no han empezado, el error dice cuál es y cuántas notas se conservan, y el modelo se valida antes de enviar nada. Las notas de una parte que Copilot cortó no se guardan en esa caché: se usan en el documento en curso (con nota) y se vuelven a pedir al generar otra vez (`asistente_ia.py:AsistenteIA._notas_por_bloque`).
 - Si faltan secciones de `SECCIONES_RESUMEN` o `SECCIONES_MINUTA`, se hace un solo reintento, que se acepta solo si
   faltan menos que antes. La revisión de fidelidad solo se acepta si no deja más secciones sin cubrir que el borrador y, en la minuta, si no deja menos filas en la tabla de tareas ni menos viñetas en Acuerdos (`asistente_ia.py:AsistenteIA._generar`, con `contar_filas_tareas` y `contar_vinetas_acuerdos`).

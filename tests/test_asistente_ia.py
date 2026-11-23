@@ -1658,3 +1658,140 @@ def test_reintento_completo_sustituye_a_la_redaccion_cortada_y_no_lleva_nota(mon
     minuta = asistente.generar_minuta("Texto corto de la reunión.")
     assert "Nota de la aplicación" not in minuta  # el documento que queda es el del reintento, completo
     assert minuta.endswith("- Próxima reunión, si se menciona.")
+
+
+# ------------------------------------------------------------------ Límite de entrada del modelo (historia 16)
+
+def _relleno(caracteres: int) -> str:
+    """Texto de relleno de exactamente `caracteres` caracteres (respuesta de notas simulada)."""
+    return ("Nota de relleno. " * caracteres)[:caracteres]
+
+
+def _simular_catalogo(monkeypatch, respuesta):
+    """Catálogo de Copilot simulado: `respuesta` es la respuesta a devolver o una excepción a lanzar. Devuelve las
+    consultas recibidas."""
+    consultas = []
+    def get(url, headers, timeout):
+        consultas.append(url)
+        if isinstance(respuesta, Exception):
+            raise respuesta
+        return respuesta
+    monkeypatch.setattr(asistente_ia.httpx, "get", get)
+    return consultas
+
+
+def _catalogo_con_limite(modelo: str, limite) -> _Respuesta:
+    return _Respuesta({"data": [{"id": modelo, "capabilities": {"limits": {"max_prompt_tokens": limite}}}]})
+
+
+def test_notas_cortas_o_una_sola_parte_no_consultan_el_catalogo(monkeypatch):
+    _prohibir_red(monkeypatch)  # ni catálogo ni sesión: el test falla si se llama
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=False)
+    texto_corto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto_corto, 900)) == 2  # varias partes, con notas cortas
+    asistente.generar_minuta(texto_corto)
+    una_parte = _relleno(150_000)  # una sola parte, pero su redacción supera el umbral de 32 000 tokens
+    assert len(dividir_texto(una_parte, 200_000)) == 1
+    AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=200_000,
+                revision_fidelidad=False).generar_minuta(una_parte)
+    assert len(cuerpos) == 4  # primera: 2 notas y la minuta; la de una parte: solo la minuta
+
+
+TEXTO_TRES_PARTES_LARGO = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(90))
+
+
+def test_notas_que_superan_el_limite_no_envian_la_redaccion(monkeypatch):
+    import re
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(100_000) if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    assert len(dividir_texto(TEXTO_TRES_PARTES_LARGO, 1200)) == 3
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as error:
+        asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)
+    estimado = int(re.search(r"unos (\d+) tokens", str(error.value)).group(1))
+    assert 74_000 <= estimado <= 78_000  # el criterio dice unos 76 000 tokens
+    assert str(error.value) == (
+        f"las notas de las 3 partes suman unos {estimado} tokens y el modelo «gpt-4.1» admite como máximo 64000 "
+        "tokens de entrada, así que no se envió la redacción. Elige en el selector un modelo con más contexto y vuelve "
+        "a generar; con otro modelo se pedirán de nuevo las notas de todas las partes.")
+    assert len(cuerpos) == 3 and all(_es_prompt_de_notas(cuerpo) for cuerpo in cuerpos)  # ninguna redacción
+    assert len(consultas) == 1
+
+
+def test_repetir_con_el_mismo_modelo_no_pide_nada_y_repite_el_error(monkeypatch):
+    import re
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(100_000) if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    with pytest.raises(ErrorAsistenteIA) as primera:
+        asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)
+    peticiones_previas, consultas_previas = len(cuerpos), len(consultas)
+    with pytest.raises(ErrorAsistenteIA) as segunda:
+        asistente.generar_resumen(TEXTO_TRES_PARTES_LARGO)
+    # Ni notas, ni redacción, ni catálogo
+    assert len(cuerpos) == peticiones_previas and len(consultas) == consultas_previas
+    # El resumen tiene otra plantilla, así que su estimación difiere un poco: el resto del error es el mismo
+    assert re.sub(r"unos \d+ tokens", "unos N tokens", str(segunda.value)) == \
+        re.sub(r"unos \d+ tokens", "unos N tokens", str(primera.value))
+    assert "no se envió la redacción" in str(segunda.value)
+
+
+def test_notas_que_caben_consultan_el_catalogo_una_vez_y_redactan(monkeypatch):
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(60_000) if _es_prompt_de_notas(cuerpo)
+                            else RESUMEN_MODELO if "Redacta un resumen" in cuerpo["messages"][-1]["content"]
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    minuta = asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)  # notas de 60 000 caracteres: unos 46 000 tokens
+    resumen = asistente.generar_resumen(TEXTO_TRES_PARTES_LARGO)
+    assert len(consultas) == 1  # una sola consulta del catálogo para la minuta y el resumen
+    assert len(cuerpos) == 3 + 2  # 3 notas, y después la minuta y el resumen, que sí se envían
+    assert minuta.startswith("# Minuta") and resumen.startswith("## Resumen")
+
+
+@pytest.mark.parametrize("respuesta", [
+    pytest.param(asistente_ia.httpx.ConnectError("sin conexión"), id="conexion-caida"),
+    pytest.param(_Respuesta({}, 401), id="401"),
+    pytest.param(_Respuesta({}, 500), id="500"),
+    pytest.param(_Respuesta({"data": "no es una lista"}), id="data-inesperado"),
+    pytest.param(_catalogo_con_limite("otro-modelo", 64000), id="modelo-ausente"),
+    pytest.param(_Respuesta({"data": [{"id": "gpt-4.1", "capabilities": {}}]}), id="sin-limits"),
+    pytest.param(_catalogo_con_limite("gpt-4.1", 0), id="limite-cero"),
+    pytest.param(_catalogo_con_limite("gpt-4.1", -5), id="limite-negativo"),
+    pytest.param(_catalogo_con_limite("gpt-4.1", "64000"), id="limite-texto"),
+])
+def test_sin_limite_conocido_se_redacta_como_hoy(monkeypatch, caplog, respuesta):
+    consultas = _simular_catalogo(monkeypatch, respuesta)
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: _relleno(100_000) if _es_prompt_de_notas(cuerpo)
+                            else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    with caplog.at_level("WARNING", logger="transcriptor.ia"):
+        minuta = asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)  # no es un error: se redacta
+    assert len(consultas) == 1
+    assert len(cuerpos) == 4 and not _es_prompt_de_notas(cuerpos[-1])  # 3 notas y la redacción
+    assert minuta.startswith("# Minuta")
+    assert "no se pudo comprobar el límite de entrada" in caplog.text.lower()
+
+
+def test_si_el_catalogo_falla_se_vuelve_a_consultar_en_la_siguiente_generacion(monkeypatch):
+    respuestas = iter([asistente_ia.httpx.ConnectError("sin conexión"), _catalogo_con_limite("gpt-4.1", 64000)])
+    llamadas = []
+
+    def get(*args, **kwargs):
+        llamadas.append(1)
+        respuesta = next(respuestas)
+        if isinstance(respuesta, Exception):
+            raise respuesta
+        return respuesta
+
+    monkeypatch.setattr(copilot.httpx, "get", get)
+    _simular_chat(monkeypatch, lambda cuerpo: _relleno(100_000) if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    assert asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO).startswith("# Minuta")  # sin límite: se redacta
+    with pytest.raises(ErrorAsistenteIA, match="no se envió la redacción"):
+        asistente.generar_resumen(TEXTO_TRES_PARTES_LARGO)  # el catálogo ya responde: se comprueba
+    assert len(llamadas) == 2

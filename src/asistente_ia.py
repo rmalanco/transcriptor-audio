@@ -22,6 +22,9 @@ log = logging.getLogger("transcriptor.ia")
 NOMBRE_PROVEEDOR = "GitHub Copilot"
 MODELO_POR_DEFECTO = "gpt-4.1"
 LIMITE_NOTAS_EN_CACHE = 64  # partes; equivale a unas 8 transcripciones de 8 partes
+# Límite de entrada: solo se consulta el catálogo si la redacción estimada supera este umbral (historia 16)
+UMBRAL_COMPROBAR_LIMITE = 32_000  # tokens estimados
+CARACTERES_POR_TOKEN = 4  # estimación sin margen: con tokenizadores de Claude suele quedarse corta
 
 PROMPT_SISTEMA = """Eres un asistente experto en redactar documentos en español a partir de transcripciones \
 automáticas de audio. Las transcripciones pueden contener errores de reconocimiento, muletillas y \
@@ -429,6 +432,9 @@ class AsistenteIA:
         self.es_auto = modelo == copilot.MODELO_AUTO
         self._sesion_auto: Optional[copilot.SesionAuto] = None
         self._cerrojo_auto = threading.Lock()
+        # Límites de entrada del catálogo (id -> tokens), leídos una vez por asistente cuando hacen falta
+        self._limites: Optional[dict[str, int]] = None
+        self._cerrojo_limites = threading.Lock()
 
     @property
     def modelo_usado(self) -> str:
@@ -723,6 +729,8 @@ class AsistenteIA:
         if on_progreso:
             on_progreso("Redactando documento…")
         prompt = plantilla.format(texto=texto)
+        if len(bloques) > 1:
+            self._comprobar_limite_de_entrada(prompt, len(bloques), cancelar)
         documento = self._completar(prompt, cancelar)
 
         corte = _corte(documento)
@@ -783,6 +791,36 @@ class AsistenteIA:
         # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
         return _Documento(documento, len(bloques), faltan_al_final,
                           error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes)
+
+    def _comprobar_limite_de_entrada(self, prompt: str, partes: int, cancelar: Optional[threading.Event]) -> None:
+        """Antes de redactar a partir de notas: si la petición entera supera el límite de entrada del modelo que se
+        usará, no se envía (Copilot la rechazaría con un error poco claro). Solo se consulta el catálogo si la
+        estimación supera el umbral."""
+        estimado = math.ceil((len(PROMPT_SISTEMA) + len(prompt)) / CARACTERES_POR_TOKEN)
+        if estimado <= UMBRAL_COMPROBAR_LIMITE:
+            return
+        if cancelar and cancelar.is_set():
+            raise InterruptedError
+        modelo, _ = self._modelo_para_peticion()
+        with self._cerrojo_limites:
+            if self._limites is None:
+                try:
+                    self._limites = copilot.limites_de_entrada(copilot.Sesion(self.api_key, self.enterprise_url))
+                except copilot.ErrorCopilot as e:
+                    # El fallo no se recuerda: la siguiente generación vuelve a consultar el catálogo
+                    log.warning("No se pudo comprobar el límite de entrada de «%s» (%s); se envía la redacción "
+                                "como hoy.", modelo, e)
+                    return
+        limite = self._limites.get(modelo)
+        if limite is None:
+            log.warning("No se pudo comprobar el límite de entrada de «%s»: el catálogo no lo informa; se envía la "
+                        "redacción como hoy.", modelo)
+        elif estimado > limite:
+            raise ErrorAsistenteIA(
+                f"las notas de las {partes} partes suman unos {estimado} tokens y el modelo «{modelo}» admite como "
+                f"máximo {limite} tokens de entrada, así que no se envió la redacción. Elige en el selector un modelo "
+                "con más contexto y vuelve a generar; con otro modelo se pedirán de nuevo las notas de todas las "
+                "partes.")
 
     def _con_nota(self, d: _Documento) -> str:
         """Añade al final las notas de la aplicación que apliquen. Va después de todas las pasadas del modelo y del

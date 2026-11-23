@@ -248,12 +248,8 @@ def esperar_login(
 
 # ------------------------------------------------------------------ Modelos
 
-def listar_modelos(sesion: Sesion) -> list[dict]:
-    """Modelos de chat que la cuenta puede usar por /chat/completions.
-
-    La señal fiable es `policy.state == "enabled"` (lo que la licencia u organización permite);
-    `model_picker_enabled` viene en False para todos en algunas cuentas, así que solo se usa como alternativa.
-    """
+def _catalogo(sesion: Sesion) -> list[dict]:
+    """Todos los modelos del catálogo de Copilot (/models), sin filtrar."""
     try:
         respuesta = httpx.get(f"{url_api(sesion.enterprise_url)}/models", headers=cabeceras(sesion.token), timeout=30)
     except httpx.HTTPError as e:
@@ -262,8 +258,33 @@ def listar_modelos(sesion: Sesion) -> list[dict]:
         raise ErrorCopilot("La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión.")
     if respuesta.status_code >= 400:
         raise ErrorCopilot(f"GitHub Copilot respondió {respuesta.status_code}: {respuesta.text[:200]}")
+    return _lista_de_objetos(respuesta, "pedir la lista de modelos", "data")
+
+
+def limites_de_entrada(sesion: Sesion) -> dict[str, int]:
+    """Tokens de entrada que admite cada modelo del catálogo (`capabilities.limits.max_prompt_tokens`), por id.
+
+    Omite los modelos que no lo informan o no lo informan como entero positivo. No filtra por habilitados: el modelo
+    con el que se generó puede no estar en la lista del selector.
+    """
+    limites = {}
+    for modelo in _catalogo(sesion):
+        capacidades = modelo.get("capabilities")
+        limites_del_modelo = capacidades.get("limits") if isinstance(capacidades, dict) else None
+        limite = limites_del_modelo.get("max_prompt_tokens") if isinstance(limites_del_modelo, dict) else None
+        if isinstance(modelo.get("id"), str) and type(limite) is int and limite > 0:
+            limites[modelo["id"]] = limite
+    return limites
+
+
+def listar_modelos(sesion: Sesion) -> list[dict]:
+    """Modelos de chat que la cuenta puede usar por /chat/completions.
+
+    La señal fiable es `policy.state == "enabled"` (lo que la licencia u organización permite);
+    `model_picker_enabled` viene en False para todos en algunas cuentas, así que solo se usa como alternativa.
+    """
     modelos = []
-    for modelo in _lista_de_objetos(respuesta, "pedir la lista de modelos", "data"):
+    for modelo in _catalogo(sesion):
         endpoints = modelo.get("supported_endpoints")
         habilitado = (modelo.get("policy") or {}).get("state") == "enabled" or modelo.get("model_picker_enabled")
         if not habilitado:

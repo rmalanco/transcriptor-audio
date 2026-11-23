@@ -174,6 +174,25 @@ def test_listar_modelos_con_respuesta_inesperada_da_error_copilot(monkeypatch):
     assert str(error.value) == "GitHub devolvió una respuesta inesperada al pedir la lista de modelos."
 
 
+def test_limites_de_entrada_del_catalogo(monkeypatch):
+    datos = {"data": [
+        {"id": "gpt-4.1", "policy": {"state": "enabled"}, "capabilities": {"limits": {"max_prompt_tokens": 64000}}},
+        # Sin filtro de habilitados: el modelo con el que se generó puede no estar en el selector
+        {"id": "claude-haiku-5.5", "model_picker_enabled": False,
+         "capabilities": {"limits": {"max_prompt_tokens": 936000}}},
+        {"id": "sin-max-prompt", "capabilities": {"limits": {"max_output_tokens": 16384}}},
+        {"id": "sin-capacidades"},
+        {"id": "capacidades-de-texto", "capabilities": "chat"},
+        {"id": "limite-de-texto", "capabilities": {"limits": {"max_prompt_tokens": "64000"}}},
+        {"id": "limite-cero", "capabilities": {"limits": {"max_prompt_tokens": 0}}},
+        {"id": "limite-negativo", "capabilities": {"limits": {"max_prompt_tokens": -1}}},
+        {"id": "limite-decimal", "capabilities": {"limits": {"max_prompt_tokens": 64000.0}}},
+        {"id": "limite-booleano", "capabilities": {"limits": {"max_prompt_tokens": True}}},
+    ]}
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta(datos))
+    assert copilot.limites_de_entrada(copilot.Sesion("gho_x")) == {"gpt-4.1": 64000, "claude-haiku-5.5": 936000}
+
+
 def test_sin_sesion_lanza_error_especifico():
     with pytest.raises(ErrorSinSesionCopilot):
         AsistenteIA()
