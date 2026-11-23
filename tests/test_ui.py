@@ -100,8 +100,9 @@ def test_campos_avanzados_e_historial():
     """C2, criterios 1 y 2: las 15 claves fuera de «ia», en su orden; las siete de decodificación plegadas dentro de
     Transcripción, y `historial.ruta` con su nota."""
     from src import configuracion
-    from src.ui_configuracion import CAMPOS
+    from src.ui_configuracion import CAMPOS as TODOS
 
+    CAMPOS = [c for c in TODOS if c.seccion != "ia"]  # las claves de «ia» tienen su propio test (D1)
     assert [(c.seccion, c.clave) for c in CAMPOS] == [
         ("modelo", "nombre"), ("transcripcion", "idioma"), ("modelo", "dispositivo"), ("modelo", "compute_type"),
         ("transcripcion", "beam_size"), ("transcripcion", "best_of"), ("transcripcion", "temperature"),
@@ -191,7 +192,7 @@ def test_aplicar_guardado_solo_toca_las_claves_cambiadas():
     resultado = ResultadoGuardado({}, efectiva, None, [], {("transcripcion", "idioma"), ("salida", "formato")},
                                   "Configuración guardada")
     app = SimpleNamespace(
-        configuracion=anterior, avisos_preferencias=[], var_modelo=Doble(), var_idioma=Doble(),
+        configuracion=anterior, avisos_preferencias=[], _modelo_preferido=None, var_modelo=Doble(), var_idioma=Doble(),
         var_formato=Doble(), var_dispositivo=Doble(), var_compute=Doble(), var_timestamps=Doble(),
         combo_idioma=DobleCombo(),
     )
@@ -318,3 +319,278 @@ def test_aplicar_guardado_repone_el_modelo_de_ia_y_olvida_el_asistente():
     assert app.combo_modelo_ia.valores == ["auto", "claude-sonnet-5.5"]
     assert app.tabs_ia["resumen"]["estado"].texto == "Modelo: GitHub Copilot · claude-sonnet-5.5"
     assert app._documentos.olvidados == 0
+
+
+def test_campos_de_ia_sin_modelo():
+    """D1, criterio 1: `CAMPOS` tiene las cinco claves `ia.*` salvo `ia.modelo`, seguidas y en el grupo «IA», entre
+    la última de «Salida» y `historial.ruta`; dominio y revisión sin plegar, el resto plegado; sin nota; con sus
+    etiquetas."""
+    from src.ui_configuracion import CAMPOS
+
+    indices = [i for i, c in enumerate(CAMPOS) if c.seccion == "ia"]
+    ia = [CAMPOS[i] for i in indices]
+    assert [c.clave for c in ia] == [
+        "copilot_enterprise_url", "revision_fidelidad", "temperatura", "max_caracteres_bloque", "peticiones_paralelas",
+    ]
+    assert indices == list(range(indices[0], indices[0] + 5))
+    assert all(c.grupo == "IA" for c in ia)
+    assert CAMPOS[indices[0] - 1].grupo == "Salida"
+    assert (CAMPOS[indices[-1] + 1].seccion, CAMPOS[indices[-1] + 1].clave) == ("historial", "ruta")
+    assert [(c.control, c.avanzado) for c in ia] == [
+        ("texto", False), ("interruptor", False), ("texto", True), ("texto", True), ("texto", True),
+    ]
+    assert [c.etiqueta for c in ia] == [
+        "Dominio de GitHub Enterprise (vacío = github.com)", "Revisión de fidelidad", "Temperatura de la IA",
+        "Caracteres por parte", "Partes a la vez",
+    ]
+    assert all(c.nota == "" for c in ia)
+
+
+class Doble:
+    """Registra cada llamada a cualquier método (`configure`, `set`, `cget`…) y devuelve lo que se le indique."""
+
+    def __init__(self, devuelve=None):
+        self.llamadas = []
+        self.devuelve = devuelve
+
+    def __getattr__(self, nombre):
+        def registrar(*args, **kwargs):
+            self.llamadas.append((nombre, args, kwargs))
+            return self.devuelve
+        return registrar
+
+
+@pytest.fixture
+def asistentes_anotados(monkeypatch):
+    """Sustituye `ui.AsistenteIA` por un doble que anota los argumentos con que se crea y no lee el token."""
+    from src import ui
+
+    creados = []
+
+    class AsistenteAnotador:
+        def __init__(self, **kwargs):
+            creados.append(kwargs)
+            self.kwargs = kwargs
+            self.modelo = kwargs["modelo"]
+            self.modelo_usado = kwargs["modelo"]
+            self.nombre_proveedor = "GitHub Copilot"
+
+    monkeypatch.setattr(ui, "AsistenteIA", AsistenteAnotador)
+    return creados
+
+
+def test_crear_asistente_usa_los_valores_de_la_ventana(monkeypatch, asistentes_anotados):
+    """D1, criterio 2: `_crear_asistente` crea el asistente con `argumentos_asistente` de la configuración y el modelo
+    efectivo de ese momento."""
+    from types import SimpleNamespace
+
+    from src import ui
+    from src.configuracion import cargar_configuracion
+
+    cfg = cargar_configuracion()
+    espiados = []
+    esperado = {"modelo": "claude-sonnet-5.5", "temperatura": 0.5, "max_caracteres_bloque": 30000,
+                "revision_fidelidad": True, "peticiones_paralelas": 2, "enterprise_url": "empresa.ghe.com"}
+
+    def espia(configuracion, modelo):
+        espiados.append((configuracion, modelo))
+        return esperado
+
+    monkeypatch.setattr(ui, "argumentos_asistente", espia)
+    app = SimpleNamespace(configuracion=cfg, _modelo_ia_configurado=lambda: "claude-sonnet-5.5")
+
+    AppTranscriptor._crear_asistente(app)
+
+    assert espiados == [(cfg, "claude-sonnet-5.5")]
+    assert asistentes_anotados == [esperado]
+
+
+@pytest.mark.parametrize("seccion,clave,valor,argumento", [
+    ("ia", "temperatura", 0.5, "temperatura"),
+    ("ia", "revision_fidelidad", True, "revision_fidelidad"),
+    ("ia", "copilot_enterprise_url", "empresa.ghe.com", "enterprise_url"),
+    ("ia", "peticiones_paralelas", 2, "peticiones_paralelas"),
+    ("ia", "max_caracteres_bloque", 30000, "max_caracteres_bloque"),
+    ("salida", "formato", "srt", None),  # lo que no es de IA no rehace el asistente: sus notas se conservan
+])
+def test_guardar_ia_rehace_el_asistente_solo_en_la_siguiente_generacion(
+        tmp_path, asistentes_anotados, seccion, clave, valor, argumento):
+    """D1, criterio 2: guardar una clave de IA hace que la generación siguiente use los valores nuevos; la generación
+    en curso sigue con su asistente. Guardar otra clave no rehace el asistente."""
+    import copy
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado, cargar_configuracion
+    from src.flujo_documentos import GestorDocumentos
+    from src.transcriber import ResultadoTranscripcion, SegmentoTranscripcion
+
+    anterior = cargar_configuracion()
+    app = SimpleNamespace(configuracion=anterior, _modelo_preferido=None, avisos_preferencias=[], _epoca_ia=0,
+                          combo_modelo_ia=Doble(), var_modelo_ia=Doble(), var_formato=Doble(), tabs_ia={})
+    app._modelo_ia_configurado = lambda: "claude-haiku-5.5"
+    app._documentos = GestorDocumentos(None, lambda: AppTranscriptor._crear_asistente(app))
+    resultado = ResultadoTranscripcion(
+        texto_completo="Hola.", segmentos=[SegmentoTranscripcion(0.0, 1.0, "Hola.")],
+        idioma_detectado="es", probabilidad_idioma=1.0, duracion_total=1.0)
+    archivo = str(tmp_path / "reunion.m4a")
+
+    en_curso = app._documentos.iniciar("resumen", resultado, archivo, None, None)
+    antes = dict(en_curso.asistente.kwargs)
+
+    efectiva = copy.deepcopy(anterior)
+    efectiva[seccion][clave] = valor
+    AppTranscriptor.aplicar_guardado(app, ResultadoGuardado({}, efectiva, None, [], {(seccion, clave)},
+                                                            "Configuración guardada"))
+    assert en_curso.asistente.kwargs == antes  # la generación en curso no cambia
+
+    app._documentos.terminar(en_curso)
+    app._documentos.iniciar("resumen", resultado, archivo, None, None)
+
+    assert len(asistentes_anotados) == (1 if argumento is None else 2)
+    if argumento is not None:
+        assert asistentes_anotados[-1][argumento] == valor
+
+
+def test_guardar_el_dominio_avanza_la_epoca_y_reinicia_el_selector(monkeypatch):
+    """D1, criterio 3: al cambiar `ia.copilot_enterprise_url`, la época de la IA sube y el selector del lateral vuelve
+    a ofrecer solo `auto` y el modelo configurado; con otra clave de IA, ni la época ni el selector cambian."""
+    import copy
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado, cargar_configuracion
+
+    anterior = cargar_configuracion()
+    app = SimpleNamespace(configuracion=anterior, _modelo_preferido=None, avisos_preferencias=[], _epoca_ia=0,
+                          combo_modelo_ia=Doble(), var_modelo_ia=Doble(), var_formato=Doble(), tabs_ia={},
+                          _documentos=Doble())
+    app._modelo_ia_configurado = lambda: "claude-haiku-5.5"
+
+    efectiva = copy.deepcopy(anterior)
+    efectiva["ia"]["copilot_enterprise_url"] = "empresa.ghe.com"
+    AppTranscriptor.aplicar_guardado(app, ResultadoGuardado({}, efectiva, None, [], {("ia", "copilot_enterprise_url")},
+                                                            "Configuración guardada"))
+
+    assert app._epoca_ia == 1
+    assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "claude-haiku-5.5"]})]
+
+    otra = copy.deepcopy(efectiva)
+    otra["ia"]["temperatura"] = 0.5
+    app.combo_modelo_ia.llamadas.clear()
+    AppTranscriptor.aplicar_guardado(app, ResultadoGuardado({}, otra, None, [], {("ia", "temperatura")},
+                                                            "Configuración guardada"))
+
+    assert app._epoca_ia == 1
+    assert app.combo_modelo_ia.llamadas == []
+
+
+def _ventana_para_modelos(epoca_actual, proceso=False):
+    """Doble de la ventana con lo que usan las respuestas de «↻»; registra lo que hacen sin tocar Tk ni la red."""
+    from types import SimpleNamespace
+
+    app = SimpleNamespace(_epoca_ia=epoca_actual, _consultando_modelos=True, combo_modelo_ia=Doble(),
+                          btn_cargar_modelos_ia=Doble(), label_estado=Doble(), registro=[], login=[])
+    app._log = app.registro.append
+    app._iniciar_sesion_copilot = app.login.append
+    app._modelo_ia_configurado = lambda: "claude-haiku-5.5"
+    app._cargar_modelos_ia = lambda: None
+    app._transcribiendo = lambda: proceso == "transcripcion"
+    app._generando_ia = lambda: proceso == "generacion"
+    return app
+
+
+RESPUESTAS_DE_MODELOS = {
+    "mostrar": lambda app, epoca: AppTranscriptor._mostrar_modelos_ia(app, ["auto", "gpt-4.1"], epoca),
+    "fallo": lambda app, epoca: AppTranscriptor._fallo_cargar_modelos_ia(app, "sin red", epoca),
+    "sin_sesion": lambda app, epoca: AppTranscriptor._sin_sesion_para_modelos(app, epoca),
+}
+DESCARTE = "Se descarta una lista de modelos de una sesión o un dominio anteriores"
+
+
+@pytest.mark.parametrize("proceso", ["transcripcion", "generacion"])
+def test_lista_de_otra_epoca_no_pisa_la_barra_de_un_proceso_en_curso(proceso):
+    """Si al descartar la lista vieja hay una transcripción o una generación en curso, la barra de estado es suya: no
+    se cambia a «Listo»."""
+    app = _ventana_para_modelos(epoca_actual=1, proceso=proceso)
+
+    AppTranscriptor._mostrar_modelos_ia(app, ["auto", "gpt-4.1"], 0)
+
+    assert app.registro == [DESCARTE]
+    assert app.label_estado.llamadas == []
+
+
+@pytest.mark.parametrize("nombre", list(RESPUESTAS_DE_MODELOS))
+def test_lista_de_modelos_de_otra_epoca_se_descarta(nombre):
+    """D1, criterio 3: una respuesta de «↻» lanzada con otra época no pinta la lista ni abre el inicio de sesión;
+    rehabilita «↻», anota en Registro y devuelve la barra de estado a «Listo». Con la misma época, hace lo de hoy."""
+    app = _ventana_para_modelos(epoca_actual=1)
+
+    RESPUESTAS_DE_MODELOS[nombre](app, 0)
+
+    assert app.combo_modelo_ia.llamadas == []
+    assert app.login == []
+    assert app.btn_cargar_modelos_ia.llamadas == [("configure", (), {"state": "normal"})]
+    assert app._consultando_modelos is False
+    assert app.registro == [DESCARTE]
+    assert app.label_estado.llamadas[-1] == ("configure", (), {"text": "Listo"})
+
+    app = _ventana_para_modelos(epoca_actual=0)
+
+    RESPUESTAS_DE_MODELOS[nombre](app, 0)
+
+    assert app.btn_cargar_modelos_ia.llamadas == [("configure", (), {"state": "normal"})]
+    assert app._consultando_modelos is False
+    assert DESCARTE not in app.registro
+    if nombre == "mostrar":
+        assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "gpt-4.1"]})]
+        assert app.label_estado.llamadas[-1] == ("configure", (), {"text": "Modelos de IA cargados"})
+    elif nombre == "fallo":
+        assert app.label_estado.llamadas[-1] == ("configure", (), {"text": "No se pudieron cargar los modelos de IA"})
+    else:
+        assert app.login == [app._cargar_modelos_ia]
+
+
+@pytest.mark.parametrize("cambia_la_epoca", [True, False])
+def test_cargar_modelos_ia_descarta_si_cambia_la_epoca_durante_la_consulta(monkeypatch, cambia_la_epoca):
+    """D1, criterio 3: la época se captura al lanzar «↻», no al recibir la respuesta. Si el dominio cambia mientras se
+    consulta, la lista no se pinta; si no cambia, sí. El dominio que recibe `leer_token` es el de la configuración."""
+    from types import SimpleNamespace
+
+    from src import copilot, ui
+    from src.configuracion import cargar_configuracion
+
+    cfg = cargar_configuracion()
+    cfg["ia"]["copilot_enterprise_url"] = "empresa.ghe.com"
+    app = _ventana_para_modelos(epoca_actual=0)
+    app.configuracion = cfg
+    app._en_ui = lambda funcion, *args: funcion(*args)
+    app._mostrar_modelos_ia = lambda opciones, epoca: AppTranscriptor._mostrar_modelos_ia(app, opciones, epoca)
+    dominios = []
+
+    def leer_token(enterprise_url=None):
+        dominios.append(enterprise_url)
+        return object()
+
+    def cargar_opciones(sesion, actual):
+        if cambia_la_epoca:
+            app._epoca_ia += 1  # un guardado del dominio mientras se consulta
+        return ["auto", "gpt-4.1"]
+
+    class HiloSincrono:
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(copilot, "leer_token", leer_token)
+    monkeypatch.setattr(copilot, "cargar_opciones_de_modelo", cargar_opciones)
+    monkeypatch.setattr(ui, "threading", SimpleNamespace(Thread=HiloSincrono))
+
+    AppTranscriptor._cargar_modelos_ia(app)
+
+    assert dominios == ["empresa.ghe.com"]
+    if cambia_la_epoca:
+        assert app.combo_modelo_ia.llamadas == []
+        assert app.registro == [DESCARTE]
+    else:
+        assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": ["auto", "gpt-4.1"]})]

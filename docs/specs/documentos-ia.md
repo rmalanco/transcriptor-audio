@@ -172,16 +172,23 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
   las que faltan.» (el diálogo de error muestra el mismo texto), donde <motivo> es el motivo del fallo. Con una parte
   conservada la frase dice «Se conserva la nota de la parte que terminó; al volver a generar solo se pedirán las que
   faltan.»; con ninguna, «No se conserva ninguna nota: al volver a generar se pedirán todas las partes.».
-- Given ese fallo, when se vuelve a generar el mismo documento o el otro (resumen o minuta) con el mismo modelo y sin
-  cerrar la app, then Copilot recibe solo las peticiones de notas de las partes que no terminaron y después la
+- Given ese fallo, when se vuelve a generar el mismo documento o el otro (resumen o minuta) con el mismo modelo, sin
+  cerrar la app y sin guardar en la vista Configuración una clave de IA, then Copilot recibe solo las peticiones de notas de las partes que no terminaron y después la
   redacción.
+- Given ese fallo, when se guarda en la vista Configuración una clave de IA (temperatura, caracteres por parte, partes a la
+  vez, revisión de fidelidad o dominio) y se vuelve a generar, then la generación usa los valores guardados y vuelve a
+  pedir todas las partes (las notas conservadas se pierden). Una generación en curso termina con los valores con que
+  empezó, y mientras dura «Guardar» se rechaza.
+- Given ese fallo, when se guarda en la vista Configuración una clave que no es de IA (por ejemplo, «Formato de salida»
+  a `srt`) y se vuelve a generar, then la generación conserva las notas y solo pide las partes que faltan.
 - Given una transcripción de varias partes y un modelo de una familia no autorizada, vacío, o un modo `auto` sin modelo
   válido, when se pide el documento, then el error es el mismo que con una sola parte (los de «Modelos de familias no
   autorizadas» y «Modelo sin configurar»), sin mencionar partes ni notas, y no se envía nada.
-- Las notas conservadas viven en memoria y se pierden al cancelar la generación, al cambiar de modelo, tras tener que
-  iniciar sesión de nuevo o al cerrar la app.
+- Las notas conservadas viven en memoria y se pierden al cancelar la generación, al cambiar de modelo, al restablecer la configuración si cambia el modelo, tras tener que
+  iniciar sesión de nuevo, al cerrar la app o al guardar en la vista Configuración una clave de IA.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
+Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
 
 ### Notas que no caben en el modelo
 - Given una transcripción en varias partes cuyas notas estimadas superan el límite de entrada del modelo (del catálogo

@@ -51,6 +51,21 @@ def fecha_de_la_reunion(audio: str, fecha_historial: Optional[str]) -> str:
     return f"{t.tm_mday} de {MESES[t.tm_mon - 1]} de {t.tm_year} ({origen})"
 
 
+def argumentos_asistente(configuracion: dict, modelo: str) -> dict:
+    """Argumentos con que se crea el `AsistenteIA`: su modelo y lo que la vista Configuración guarda en `ia`. Un dominio
+    vacío es github.com, que el asistente recibe como None. Quien compara dos llamadas sabe si hay que olvidar el
+    asistente."""
+    ia = configuracion["ia"]
+    return {
+        "modelo": modelo,
+        "temperatura": ia["temperatura"],
+        "max_caracteres_bloque": ia["max_caracteres_bloque"],
+        "revision_fidelidad": ia["revision_fidelidad"],
+        "peticiones_paralelas": ia["peticiones_paralelas"],
+        "enterprise_url": ia["copilot_enterprise_url"] or None,
+    }
+
+
 @dataclass(eq=False)  # se compara por identidad: dos generaciones con los mismos datos son distintas
 class Generacion:
     """Una generación de resumen o minuta en curso. Su señal de cancelación es propia: cancelar una no afecta a otra."""

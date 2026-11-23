@@ -20,7 +20,7 @@ class Campo:
     clave: str
     etiqueta: str
     control: str          # "lista" | "lista_editable" | "botones" | "interruptor" | "texto"
-    grupo: str            # "Transcripción" | "Salida" | "Historial"
+    grupo: str            # "Transcripción" | "Salida" | "IA" | "Historial"
     avanzado: bool = False
     opciones: tuple = ()  # para "lista" y "botones"
     nota: str = ""        # texto bajo el campo (p. ej. «Se aplica al reiniciar la app.»)
@@ -43,6 +43,11 @@ CAMPOS = (
     Campo("salida", "formato", "Formato de salida", "botones", "Salida", opciones=FORMATOS),
     Campo("salida", "incluir_timestamps", "Incluir marcas de tiempo", "interruptor", "Salida"),
     Campo("salida", "palabra_por_palabra", "Marcas por palabra", "interruptor", "Salida"),
+    Campo("ia", "copilot_enterprise_url", "Dominio de GitHub Enterprise (vacío = github.com)", "texto", "IA"),
+    Campo("ia", "revision_fidelidad", "Revisión de fidelidad", "interruptor", "IA"),
+    Campo("ia", "temperatura", "Temperatura de la IA", "texto", "IA", avanzado=True),
+    Campo("ia", "max_caracteres_bloque", "Caracteres por parte", "texto", "IA", avanzado=True),
+    Campo("ia", "peticiones_paralelas", "Partes a la vez", "texto", "IA", avanzado=True),
     Campo("historial", "ruta", "Archivo del historial (relativo a la carpeta del proyecto)", "texto", "Historial",
           nota="Se aplica al reiniciar la app."),
 )
@@ -64,10 +69,10 @@ class PanelConfiguracion(ctk.CTkFrame):
         self._variables: dict = {}   # (sección, clave) → variable Tk del campo
         self._widgets: dict = {}     # (sección, clave) → control
         self._errores: dict = {}     # (sección, clave) → etiqueta del error bajo el campo
+        self._avanzados: dict = {}   # grupo → su «Avanzado»: botón, marco, filas y si está desplegado
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self._avanzado_abierto = False
         self._construir()
         self.refrescar()
 
@@ -89,8 +94,6 @@ class PanelConfiguracion(ctk.CTkFrame):
 
         fila = 0
         grupo_actual = None
-        marco_avanzado = None
-        fila_avanzada = 0
         for campo in CAMPOS:
             if campo.grupo != grupo_actual:
                 grupo_actual = campo.grupo
@@ -98,21 +101,12 @@ class PanelConfiguracion(ctk.CTkFrame):
                     row=fila, column=0, padx=8, pady=(12, 0), sticky="w")
                 fila += 1
             if campo.avanzado:
-                if marco_avanzado is None:  # los campos avanzados van juntos, plegados, tras su grupo
-                    self.btn_avanzado = ctk.CTkButton(formulario, text="▸ Avanzado", width=140,
-                                                      fg_color="transparent", border_width=1,
-                                                      text_color=COLOR_TEXTO_SECUNDARIO,
-                                                      command=self._alternar_avanzado)
-                    self.btn_avanzado.grid(row=fila, column=0, padx=8, pady=(6, 0), sticky="w")
-                    fila += 1
-                    marco_avanzado = ctk.CTkFrame(formulario, fg_color="transparent")
-                    marco_avanzado.grid_columnconfigure(0, weight=1)
-                    marco_avanzado.grid(row=fila, column=0, sticky="ew")
-                    marco_avanzado.grid_remove()
-                    self.marco_avanzado = marco_avanzado
-                    fila += 1
-                self._construir_campo(marco_avanzado, campo, fila_avanzada)
-                fila_avanzada += 1
+                if campo.grupo not in self._avanzados:  # cada grupo tiene su «Avanzado», plegado, tras sus campos
+                    self._crear_avanzado(formulario, campo.grupo, fila)
+                    fila += 2
+                bloque = self._avanzados[campo.grupo]
+                self._construir_campo(bloque["marco"], campo, bloque["filas"])
+                bloque["filas"] += 1
             else:
                 self._construir_campo(formulario, campo, fila)
                 fila += 1
@@ -194,17 +188,28 @@ class PanelConfiguracion(ctk.CTkFrame):
         else:
             self.marco_avisos.grid_remove()
 
-    def _alternar_avanzado(self):
-        self._desplegar_avanzado(not self._avanzado_abierto)
+    def _crear_avanzado(self, formulario, grupo: str, fila: int):
+        boton = ctk.CTkButton(formulario, text="▸ Avanzado", width=140, fg_color="transparent", border_width=1,
+                              text_color=COLOR_TEXTO_SECUNDARIO, command=lambda: self._alternar_avanzado(grupo))
+        boton.grid(row=fila, column=0, padx=8, pady=(6, 0), sticky="w")
+        marco = ctk.CTkFrame(formulario, fg_color="transparent")
+        marco.grid_columnconfigure(0, weight=1)
+        marco.grid(row=fila + 1, column=0, sticky="ew")
+        marco.grid_remove()
+        self._avanzados[grupo] = {"boton": boton, "marco": marco, "filas": 0, "abierto": False}
 
-    def _desplegar_avanzado(self, abierto: bool):
-        self._avanzado_abierto = abierto
+    def _alternar_avanzado(self, grupo: str):
+        self._desplegar_avanzado(grupo, not self._avanzados[grupo]["abierto"])
+
+    def _desplegar_avanzado(self, grupo: str, abierto: bool):
+        bloque = self._avanzados[grupo]
+        bloque["abierto"] = abierto
         if abierto:
-            self.marco_avanzado.grid()
-            self.btn_avanzado.configure(text="▾ Avanzado")
+            bloque["marco"].grid()
+            bloque["boton"].configure(text="▾ Avanzado")
         else:
-            self.marco_avanzado.grid_remove()
-            self.btn_avanzado.configure(text="▸ Avanzado")
+            bloque["marco"].grid_remove()
+            bloque["boton"].configure(text="▸ Avanzado")
 
     def _valores_formulario(self) -> dict:
         valores = {}
@@ -231,7 +236,8 @@ class PanelConfiguracion(ctk.CTkFrame):
     def _pintar(self, resultado: ResultadoGuardado):
         for clave, etiqueta in self._errores.items():
             etiqueta.configure(text=resultado.errores.get(clave, ""))
-        if any((c.seccion, c.clave) in resultado.errores for c in CAMPOS if c.avanzado):
-            self._desplegar_avanzado(True)  # un error dentro de «Avanzado» se ve sin desplegarlo a mano
+        for grupo in self._avanzados:  # un error dentro de un «Avanzado» se ve sin desplegarlo a mano
+            if any((c.seccion, c.clave) in resultado.errores for c in CAMPOS if c.avanzado and c.grupo == grupo):
+                self._desplegar_avanzado(grupo, True)
         self.label_pie.configure(text=resultado.mensaje)
 

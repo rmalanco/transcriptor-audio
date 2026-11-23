@@ -36,7 +36,7 @@ from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, 
                                      TranscripcionPersistida, ruta_transcripcion, transcribir_y_persistir,
                                      transcriptor_para)
 from src.flujo_documentos import (SUFIJOS_DOCUMENTO, DocumentoGenerado, GestorDocumentos, Generacion,
-                                  procesar_generacion)
+                                  argumentos_asistente, procesar_generacion)
 from src.ui_copilot import DialogoLoginCopilot
 from src.persistencia import (Persistencia, motivo_de_error,
                               texto_destino_documento, texto_sin_guardado)
@@ -55,6 +55,23 @@ VISTA_CONFIGURACION = "⚙  Configuración"
 def _etiqueta_modelo_ia(modelo: str) -> str:
     """Texto de la línea de estado de las pestañas de IA para un modelo."""
     return f"Modelo: {NOMBRE_PROVEEDOR} · {modelo}"
+
+
+def _cerrar_consulta_de_modelos(app, epoca: int) -> bool:
+    """Cierra una respuesta de «↻»: ya no hay consulta en curso y el botón vuelve a estar habilitado. Si la época ya
+    no es la de cuando se lanzó (cambió el dominio de GitHub Enterprise), se descarta: se anota en Registro, la barra
+    de estado vuelve a «Listo» (salvo si hay una transcripción o una generación en curso, que la usan) y devuelve
+    False."""
+    app._consultando_modelos = False
+    app.btn_cargar_modelos_ia.configure(state="normal")
+    if epoca == app._epoca_ia:
+        return True
+    app._log("Se descarta una lista de modelos de una sesión o un dominio anteriores")
+    if not (app._transcribiendo() or app._generando_ia()):
+        app.label_estado.configure(text="Listo")
+    return False
+
+
 TAB_TEXTO = "Texto"  # nombre corto: las pestañas se recortan en ventanas estrechas
 DOCUMENTOS_IA = {
     "resumen": {"pestana": "Resumen", "sufijo": SUFIJOS_DOCUMENTO["resumen"], "genitivo": "del resumen",
@@ -148,6 +165,9 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.var_timestamps = tk.BooleanVar(value=self.configuracion["salida"]["incluir_timestamps"])
         self._modelo_preferido = leer_modelo_preferido()  # el que eligió el usuario en el selector, si lo hay
         self.var_modelo_ia = tk.StringVar(value=self._modelo_ia_configurado())
+        # Sube al cambiar el dominio de GitHub Enterprise: una respuesta de «↻» de otra época se descarta
+        self._epoca_ia = 0
+        self._consultando_modelos = False  # «↻» tiene una consulta en curso
 
         self._construir_ui()
         for aviso in self.avisos_preferencias:
@@ -814,15 +834,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _crear_asistente(self) -> AsistenteIA:
         """Lo llama el gestor de documentos, con la configuración y el modelo elegidos en ese momento."""
-        cfg = self.configuracion["ia"]
-        return AsistenteIA(
-            modelo=self._modelo_ia_configurado(),
-            temperatura=cfg["temperatura"],
-            max_caracteres_bloque=cfg["max_caracteres_bloque"],
-            revision_fidelidad=cfg["revision_fidelidad"],
-            peticiones_paralelas=cfg["peticiones_paralelas"],
-            enterprise_url=cfg["copilot_enterprise_url"] or None,
-        )
+        return AsistenteIA(**argumentos_asistente(self.configuracion, self._modelo_ia_configurado()))
 
     def _generar_documento_ia(self, clave: str):
         if not self.resultado_actual or self._generando_ia() or self._transcribiendo():
@@ -958,37 +970,42 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         """Pulsación de «↻»: consulta una vez el catálogo de Copilot, en segundo plano, y lo muestra en el selector.
         Sin sesión, abre el inicio de sesión y vuelve a cargar al terminar bien."""
         self.btn_cargar_modelos_ia.configure(state="disabled")
+        self._consultando_modelos = True
         self.label_estado.configure(text="Consultando los modelos de GitHub Copilot…")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
         actual = self._modelo_ia_configurado()
+        epoca = self._epoca_ia  # la de cuando se pulsa: si el dominio cambia antes de la respuesta, esta se descarta
 
         def consultar():
             try:
                 sesion = copilot.leer_token(enterprise_url)
                 if not sesion:
-                    self._en_ui(self._sin_sesion_para_modelos)
+                    self._en_ui(self._sin_sesion_para_modelos, epoca)
                     return
                 opciones = copilot.cargar_opciones_de_modelo(sesion, actual)
             except Exception as e:  # siempre se llega al hilo principal, para que «↻» vuelva a estar habilitado
-                self._en_ui(self._fallo_cargar_modelos_ia, str(e) or type(e).__name__)
+                self._en_ui(self._fallo_cargar_modelos_ia, str(e) or type(e).__name__, epoca)
                 return
-            self._en_ui(self._mostrar_modelos_ia, opciones)
+            self._en_ui(self._mostrar_modelos_ia, opciones, epoca)
 
         threading.Thread(target=consultar, daemon=True).start()
 
-    def _sin_sesion_para_modelos(self):
-        self.btn_cargar_modelos_ia.configure(state="normal")
+    def _sin_sesion_para_modelos(self, epoca: int):
+        if not _cerrar_consulta_de_modelos(self, epoca):
+            return
         self._log("Sin sesión de GitHub Copilot: se abre el inicio de sesión para cargar los modelos")
         self._iniciar_sesion_copilot(self._cargar_modelos_ia)
 
-    def _fallo_cargar_modelos_ia(self, mensaje: str):
-        self.btn_cargar_modelos_ia.configure(state="normal")
+    def _fallo_cargar_modelos_ia(self, mensaje: str, epoca: int):
+        if not _cerrar_consulta_de_modelos(self, epoca):
+            return
         self._log(f"No se pudo consultar los modelos de GitHub Copilot: {mensaje}")
         self.label_estado.configure(text="No se pudieron cargar los modelos de IA")
 
-    def _mostrar_modelos_ia(self, opciones: list[str]):
+    def _mostrar_modelos_ia(self, opciones: list[str], epoca: int):
+        if not _cerrar_consulta_de_modelos(self, epoca):
+            return
         self.combo_modelo_ia.configure(values=opciones)
-        self.btn_cargar_modelos_ia.configure(state="normal")
         actual = self._modelo_ia_configurado()
         if copilot.familia_excluida(actual):
             self._log(f"El modelo configurado ({actual}) es de una familia no autorizada por la empresa; no se ofrece")
@@ -1147,8 +1164,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def aplicar_guardado(self, resultado: ResultadoGuardado):
         """Aplica un guardado o restablecimiento correcto. La configuración nueva sustituye a la de la ventana (sin
         mutarla) y el panel lateral solo cambia en los controles de las claves que cambiaron, para no pisar lo
-        ajustado a mano. Si cambió el modelo de IA efectivo, el selector, las pestañas que lo mostraban y el asistente
-        se reponen."""
+        ajustado a mano. Si cambió el modelo de IA efectivo, el selector y las pestañas que lo mostraban se reponen. Si
+        cambió con qué se crea el asistente (modelo, dominio o ajuste de IA), se olvida: la generación siguiente lo crea
+        de nuevo; la generación en curso conserva el suyo."""
+        antes = argumentos_asistente(self.configuracion, modelo_ia_efectivo(self.configuracion, self._modelo_preferido))
+        despues = argumentos_asistente(resultado.efectiva,
+                                       modelo_ia_efectivo(resultado.efectiva, resultado.modelo_preferido))
         modelo_cambia = ("ia", "modelo") in resultado.cambiadas
         if modelo_cambia:
             etiqueta_anterior = _etiqueta_modelo_ia(modelo_ia_efectivo(self.configuracion, self._modelo_preferido))
@@ -1168,7 +1189,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             for tab in self.tabs_ia.values():
                 if tab["estado"].cget("text") == etiqueta_anterior:
                     tab["estado"].configure(text=_etiqueta_modelo_ia(modelo))
-            self._documentos.olvidar_asistente()  # se recrea con el modelo nuevo en la próxima generación
+        if ("ia", "copilot_enterprise_url") in resultado.cambiadas:
+            self._epoca_ia += 1  # las listas de «↻» pedidas con el dominio anterior ya no se pintan
+            opciones = copilot.opciones_de_modelo([copilot.MODELO_AUTO], self._modelo_ia_configurado())
+            self.combo_modelo_ia.configure(values=opciones)
+        if antes != despues:
+            self._documentos.olvidar_asistente()  # la próxima generación lo crea con lo guardado
 
     def _refrescar_historial(self):
         if self.panel_historial is not None:

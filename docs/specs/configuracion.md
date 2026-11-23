@@ -120,8 +120,8 @@ Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
 
 ### Vista Configuración
-La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida e Historial; el resto (IA y la
-sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
+La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con su «Avanzado» plegado y sin
+campo de modelo) e Historial; el resto (el campo de modelo de IA y la sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la
 vista solo cambia los controles del lateral de las claves guardadas.
 
 - Given el YAML del proyecto (`salida.formato: "txt"`, `modelo.nombre: "large-v3-turbo"`), sin `preferencias.json` y con
@@ -131,7 +131,7 @@ vista solo cambia los controles del lateral de las claves guardadas.
   `config/settings.yaml` no cambia (mismos bytes y misma fecha de modificación), y al volver con `Ctrl+1` el selector de
   formato del lateral muestra `srt` y el de modelo sigue en `tiny`. La vista muestra los grupos «Transcripción» (Modelo
   de Whisper, Idioma, Dispositivo, Precisión) y «Salida» (Formato de salida, Incluir marcas de tiempo, Marcas por
-  palabra); desde la historia 22, también «Historial» y «Avanzado»; cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
+  palabra); desde la historia 22, también «Historial» y «Avanzado»; desde la historia 23, el grupo «IA» (ver «Grupo IA de la vista Configuración»); cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
   ninguna petición de red ni lee el token.
 - Given «Idioma» con `nl` escrito a mano, when se pulsa «Guardar», then `preferencias.json` guarda `transcripcion.idioma`
   = `nl` y el selector de idioma del lateral muestra `nl` y lo ofrece al final de su lista; y si después se cambia
@@ -170,3 +170,34 @@ vista solo cambia los controles del lateral de las claves guardadas.
 
 Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md
 Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md
+
+### Grupo IA de la vista Configuración
+- Given el YAML del proyecto (`ia.copilot_enterprise_url: ""`, `revision_fidelidad: false`, `temperatura: 0.2`,
+  `max_caracteres_bloque: 60000`, `peticiones_paralelas: 3`) y sin `preferencias.json`, when se abre «⚙ Configuración»,
+  then entre «Salida» e «Historial» hay un grupo «IA» con «Dominio de GitHub Enterprise (vacío = github.com)» vacío,
+  «Revisión de fidelidad» apagado y un «▸ Avanzado» plegado con «Temperatura de la IA» `0.2`, «Caracteres por parte»
+  `60000` y «Partes a la vez» `3`, cada campo con su clave del YAML en gris (no hay campo «Modelo de IA»).
+- Given esa vista con `https://empresa.ghe.com/` en el dominio y `9` en «Partes a la vez», when se pulsa «Guardar», then
+  bajo el dominio aparece «`ia.copilot_enterprise_url` debe ser un nombre de dominio sin https:// ni barras, como
+  empresa.ghe.com, o estar vacío (vale «https://empresa.ghe.com/»).», «Avanzado» se despliega y bajo «Partes a la vez»
+  aparece «`ia.peticiones_paralelas` debe ser un número entero entre 1 y 8 (vale «9»).», el pie dice «No se guardó nada:
+  corrige 2 valores.» y `preferencias.json` no se crea.
+- Given el dominio vacío, «Temperatura de la IA» `0,5`, «Partes a la vez» `2` y «Revisión de fidelidad» encendido, when
+  se pulsa «Guardar», then el pie dice «Configuración guardada», `preferencias.json` queda exactamente
+  `{"configuracion": {"ia": {"revision_fidelidad": true, "temperatura": 0.5, "peticiones_paralelas": 2}}}` (el orden de
+  las claves no importa) y `config/settings.yaml` no cambia.
+
+Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
+
+### Cambio del dominio de GitHub Enterprise en la vista
+- Given «↻» pulsado con el dominio vacío (github.com) y todavía sin respuesta, when se guarda `empresa.ghe.com` en el
+  dominio, then el selector «Modelo de IA (resumen y minuta)» del lateral pasa a ofrecer solo `auto` y el modelo
+  configurado; cuando llega la lista de github.com se descarta (el selector no cambia, «↻» vuelve a estar habilitado y
+  Registro anota «Se descarta una lista de modelos de una sesión o un dominio anteriores»), y si esa consulta termina sin
+  sesión no se abre el inicio de sesión.
+- Given el dominio guardado como `empresa.ghe.com`, when se pulsa «↻», se genera un resumen o una minuta o se abre el
+  inicio de sesión de Copilot, then esas acciones usan `empresa.ghe.com`.
+- Given «↻» sin consulta en curso, when se guarda un cambio de dominio, then el selector vuelve a ofrecer solo `auto` y
+  el modelo configurado.
+
+Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md

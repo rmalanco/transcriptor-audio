@@ -584,3 +584,53 @@ def test_fallo_de_una_parte_reutiliza_notas_y_cancelar_las_pierde(historial, tmp
     ejecutar(gestor.iniciar("minuta", resultado, audio, id_, None))
     assert len(creados) == 2
     assert sorted(_numeros_de_nota(cuerpos)) == list(range(1, total + 1))
+
+
+# ---- Argumentos del asistente desde la configuración (historia D1 de 06-panel-de-configuracion)
+
+def _configuracion_base():
+    import copy
+
+    from src.configuracion import cargar_configuracion
+    return copy.deepcopy(cargar_configuracion())
+
+
+def test_argumentos_asistente_salen_de_la_configuracion():
+    """D1, criterio 1: el asistente se crea con los valores de `ia`; un dominio vacío da `enterprise_url` None."""
+    cfg = {"ia": {"copilot_enterprise_url": "", "revision_fidelidad": True, "temperatura": 0.5,
+                  "max_caracteres_bloque": 60000, "peticiones_paralelas": 2}}
+
+    assert fd.argumentos_asistente(cfg, "claude-haiku-5.5") == {
+        "modelo": "claude-haiku-5.5", "temperatura": 0.5, "max_caracteres_bloque": 60000,
+        "revision_fidelidad": True, "peticiones_paralelas": 2, "enterprise_url": None,
+    }
+    cfg["ia"]["copilot_enterprise_url"] = "empresa.ghe.com"
+    assert fd.argumentos_asistente(cfg, "claude-haiku-5.5")["enterprise_url"] == "empresa.ghe.com"
+
+
+@pytest.mark.parametrize("seccion,clave,valor,argumento", [
+    ("ia", "temperatura", 0.5, "temperatura"),
+    ("ia", "max_caracteres_bloque", 30000, "max_caracteres_bloque"),
+    ("ia", "peticiones_paralelas", 2, "peticiones_paralelas"),
+    ("ia", "revision_fidelidad", True, "revision_fidelidad"),
+    ("ia", "copilot_enterprise_url", "empresa.ghe.com", "enterprise_url"),
+    ("modelo", None, "claude-sonnet-5.5", "modelo"),  # el modelo no está en la configuración: llega como argumento
+    ("salida", "formato", "srt", None),  # lo que no es de IA no cambia ningún argumento
+    ("transcripcion", "beam_size", 3, None),
+    ("historial", "ruta", "otra/historial.db", None),
+])
+def test_argumentos_asistente_solo_cambian_con_la_ia(seccion, clave, valor, argumento):
+    """D1, criterio 2: cambiar una clave de IA (o el modelo) cambia solo su argumento; cambiar lo que no es de IA no
+    cambia ninguno, y el asistente no se olvida por ello."""
+    antes = _configuracion_base()
+    despues = _configuracion_base()
+    modelo_despues = "claude-haiku-5.5"
+    if seccion == "modelo":
+        modelo_despues = valor
+    else:
+        despues[seccion][clave] = valor
+
+    a = fd.argumentos_asistente(antes, "claude-haiku-5.5")
+    d = fd.argumentos_asistente(despues, modelo_despues)
+
+    assert {k for k in a if a[k] != d[k]} == ({argumento} if argumento else set())
