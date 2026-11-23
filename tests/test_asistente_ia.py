@@ -637,13 +637,20 @@ def test_modelo_excluido_no_depende_del_catalogo(monkeypatch, modelo, familia):
     assert modelo in str(error.value) and familia in str(error.value) and "autorizad" in str(error.value)
 
 
-def _simular_auto(monkeypatch, sesiones, catalogo):
+def _simular_auto(monkeypatch, sesiones, catalogo, limites=None):
     """Copilot en modo auto: cada apertura de sesión recibe la siguiente de `sesiones`; `catalogo` da los
-    endpoints de cada modelo ({id: [endpoints]})."""
+    endpoints de cada modelo ({id: [endpoints]}). `limites` ({id: tokens}) añade `capabilities.limits` solo a
+    esos modelos; los demás del catálogo van sin límite, como hasta ahora."""
+    limites = limites or {}
+    def modelo(id_, endpoints):
+        entrada = {"id": id_, "supported_endpoints": endpoints}
+        if id_ in limites:
+            entrada["capabilities"] = {"limits": {"max_prompt_tokens": limites[id_]}}
+        return entrada
     respuestas = iter(sesiones)
     monkeypatch.setattr(asistente_ia.copilot.httpx, "post", lambda *a, **kw: _Respuesta(next(respuestas)))
     monkeypatch.setattr(asistente_ia.copilot.httpx, "get", lambda *a, **kw: _Respuesta(
-        {"data": [{"id": i, "supported_endpoints": e} for i, e in catalogo.items()]}))
+        {"data": [modelo(i, e) for i, e in catalogo.items()]}))
 
 
 def test_auto_envia_todas_las_peticiones_al_modelo_autorizado(monkeypatch):
@@ -965,6 +972,18 @@ def test_nota_de_notas_con_revision_contra_la_transcripcion():
         "bueno. La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no "
         "sustituye a esa comprobación.")
     assert nota_de_notas(2, False, fuente_revision="transcripcion") == nota_de_notas(2, False)
+
+
+def test_nota_de_notas_con_motivo():
+    from src.asistente_ia import nota_de_notas
+    motivo = (70000, 64000, "gpt-4.1")
+    assert nota_de_notas(2, True, motivo_notas=motivo).endswith(
+        "bueno. La revisión de fidelidad se hizo contra esas notas y no contra la transcripción completa, que suma unos "
+        "70000 tokens y supera los 64000 que admite «gpt-4.1».")
+    assert nota_de_notas(2, False, motivo_notas=motivo) == nota_de_notas(2, False)
+    assert nota_de_notas(2, True, fuente_revision="transcripcion", motivo_notas=motivo).endswith(
+        "bueno. La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no "
+        "sustituye a esa comprobación.")
 
 
 class _StreamConTexto(_Stream):
@@ -2037,16 +2056,87 @@ def test_revision_que_no_cabe_vuelve_a_las_notas(monkeypatch, caplog):
     with caplog.at_level("INFO", logger="transcriptor.ia"):
         minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
     assert len(consultas) == 1
-    assert "Revisando fidelidad con las notas de las 2 partes…" in progreso
+    estimado = asistente_ia.estimar_tokens(asistente_ia.PROMPT_SISTEMA + asistente_ia.PROMPT_REVISION.format(
+        texto=TEXTO2, documento=MINUTA_MODELO))
+    assert ("Revisando fidelidad con las notas de las 2 partes (la transcripción completa no cabe en «gpt-4.1»)…"
+            in progreso)
     revision = cuerpos[-1]["messages"][-1]["content"]
     assert "Notas de la parte 1" in revision
     assert not any(linea in revision for linea in TEXTO2.splitlines())
-    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES
-                           + " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.")
-    estimado = asistente_ia.estimar_tokens(asistente_ia.PROMPT_SISTEMA + asistente_ia.PROMPT_REVISION.format(
-        texto=TEXTO2, documento=MINUTA_MODELO))
+    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES + " La revisión de fidelidad se hizo contra esas notas y no "
+                           f"contra la transcripción completa, que suma unos {estimado} tokens y supera los 1300 que "
+                           "admite «gpt-4.1».")
     assert ("La revisión con la transcripción completa suma unos " f"{estimado} tokens y «gpt-4.1» admite 1300; "
             "se revisa con las notas de las 2 partes.") in caplog.text
+
+
+def test_revision_contra_las_notas_dice_el_motivo_del_limite(monkeypatch):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # revisión con la transcripción: > 1 300
+    _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 1300))
+    _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    progreso = []
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
+    total = asistente_ia.estimar_tokens(asistente_ia.PROMPT_SISTEMA + asistente_ia.PROMPT_REVISION.format(
+        texto=TEXTO2, documento=MINUTA_MODELO))
+    assert total > 1300
+    assert ("Revisando fidelidad con las notas de las 2 partes (la transcripción completa no cabe en «gpt-4.1»)…"
+            in progreso)
+    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES + " La revisión de fidelidad se hizo contra esas notas y no "
+                           f"contra la transcripción completa, que suma unos {total} tokens y supera los 1300 que "
+                           "admite «gpt-4.1».")
+
+
+@pytest.mark.parametrize("modo, nota", [
+    ("falla", "> Nota de la aplicación: la revisión de fidelidad no se pudo completar ("),
+    ("descartada", "> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias"),
+])
+def test_revision_contra_las_notas_fallida_o_descartada_no_da_motivo_ni_dice_revisada(monkeypatch, modo, nota):
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "_esperar", lambda segundos, cancelar: None)
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # revisión con la transcripción: 1 676 > 1 300
+    _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 1300))
+    sin_proximos_pasos = MINUTA_MODELO.split("## Próximos pasos")[0].rstrip()
+
+    def respuesta(cuerpo):
+        if "DOCUMENTO:" in cuerpo["messages"][-1]["content"]:  # la revisión contra las notas
+            return 500 if modo == "falla" else sin_proximos_pasos
+        return _responder_minuta_o_notas(cuerpo)
+    _simular_chat_con_estados(monkeypatch, respuesta)
+    progreso = []
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
+    assert ("Revisando fidelidad con las notas de las 2 partes (la transcripción completa no cabe en «gpt-4.1»)…"
+            in progreso)
+    assert nota in minuta and minuta.index(nota) < minuta.index(BASE_DOS_PARTES)  # la revisión, antes de las partes
+    assert minuta.endswith("\n\n" + BASE_DOS_PARTES)  # la nota de las partes es BASE sola, sin frase de revisión
+    assert "La revisión de fidelidad se hizo" not in minuta
+    assert "1300" not in minuta
+
+
+def test_revision_contra_las_notas_en_auto_nombra_el_modelo_de_la_sesion(monkeypatch):
+    import re
+    _prohibir_red(monkeypatch)
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # revisión con la transcripción: 1 676 > 1 300
+    _simular_auto(monkeypatch,
+                  [{"available_models": ["kimi-k3", "gpt-4.1"], "selected_model": "kimi-k3", "session_token": "st",
+                    "expires_at": 9999999999}],
+                  {"kimi-k3": ["/chat/completions"], "gpt-4.1": ["/chat/completions"]}, limites={"gpt-4.1": 1300})
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    progreso = []
+    asistente = AsistenteIA(api_key="gho_x", modelo="auto", max_caracteres_bloque=900, revision_fidelidad=True)
+    minuta = asistente.generar_minuta(TEXTO2, on_progreso=progreso.append)
+    assert set(c["model"] for c in cuerpos) == {"gpt-4.1"}  # kimi-k3 está excluida: nada se envía a esa familia
+    total = asistente_ia.estimar_tokens(asistente_ia.PROMPT_SISTEMA + asistente_ia.PROMPT_REVISION.format(
+        texto=TEXTO2, documento=MINUTA_MODELO))
+    assert total > 1300
+    assert ("Revisando fidelidad con las notas de las 2 partes (la transcripción completa no cabe en «gpt-4.1»)…"
+            in progreso)
+    assert minuta.endswith("\n\n---\n\n" + BASE_DOS_PARTES + " La revisión de fidelidad se hizo contra esas notas y no "
+                           f"contra la transcripción completa, que suma unos {total} tokens y supera los 1300 que "
+                           "admite «gpt-4.1».")
+    assert not any(re.search(r"\bauto\b", texto) for texto in progreso + [minuta])  # el modelo, no «auto»
+    assert asistente.modelo_usado == "auto → gpt-4.1"
 
 
 def test_catalogo_caido_se_consulta_una_vez_y_se_revisa_con_la_transcripcion(monkeypatch, caplog):

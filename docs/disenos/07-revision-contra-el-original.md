@@ -1,8 +1,7 @@
 # Revisión de fidelidad contra la transcripción original
 
 *   **Autor:** rmalanco
-*   **Estado:** Aprobado con decisiones del usuario; listo para historias. Revisión ligera del 2026-11-22 con dos
-    revisores (diseño y preparación) aplicada: ver «Revisión (2026-11-22)».
+*   **Estado:** Implementado el 2026-11-22 (historias 28 a 33 de `docs/historias/hechas/`); R5 queda fuera (D5).
 *   **Fecha:** 2026-11-22
 *   **Origen:** `BACKLOG.md`, «Salud del código» #23 (carril L), hallazgo A-05 de `audit_report.md` (salida «revisar
     contra el original»), aceptado en `goldfish_review_report.md` (fila 10: «Afecta a la regla de fidelidad de la

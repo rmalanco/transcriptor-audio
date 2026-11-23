@@ -367,6 +367,7 @@ class _Documento:
     revision_descartada: Optional[str] = None  # motivo si la revisión se descartó y se conservó el documento anterior
     repuestas: list[str] = field(default_factory=list)  # tareas que la revisión quitó y que la app repuso marcadas
     fuente_revision: str = "notas"  # con qué se revisó: "transcripcion" o "notas"
+    motivo_notas: Optional[tuple[int, int, str]] = None  # (estimado, límite, modelo) si la transcripción no cupo
 
 
 @dataclass
@@ -475,13 +476,18 @@ def normalizar_tabla_tareas(minuta: str) -> str:
     return "\n".join(lineas)
 
 
-def _cita_de_partes(partes: int, revisado: bool, *, fuente_revision: str = "notas") -> str:
+def _cita_de_partes(partes: int, revisado: bool, *, fuente_revision: str = "notas",
+                    motivo_notas: Optional[tuple[int, int, str]] = None) -> str:
     cita = (f"> Nota de la aplicación: la transcripción se procesó en {partes} partes y este documento se "
             "redactó a partir de notas extraídas de cada parte, no de la transcripción completa. Contrasta nombres, "
             "fechas, cifras y condiciones con la transcripción antes de darlo por bueno.")
     if revisado and fuente_revision == "transcripcion":
         cita += (" La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no "
                  "sustituye a esa comprobación.")
+    elif revisado and motivo_notas:
+        estimado, limite, modelo = motivo_notas
+        cita += (" La revisión de fidelidad se hizo contra esas notas y no contra la transcripción completa, que suma "
+                 f"unos {estimado} tokens y supera los {limite} que admite «{modelo}».")
     elif revisado:
         cita += " La revisión de fidelidad se hizo contra esas notas, no contra la transcripción."
     return cita
@@ -532,7 +538,8 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
                            corte: Optional[str] = None, cortes_partes: Optional[dict] = None, *,
                            revision_descartada: Optional[str] = None,
                            repuestas: Optional[list[str]] = None,
-                           fuente_revision: str = "notas") -> str:
+                           fuente_revision: str = "notas",
+                           motivo_notas: Optional[tuple[int, int, str]] = None) -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
     (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
     `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
@@ -562,16 +569,17 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
     if repuestas:
         citas.append(_cita_de_lo_repuesto(repuestas))
     if partes >= 2:
-        citas.append(_cita_de_partes(partes, revisado, fuente_revision=fuente_revision))
+        citas.append(_cita_de_partes(partes, revisado, fuente_revision=fuente_revision, motivo_notas=motivo_notas))
     if not citas:
         return ""
     return "\n---\n\n" + "\n\n".join(citas)
 
 
-def nota_de_notas(partes: int, revisado: bool, *, fuente_revision: str = "notas") -> str:
+def nota_de_notas(partes: int, revisado: bool, *, fuente_revision: str = "notas",
+                  motivo_notas: Optional[tuple[int, int, str]] = None) -> str:
     """Bloque que la app añade al final de un documento redactado a partir de notas (2 o más partes).
     Lo añade la app, no el modelo: ningún prompt lo contiene y el post-proceso no lo toca."""
-    return notas_de_la_aplicacion([], partes, revisado, fuente_revision=fuente_revision)
+    return notas_de_la_aplicacion([], partes, revisado, fuente_revision=fuente_revision, motivo_notas=motivo_notas)
 
 
 def _frase_de_partes_conservadas(n: int) -> str:
@@ -977,14 +985,18 @@ class AsistenteIA:
         revision_descartada = None
         repuestas: list[str] = []
         fuente_revision = "notas"
+        motivo_notas = None
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
             try:
                 fuente = self._fuente_de_revision(original, texto, documento, len(bloques), consulta, cancelar)
                 fuente_revision = fuente.tipo
+                motivo_notas = fuente.motivo
                 if on_progreso:
                     quien = ("la transcripción" if len(bloques) == 1 else "la transcripción completa"
                              if fuente.tipo == "transcripcion" else f"las notas de las {len(bloques)} partes")
+                    if fuente.motivo:
+                        quien += f" (la transcripción completa no cabe en «{fuente.motivo[2]}»)"
                     on_progreso(f"Revisando fidelidad con {quien}…")
                 revisado = _sin_cortar(self._completar(PROMPT_REVISION.format(texto=fuente.texto, documento=documento),
                                                        cancelar))
@@ -1015,7 +1027,7 @@ class AsistenteIA:
         return _Documento(documento, len(bloques), faltan_al_final,
                           error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes,
                           revision_descartada=revision_descartada, repuestas=repuestas,
-                          fuente_revision=fuente_revision)
+                          fuente_revision=fuente_revision, motivo_notas=motivo_notas)
 
     def _limite_del_modelo(self, consulta: _ConsultaDeLimite,
                            cancelar: Optional[threading.Event]) -> tuple[str, Optional[int]]:
@@ -1093,7 +1105,8 @@ class AsistenteIA:
         revisado = self.revision_fidelidad and not d.error_revision and not d.revision_descartada
         nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision, d.corte,
                                       d.cortes_partes, revision_descartada=d.revision_descartada,
-                                      repuestas=d.repuestas, fuente_revision=d.fuente_revision)
+                                      repuestas=d.repuestas, fuente_revision=d.fuente_revision,
+                                      motivo_notas=d.motivo_notas)
         return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:
