@@ -600,3 +600,286 @@ def test_resumen_errores_singular_y_plural():
 
     assert resumen_errores(1) == "No se guardó nada: corrige 1 valor."
     assert resumen_errores(3) == "No se guardó nada: corrige 3 valores."
+
+
+# --- Historia 19: guardar y restablecer las preferencias en una escritura atómica ---
+
+YAML_PROYECTO_19 = """\
+salida:
+  formato: "txt"
+transcripcion:
+  beam_size: 5
+  best_of: 5
+ia:
+  modelo: "gpt-4.1"
+"""
+
+
+def _proyecto_19(tmp_path):
+    from src.configuracion import cargar_configuracion
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text(YAML_PROYECTO_19, encoding="utf-8")
+    return cargar_configuracion(ruta)
+
+
+def _ruta_preferencias_19(monkeypatch, tmp_path, contenido=None):
+    from src import configuracion
+
+    ruta = tmp_path / "preferencias.json"
+    if contenido is not None:
+        ruta.write_text(contenido, encoding="utf-8")
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
+    return ruta
+
+
+def _contar_replace_19(monkeypatch):
+    """Envuelve os.replace: anota cada llamada y llama al original."""
+    import os
+
+    from src import configuracion
+
+    llamadas = []
+    original = os.replace
+
+    def contar(origen, destino):
+        llamadas.append((origen, destino))
+        return original(origen, destino)
+
+    monkeypatch.setattr(configuracion.os, "replace", contar)
+    return llamadas
+
+
+def test_guardar_ajustes_solo_diferencias_y_descarta_lo_que_no_sirve(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({
+        "modelo_ia": "gpt-4.1", "x": 1,
+        "configuracion": {"transcripcion": {"best_of": 3, "beam_size": "x"}, "audio": {"a": 1}},
+    }))
+
+    avisos = configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "srt",
+                                                                    ("transcripcion", "beam_size"): 5})
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {
+        "modelo_ia": "gpt-4.1", "x": 1,
+        "configuracion": {"transcripcion": {"best_of": 3}, "salida": {"formato": "srt"}},
+    }
+    assert avisos == [f"Se descartaron de {ruta} claves que no sirven: `transcripcion.beam_size`, `audio.a`."]
+    assert not ruta.with_name("preferencias.json.tmp").exists()
+
+
+def test_guardar_ajustes_quita_configuracion_vacia(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({
+        "modelo_ia": "gpt-4.1", "x": 1,
+        "configuracion": {"transcripcion": {"best_of": 3}, "salida": {"formato": "srt"}},
+    }))
+
+    configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "txt",
+                                                           ("transcripcion", "best_of"): 5})
+
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    assert "configuracion" not in datos
+    assert datos["x"] == 1
+    assert datos["modelo_ia"] == "gpt-4.1"
+
+
+def test_guardar_ajustes_con_modelo_en_una_sola_escritura(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"x": 1}))
+    llamadas = _contar_replace_19(monkeypatch)
+
+    configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "srt"},
+                                  modelo_ia="claude-sonnet-5.5")
+
+    assert len(llamadas) == 1
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {
+        "x": 1, "modelo_ia": "claude-sonnet-5.5", "configuracion": {"salida": {"formato": "srt"}},
+    }
+
+
+def test_guardar_el_modelo_del_yaml_quita_modelo_ia(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"modelo_ia": "claude-sonnet-5.5", "x": 1}))
+
+    configuracion.guardar_ajustes(_proyecto_19(tmp_path), {}, modelo_ia="gpt-4.1")
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"x": 1}
+
+
+def test_guardar_ajustes_rechaza_modelo_excluido_sin_escribir(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"x": 1}))
+    antes = ruta.read_bytes()
+    llamadas = _contar_replace_19(monkeypatch)
+
+    with pytest.raises(ValueError):
+        configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "srt"},
+                                      modelo_ia="Mistral-Large-3")
+
+    assert ruta.read_bytes() == antes
+    assert llamadas == []
+
+
+def test_restablecer_borra_ajustes_y_modelo_y_conserva_lo_demas(tmp_path, monkeypatch):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({
+        "modelo_ia": "claude-sonnet-5.5", "x": 1, "configuracion": {"salida": {"formato": "srt"}},
+    }))
+    llamadas = _contar_replace_19(monkeypatch)
+
+    configuracion.restablecer_ajustes()
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"x": 1}
+    assert len(llamadas) == 1
+
+
+CONTENIDO_19 = '{"modelo_ia": "gpt-4.1", "x": 1, "configuracion": {"salida": {"formato": "txt"}}}'
+
+
+def _llamar_19(operacion, proyecto):
+    from src import configuracion
+
+    if operacion == "guardar_ajustes":
+        return configuracion.guardar_ajustes(proyecto, {("salida", "formato"): "srt"})
+    if operacion == "restablecer_ajustes":
+        return configuracion.restablecer_ajustes()
+    return configuracion.guardar_modelo_preferido("claude-haiku-5.5")
+
+
+@pytest.mark.parametrize("operacion", ["guardar_ajustes", "restablecer_ajustes", "guardar_modelo_preferido"])
+def test_fallo_de_lectura_no_borra_las_preferencias(tmp_path, monkeypatch, operacion):
+    import errno
+    from pathlib import Path
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, CONTENIDO_19)
+    antes = ruta.read_bytes()
+    original = Path.read_text
+
+    def leer_denegado(self, *args, **kwargs):
+        if self == configuracion.RUTA_PREFERENCIAS:
+            raise PermissionError(errno.EACCES, "Permiso denegado", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", leer_denegado)
+    llamadas = _contar_replace_19(monkeypatch)
+
+    with pytest.raises(OSError):
+        _llamar_19(operacion, _proyecto_19(tmp_path))
+
+    assert ruta.read_bytes() == antes
+    assert llamadas == []
+    assert not ruta.with_name("preferencias.json.tmp").exists()
+
+
+@pytest.mark.parametrize("fallo", ["temporal_a_medias", "renombrado"])
+@pytest.mark.parametrize("operacion", ["guardar_ajustes", "restablecer_ajustes", "guardar_modelo_preferido"])
+def test_fallo_al_escribir_no_toca_el_archivo_ni_deja_temporal(tmp_path, monkeypatch, operacion, fallo):
+    import errno
+    from pathlib import Path
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, CONTENIDO_19)
+    antes = ruta.read_bytes()
+    original_escribir = Path.write_text
+
+    if fallo == "temporal_a_medias":
+        def escribir_lleno(self, texto, *args, **kwargs):
+            if self.name == "preferencias.json.tmp":
+                original_escribir(self, texto[:len(texto) // 2], *args, **kwargs)
+                raise OSError(errno.ENOSPC, "No queda espacio en el disco")
+            return original_escribir(self, texto, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", escribir_lleno)
+    else:
+        def renombrar_fallido(origen, destino):
+            raise OSError(errno.EIO, "Error de entrada/salida")
+
+        monkeypatch.setattr(configuracion.os, "replace", renombrar_fallido)
+
+    with pytest.raises(OSError):
+        _llamar_19(operacion, _proyecto_19(tmp_path))
+
+    assert ruta.read_bytes() == antes
+    assert not ruta.with_name("preferencias.json.tmp").exists()
+
+
+@pytest.mark.parametrize("contenido", ["{", "[]"])
+def test_json_invalido_se_reemplaza_al_guardar(tmp_path, monkeypatch, contenido):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, contenido)
+
+    avisos = configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "srt"})
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"configuracion": {"salida": {"formato": "srt"}}}
+    assert avisos == []
+
+
+def test_guardar_modelo_preferido_no_reescribe_si_no_puede_leer(tmp_path, monkeypatch):
+    import errno
+    from pathlib import Path
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, '{"x": 1, "configuracion": {"salida": {"formato": "srt"}}}')
+    antes = ruta.read_bytes()
+    original = Path.read_text
+
+    def leer_denegado(self, *args, **kwargs):
+        if self == configuracion.RUTA_PREFERENCIAS:
+            raise PermissionError(errno.EACCES, "Permiso denegado", str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", leer_denegado)
+
+    with pytest.raises(OSError):
+        configuracion.guardar_modelo_preferido("claude-haiku-5.5")
+
+    assert ruta.read_bytes() == antes
+    assert not ruta.with_name("preferencias.json.tmp").exists()
+
+
+@pytest.mark.parametrize("configuracion_guardada, descartadas", [
+    ({"ia": {"modelo": "gpt-4.1", "temperatura": 0.5}}, "`ia.modelo`"),
+    ({"salida": 3, "transcripcion": {"best_of": 3}}, "`salida`"),
+    (3, "`configuracion`"),
+])
+def test_guardar_ajustes_descarta_entradas_mal_formadas_sin_fallar(tmp_path, monkeypatch, configuracion_guardada,
+                                                                    descartadas):
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"x": 1, "configuracion": configuracion_guardada}))
+
+    avisos = configuracion.guardar_ajustes(_proyecto_19(tmp_path), {("salida", "formato"): "srt"})
+
+    guardado = json.loads(ruta.read_text(encoding="utf-8"))
+    assert guardado["x"] == 1
+    assert guardado["configuracion"]["salida"] == {"formato": "srt"}
+    assert "modelo" not in guardado["configuracion"].get("ia", {})
+    assert avisos == [f"Se descartaron de {ruta} claves que no sirven: {descartadas}."]

@@ -187,10 +187,84 @@ def leer_modelo_preferido() -> Optional[str]:
 
 def guardar_modelo_preferido(modelo: str) -> None:
     """Guarda el modelo de IA elegido conservando las demás preferencias. Lanza OSError si no puede escribir."""
-    datos = _leer_preferencias()
+    datos = _leer_para_escribir()
     datos["modelo_ia"] = modelo
+    _escribir_preferencias_atomico(datos)
+
+
+def _leer_para_escribir() -> dict:
+    try:
+        datos = json.loads(RUTA_PREFERENCIAS.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (ValueError, RecursionError):  # JSON inválido, texto que no es UTF-8 o anidamiento extremo
+        return {}
+    return datos if isinstance(datos, dict) else {}
+
+
+def guardar_ajustes(proyecto: dict, valores: dict, modelo_ia: Optional[str] = None) -> list[str]:
+    if modelo_ia is not None:
+        # Import aquí: copilot importa httpx y esta carga no debe pagarlo al importar configuracion.
+        from src import copilot
+        familia = copilot.familia_excluida(modelo_ia)
+        if familia is not None:
+            raise ValueError(f"El modelo «{modelo_ia}» es de la familia «{familia}», no autorizada por la empresa")
+    datos = _leer_para_escribir()
+    grupos = {}
+    avisos_descartes = []
+    guardados = datos.get(CLAVE_AJUSTES, {})
+    if not isinstance(guardados, dict):
+        avisos_descartes.append(f"`{CLAVE_AJUSTES}`")
+        guardados = {}
+    for seccion, claves in guardados.items():
+        if not isinstance(claves, dict):
+            avisos_descartes.append(f"`{seccion}`")
+            continue
+        for clave, valor in claves.items():
+            if ((seccion, clave) == ("ia", "modelo") or (seccion, clave) not in _tabla()
+                    or _motivo_de_rechazo(seccion, clave, valor, con_disco=False)):
+                avisos_descartes.append(f"`{seccion}.{clave}`")
+                continue
+            grupos.setdefault(seccion, {})[clave] = valor
+    for (seccion, clave), valor in valores.items():
+        if valor == proyecto[seccion][clave]:
+            grupos.get(seccion, {}).pop(clave, None)
+        else:
+            grupos.setdefault(seccion, {})[clave] = valor
+    grupos = {seccion: claves for seccion, claves in grupos.items() if claves}
+    if grupos:
+        datos[CLAVE_AJUSTES] = grupos
+    else:
+        datos.pop(CLAVE_AJUSTES, None)
+    if modelo_ia == proyecto["ia"]["modelo"]:
+        datos.pop("modelo_ia", None)
+    elif modelo_ia is not None:
+        datos["modelo_ia"] = modelo_ia
+    _escribir_preferencias_atomico(datos)
+    if avisos_descartes:
+        return [f"Se descartaron de {RUTA_PREFERENCIAS} claves que no sirven: {', '.join(avisos_descartes)}."]
+    return []
+
+
+def restablecer_ajustes() -> None:
+    datos = _leer_para_escribir()
+    datos.pop(CLAVE_AJUSTES, None)
+    datos.pop("modelo_ia", None)
+    _escribir_preferencias_atomico(datos)
+
+
+def _escribir_preferencias_atomico(datos: dict) -> None:
     RUTA_PREFERENCIAS.parent.mkdir(parents=True, exist_ok=True)
-    RUTA_PREFERENCIAS.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporal = RUTA_PREFERENCIAS.with_name(RUTA_PREFERENCIAS.name + ".tmp")
+    try:
+        temporal.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temporal, RUTA_PREFERENCIAS)
+    except OSError:
+        try:
+            temporal.unlink(missing_ok=True)
+        except OSError:
+            pass  # si tampoco se puede borrar el temporal, importa más el error de la escritura
+        raise
 
 
 def modelo_ia_efectivo(configuracion: dict, preferido: Optional[str]) -> str:

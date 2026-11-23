@@ -53,6 +53,9 @@ Dependencias entre módulos (quién importa a quién):
 - `configuracion.py:leer_modelo_preferido() -> Optional[str]`, `guardar_modelo_preferido(modelo)` (lanza `OSError` si
   no puede escribir) y `modelo_ia_efectivo(configuracion, preferido) -> str`: el modelo de IA elegido en el selector
   gana a `ia.modelo`.
+- `configuracion.py:guardar_ajustes(proyecto, valores, modelo_ia=None) -> list[str]` y `restablecer_ajustes()`: escriben
+  `preferencias.json` en una sola escritura, conservando las claves ajenas; `guardar_ajustes` devuelve los avisos de lo
+  descartado y lanza `ValueError` con un modelo de una familia excluida, sin escribir.
 - `configuracion.py:leer_ajustes() -> AjustesLeidos`: lee el bloque `configuracion` de `preferencias.json` sin lanzar.
   `AjustesLeidos(valores, avisos, ilegible)`: `valores` es `(sección, clave) → valor`, `avisos` son los textos para Registro,
   e `ilegible` es verdadero solo si el archivo existe y no es JSON o no es un objeto. `configuracion.py:combinar(proyecto,
@@ -331,6 +334,9 @@ Dependencias entre módulos (quién importa a quién):
 - `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
   (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`. Al abrir la ventana se lee
   también su bloque `configuracion` (`configuracion.py:leer_ajustes`), sin escribirlo; sus valores válidos ganan al YAML.
+  Toda escritura (`guardar_modelo_preferido`, `guardar_ajustes`, `restablecer_ajustes`) es atómica: escribe un temporal y lo
+  renombra encima con `os.replace` (`configuracion.py:_escribir_preferencias_atomico`). Un `OSError` al leer el archivo
+  (distinto de «no existe») se propaga sin reescribirlo.
 - Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `flujo_transcripcion.py:ruta_transcripcion` y la
   escribe `persistencia.py:persistir_transcripcion`), y `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (la ruta sale de
   `flujo_documentos.py:ruta_documento` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe

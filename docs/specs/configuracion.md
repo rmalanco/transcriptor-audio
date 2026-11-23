@@ -111,6 +111,10 @@ Origen: docs/historias/hechas/2026-11-22-18-validar-formulario.md
 - Given que `preferencias.json` no existe o no se puede leer, when se abre la ventana, then se usa `ia.modelo`, sin
   error. Si el archivo existe pero no es JSON válido o no se puede leer, Registro muestra un aviso (ver «Preferencias del
   usuario al abrir la ventana»).
+- Given que `preferencias.json` existe pero no se puede leer en ese momento, when se elige otro modelo en el selector, then
+  el archivo no se reescribe (no se pierden las demás preferencias) y Registro dice que el modelo vale solo para esta
+  sesión. Escribir el archivo es atómico: si la escritura falla a mitad, el archivo queda como estaba.
 
 Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
+Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
