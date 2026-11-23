@@ -9,6 +9,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Callable, Optional
 
 import httpx
@@ -98,10 +99,12 @@ PROMPT_REVISION = """Revisa el DOCUMENTO comparándolo frase por frase con la TR
 - Condiciones, matices o compromisos reformulados con otro sentido: reescríbelos con las palabras de la \
 transcripción (por ejemplo, si se dijo "lo entrego el lunes si me llegan los datos", no puede quedar \
 "entrega sujeta a validación de datos").
-- Datos que no aparecen en la transcripción (nombres, fechas, cifras, tareas).
+- Datos que no aparecen en la transcripción (nombres, fechas, cifras).
 - Calificativos o valoraciones que nadie expresó.
+- Tareas o acuerdos que nada de la transcripción respalda: quítalos. No quites los que se deducen de lo dicho: \
+un acuerdo con responsable también es una tarea, y la fecha que alguien estima para su propio trabajo también lo es.
 
-No cambies la estructura, los títulos, el orden ni el estilo; no elimines secciones ni tareas. Si no hay nada \
+No cambies la estructura, los títulos, el orden ni el estilo; no elimines secciones. Si no hay nada \
 que corregir, devuelve el documento igual. Responde solo con el documento completo.
 
 TRANSCRIPCIÓN:
@@ -160,6 +163,157 @@ def contar_vinetas_acuerdos(minuta: str) -> int:
     return sum(1 for l in _lineas_de_seccion(minuta, "## Acuerdos") if re.match(r"\s*[-*] ", l))
 
 
+MARCA_REPUESTA = "[comprobar]"  # en las filas y viñetas que la app repone cuando la revisión las quitó
+TITULO_TAREAS = "## Tareas y pendientes"
+TITULO_ACUERDOS = "## Acuerdos"
+CABECERA_TAREAS = "| Tarea | Responsable | Fecha límite |"
+SEPARADOR_TAREAS = "|-------|-------------|--------------|"
+
+
+def _seccion(lineas: list[str], titulo: str) -> Optional[tuple[int, int]]:
+    """Índices (inicio, fin) de la sección que empieza por `titulo`, con su encabezado; `fin` no se incluye.
+    None si la sección no está."""
+    inicio = next((i for i, l in enumerate(lineas) if l.strip().lower().startswith(titulo.lower())), None)
+    if inicio is None:
+        return None
+    fin = next((i for i in range(inicio + 1, len(lineas)) if re.match(r"#{1,2} ", lineas[i].strip())), len(lineas))
+    return inicio, fin
+
+
+def _es_separador(linea: str) -> bool:
+    return set(linea.replace("|", "").strip()) <= set("-: ")
+
+
+def _celdas(linea: str) -> list[str]:
+    return [c.strip() for c in linea.strip().strip("|").split("|")]
+
+
+def _clave(texto: str) -> str:
+    """Forma comparable de una fila o viñeta: minúsculas, espacios colapsados y sin punto final."""
+    return " ".join(texto.lower().split()).rstrip(".")
+
+
+def _clave_fila(linea: str) -> str:
+    return _clave(" | ".join(_celdas(linea)))
+
+
+def _filas_tareas(lineas: list[str]) -> list[int]:
+    """Índices de las filas de datos de la tabla de tareas: sin cabecera, separador ni la fila «Sin tareas»."""
+    rango = _seccion(lineas, TITULO_TAREAS)
+    if rango is None:
+        return []
+    inicio, fin = rango
+    filas = [i for i in range(inicio + 1, fin) if lineas[i].strip().startswith("|") and not _es_separador(lineas[i])]
+    return [i for i in filas[1:] if _celdas(lineas[i])[0].lower().rstrip(".") != "sin tareas"]
+
+
+def _pendientes(antes: list[str], despues: list[str], clave) -> list[str]:
+    """Filas de `antes` sin pareja en `despues`. Si `despues` no tiene menos, no falta ninguna. Las parejas se eligen de
+    mayor a menor similitud (a igualdad, el orden original de antes y de después), una a una."""
+    if len(despues) >= len(antes):
+        return []
+    pares = sorted((-SequenceMatcher(None, clave(a), clave(b)).ratio(), i, j)
+                   for i, a in enumerate(antes) for j, b in enumerate(despues))
+    usadas_antes, usadas_despues = set(), set()
+    for _, i, j in pares:
+        if i not in usadas_antes and j not in usadas_despues:
+            usadas_antes.add(i)
+            usadas_despues.add(j)
+    return [a for i, a in enumerate(antes) if i not in usadas_antes]
+
+
+def _tareas_quitadas(antes: str, despues: str) -> list[str]:
+    la, ld = antes.splitlines(), despues.splitlines()
+    return _pendientes([la[i] for i in _filas_tareas(la)], [ld[i] for i in _filas_tareas(ld)], _clave_fila)
+
+
+def _marcar_fila(linea: str) -> str:
+    celdas = _celdas(linea)
+    celdas[0] += f" {MARCA_REPUESTA}"
+    return "| " + " | ".join(celdas) + " |"
+
+
+def _elemento_de_tarea(linea: str) -> str:
+    """Cómo se nombra una tarea en la nota: «tarea (responsable)», o solo la tarea sin responsable conocido."""
+    tarea, responsable = (_celdas(linea) + ["", ""])[:2]
+    if not responsable or responsable.lower() == "no asignado":
+        return tarea
+    return f"{tarea} ({responsable})"
+
+
+def _reponer_tareas(lineas: list[str], quitadas: list[str]) -> list[str]:
+    """Añade al final de la tabla de tareas las filas quitadas, marcadas; si no hay tabla, bajo el título."""
+    inicio, fin = _seccion(lineas, TITULO_TAREAS)
+    filas = [i for i in range(inicio + 1, fin) if lineas[i].strip().startswith("|")]
+    marcadas = [_marcar_fila(l) for l in quitadas]
+    if filas:
+        pos = filas[-1] + 1
+        return lineas[:pos] + marcadas + lineas[pos:]
+    return lineas[:inicio + 1] + [CABECERA_TAREAS, SEPARADOR_TAREAS] + marcadas + lineas[inicio + 1:]
+
+
+def _es_vineta(linea: str) -> bool:
+    return re.match(r"\s*[-*] ", linea) is not None
+
+
+def _texto_de_vineta(linea: str) -> str:
+    return re.sub(r"^\s*[-*] ", "", linea).strip()
+
+
+def _es_relleno_acuerdo(linea: str) -> bool:
+    return _clave(_texto_de_vineta(linea)) == "sin acuerdos explícitos"
+
+
+def _vinetas_acuerdos(lineas: list[str]) -> list[int]:
+    """Índices de las viñetas de «## Acuerdos», sin la viñeta «Sin acuerdos explícitos»."""
+    rango = _seccion(lineas, TITULO_ACUERDOS)
+    if rango is None:
+        return []
+    inicio, fin = rango
+    return [i for i in range(inicio + 1, fin) if _es_vineta(lineas[i]) and not _es_relleno_acuerdo(lineas[i])]
+
+
+def _acuerdos_quitados(antes: str, despues: str) -> list[str]:
+    la, ld = antes.splitlines(), despues.splitlines()
+    return _pendientes([la[i] for i in _vinetas_acuerdos(la)], [ld[i] for i in _vinetas_acuerdos(ld)],
+                       lambda linea: _clave(_texto_de_vineta(linea)))
+
+
+def _reponer_acuerdos(lineas: list[str], quitados: list[str]) -> list[str]:
+    """Añade tras la última viñeta de Acuerdos las quitadas, marcadas. Si se repone algo, sale la viñeta «Sin acuerdos
+    explícitos»."""
+    inicio, fin = _seccion(lineas, TITULO_ACUERDOS)
+    lineas = [l for i, l in enumerate(lineas) if not (inicio < i < fin and _es_relleno_acuerdo(l))]
+    inicio, fin = _seccion(lineas, TITULO_ACUERDOS)
+    vinetas = [i for i in range(inicio + 1, fin) if _es_vineta(lineas[i])]
+    marcadas = [f"- {_texto_de_vineta(l)} {MARCA_REPUESTA}" for l in quitados]
+    pos = vinetas[-1] + 1 if vinetas else inicio + 1
+    return lineas[:pos] + marcadas + lineas[pos:]
+
+
+def _sin_donde_reponer(antes: str, despues: str) -> bool:
+    """Hay tareas o acuerdos que reponer y `despues` ya no tiene el título de su sección, donde irían."""
+    dl = despues.splitlines()
+    return (bool(_tareas_quitadas(antes, despues)) and _seccion(dl, TITULO_TAREAS) is None
+            or bool(_acuerdos_quitados(antes, despues)) and _seccion(dl, TITULO_ACUERDOS) is None)
+
+
+def reponer_lo_quitado(antes: str, despues: str) -> tuple[str, list[str]]:
+    """Devuelve `despues` con lo que la revisión quitó de las tareas y de los acuerdos, repuesto y marcado, y la lista de
+    lo repuesto para la nota. Solo repone donde `despues` tiene menos filas o viñetas que `antes`."""
+    quitadas = _tareas_quitadas(antes, despues)
+    quitados = _acuerdos_quitados(antes, despues)
+    if not quitadas and not quitados:
+        return despues, []
+    lineas = despues.splitlines()
+    if quitadas:
+        lineas = _reponer_tareas(lineas, quitadas)
+    if quitados:
+        lineas = _reponer_acuerdos(lineas, quitados)
+    elementos = [_elemento_de_tarea(l) for l in quitadas] + [_texto_de_vineta(l) for l in quitados]
+    return "\n".join(lineas), elementos
+
+
 class ErrorAsistenteIA(Exception):
     pass
 
@@ -204,6 +358,7 @@ class _Documento:
     corte: Optional[str] = None  # motivo si Copilot cortó la respuesta que quedó en el documento
     cortes_partes: dict = field(default_factory=dict)  # parte -> motivo, de las notas que Copilot cortó
     revision_descartada: Optional[str] = None  # motivo si la revisión se descartó y se conservó el documento anterior
+    repuestas: list[str] = field(default_factory=list)  # tareas que la revisión quitó y que la app repuso marcadas
 
 
 def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
@@ -325,10 +480,33 @@ def _nota_de_cortes_de_partes(cortes: dict, total: int) -> str:
             "lo que se dijo en esas partes puede faltar en este documento.")
 
 
+def _recortado(texto: str) -> str:
+    """Una línea y, si pasa de MAX_MOTIVO_NOTA caracteres, sus primeros caracteres y «…» (sin quitar el punto final)."""
+    texto = " ".join(texto.split())
+    return texto if len(texto) <= MAX_MOTIVO_NOTA else texto[:MAX_MOTIVO_NOTA] + "…"
+
+
+def _lista_entre_comillas(elementos: list[str]) -> str:
+    citados = [f"«{e}»" for e in elementos[:5]]
+    if len(elementos) > 5:
+        return ", ".join(citados) + f" y {len(elementos) - 5} más"
+    if len(citados) == 1:
+        return citados[0]
+    return ", ".join(citados[:-1]) + " y " + citados[-1]
+
+
+def _cita_de_lo_repuesto(repuestas: list[str]) -> str:
+    return ("> Nota de la aplicación: la revisión de fidelidad quiso quitar de la minuta lo siguiente por no encontrarlo "
+            "en la transcripción; la app lo ha repuesto marcado con «[comprobar]»: "
+            f"{_lista_entre_comillas([_recortado(r) for r in repuestas])}. "
+            "Compruébalo con la transcripción y bórralo si no se dijo.")
+
+
 def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
                            error_secciones: Optional[str] = None, error_revision: Optional[str] = None,
                            corte: Optional[str] = None, cortes_partes: Optional[dict] = None, *,
-                           revision_descartada: Optional[str] = None) -> str:
+                           revision_descartada: Optional[str] = None,
+                           repuestas: Optional[list[str]] = None) -> str:
     """Bloque final que la app añade a un documento: una sola línea horizontal y, debajo, las notas que apliquen
     (primero las de secciones, después la de la revisión y la de las partes). Vacío si no hay nada que avisar.
     `error_secciones` y `error_revision`: motivo por el que no se pudo completar esa pasada."""
@@ -355,6 +533,8 @@ def notas_de_la_aplicacion(faltan: list[str], partes: int, revisado: bool,
     if revision_descartada:
         citas.append(f"> Nota de la aplicación: la revisión de fidelidad se descartó porque {revision_descartada}; "
                      "este documento no está revisado.")
+    if repuestas:
+        citas.append(_cita_de_lo_repuesto(repuestas))
     if partes >= 2:
         citas.append(_cita_de_partes(partes, revisado))
     if not citas:
@@ -767,6 +947,7 @@ class AsistenteIA:
 
         error_revision = None
         revision_descartada = None
+        repuestas: list[str] = []
         if self.revision_fidelidad:
             # Segunda pasada: contrasta el documento con la fuente para corregir reformulaciones
             if on_progreso:
@@ -782,26 +963,25 @@ class AsistenteIA:
                 log.warning("No se pudo completar la revisión de fidelidad; se entrega sin revisar: %s", e)
                 error_revision = _motivo(e)
             else:
-                # Solo se acepta si conserva todas las secciones que tenía y, en la minuta, sus tareas y acuerdos
+                # Solo se acepta si conserva todas las secciones que tenía. En la minuta, lo que la revisión quitó de las
+                # tareas se repone marcado (D4)
                 conserva_secciones = (len(secciones_faltantes(revisado, secciones or []))
                                       <= len(secciones_faltantes(documento, secciones or [])))
-                pierde_tareas_o_acuerdos = conservar_tareas_y_acuerdos and (
-                    contar_filas_tareas(revisado) < contar_filas_tareas(documento)
-                    or contar_vinetas_acuerdos(revisado) < contar_vinetas_acuerdos(documento))
-                if conserva_secciones and not pierde_tareas_o_acuerdos:
-                    documento = revisado
-                    corte = _corte(revisado)  # el motivo es el de la respuesta que quedó
-                elif not conserva_secciones:
-                    revision_descartada = "quitaba secciones obligatorias"  # gana si pierde secciones y tareas
+                # Si hay que reponer algo y la revisión ya no tiene el título de su sección, no hay dónde: se descarta
+                if not conserva_secciones or (conservar_tareas_y_acuerdos and _sin_donde_reponer(documento, revisado)):
+                    revision_descartada = "quitaba secciones obligatorias"
                 else:
-                    revision_descartada = "quitaba tareas o acuerdos"  # provisional: R4 lo sustituye
+                    motivo_corte = _corte(revisado)  # el motivo es el de la respuesta que quedó
+                    if conservar_tareas_y_acuerdos:
+                        revisado, repuestas = reponer_lo_quitado(documento, revisado)
+                    documento, corte = revisado, motivo_corte
         if postproceso:
             documento = postproceso(documento)
         faltan_al_final = secciones_faltantes(documento, secciones or [])
         # Si la revisión devolvió las que faltaban, no hay nada que decir del fallo al pedirlas
         return _Documento(documento, len(bloques), faltan_al_final,
                           error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes,
-                          revision_descartada=revision_descartada)
+                          revision_descartada=revision_descartada, repuestas=repuestas)
 
     def _comprobar_limite_de_entrada(self, prompt: str, partes: int, cancelar: Optional[threading.Event]) -> None:
         """Antes de redactar a partir de notas: si la petición entera supera el límite de entrada del modelo que se
@@ -839,7 +1019,8 @@ class AsistenteIA:
         # sin revisión, o con una revisión que no se completó o se descartó, no se dice que se revisó
         revisado = self.revision_fidelidad and not d.error_revision and not d.revision_descartada
         nota = notas_de_la_aplicacion(d.faltan, d.partes, revisado, d.error_secciones, d.error_revision, d.corte,
-                                      d.cortes_partes, revision_descartada=d.revision_descartada)
+                                      d.cortes_partes, revision_descartada=d.revision_descartada,
+                                      repuestas=d.repuestas)
         return d.texto.rstrip() + "\n" + nota if nota else d.texto
 
     def generar_resumen(self, texto: str, on_progreso=None, cancelar=None) -> str:

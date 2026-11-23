@@ -156,15 +156,26 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 
 ### Notas de la aplicación juntas
 - Given un documento que lleva varias notas de la aplicación (respuesta cortada, notas de partes cortadas, secciones que
-  no se pudieron pedir de nuevo o que faltan, revisión no completada o descartada y, si está redactado a partir de notas
-  de varias partes, la de las partes), when termina la generación, then todas van bajo una sola línea horizontal,
-  separadas por una línea en blanco, en este orden: respuesta cortada, notas de partes cortadas, secciones que no se
-  pudieron pedir de nuevo, secciones que faltan, revisión no completada o descartada y, la última, la de las partes
-  («> Nota de la aplicación: la transcripción se procesó en N partes…»); el título y la fecha no cambian.
+  no se pudieron pedir de nuevo o que faltan, revisión no completada o descartada, lo repuesto por la revisión y, si está
+  redactado a partir de notas de varias partes, la de las partes), when termina la generación, then todas van bajo una
+  sola línea horizontal, separadas por una línea en blanco, en este orden: respuesta cortada, notas de partes cortadas,
+  secciones que no se pudieron pedir de nuevo, secciones que faltan, revisión no completada o descartada, lo repuesto y,
+  la última, la de las partes («> Nota de la aplicación: la transcripción se procesó en N partes…»); el título y la
+  fecha no cambian.
+- Given una minuta con lo repuesto por la revisión, when se monta la nota, then la lista de elementos va entre comillas
+  latinas, separada por comas y «y» (con 1 elemento, «A»; con 2, «A» y «B»; con 6, «A», «B», «C», «D», «E» y 1 más),
+  cada elemento en una línea y recortado a sus primeros 120 caracteres con «…» si pasa de ahí (sin quitar el punto
+  final de un elemento corto, como «Se contrata a Ana.»); una tarea cuyo responsable es «No asignado» o está vacío se
+  nombra sin paréntesis; con la lista vacía no hay nota, y el bloque es `""` si no hay nada más que avisar. La nota dice:
+  «> Nota de la aplicación: la revisión de fidelidad quiso quitar de la minuta lo siguiente por no encontrarlo en la
+  transcripción; la app lo ha repuesto marcado con «[comprobar]»: {lista}. Compruébalo con la transcripción y bórralo si
+  no se dijo.». Lo repuesto cuenta como revisado: la nota de las partes sigue diciendo «La revisión de fidelidad se hizo
+  contra esas notas, no contra la transcripción.». Ni la marca ni la nota se envían a Copilot.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
 Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
+Origen: docs/historias/hechas/2026-11-22-29-reponer-lo-quitado.md
 
 ### Fallo de una parte
 - Given una transcripción que se procesa en 8 partes y la parte 7 falla (por ejemplo, Copilot responde 429 en todos sus
@@ -226,11 +237,31 @@ Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
 
 ### Revisión de fidelidad que borra tareas o acuerdos
 - Given la revisión de fidelidad activada y una minuta de una parte, when la revisión pierde una sección y una fila de la tabla de tareas, then se descarta, se conserva la minuta anterior a la revisión y la nota dice «… se descartó porque quitaba secciones obligatorias; este documento no está revisado.» (gana el motivo de secciones).
-- Given la revisión de fidelidad activada y una minuta de una parte, when la revisión de una minuta deja la tabla de tareas con menos filas o la sección de acuerdos con menos viñetas, then se descarta, se conserva la minuta anterior a la revisión, con esa fila, y la nota dice «… se descartó porque quitaba tareas o acuerdos; este documento no está revisado.». Este motivo es provisional: lo sustituye la reposición marcada con «[comprobar]».
-- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta mientras conserve las secciones, también si quita una viñeta de «### Puntos clave».
+- Given la revisión de fidelidad activada y una minuta de una parte con las tareas «Enviar las cifras de octubre | Ana» y
+  «Revisar el plan | Ana», el acuerdo «Se aprueba el presupuesto» y la frase «la entrega está sujeta a validación», when la
+  revisión devuelve la minuta sin la fila «Enviar las cifras de octubre» y con la frase «la entrega llega si me llegan
+  los datos», then la minuta contiene la frase corregida (la revisión se aplica), la línea «| Revisar el plan | Ana |
+  Sin fecha |» seguida de «| Enviar las cifras de octubre [comprobar] | Ana | Sin fecha |» al final de la tabla, y bajo
+  la línea horizontal la nota de lo repuesto con «Enviar las cifras de octubre (Ana)»; no contiene «se descartó».
+- Given la revisión de fidelidad activada y una minuta con los acuerdos «- Se aprueba el presupuesto» y «- Se contrata a
+  Ana», when la revisión devuelve solo «* Se aprueba el presupuesto.», then la minuta lleva «- Se contrata a Ana
+  [comprobar]» tras la última viñeta de Acuerdos.
+- Given la revisión de fidelidad activada y una minuta cuya única tarea la revisión cambia por la fila «Sin tareas», when
+  termina la generación, then la tarea vuelve marcada con «[comprobar]» y la fila «Sin tareas» no aparece.
+- Given la revisión de fidelidad activada y una minuta de una parte, when la revisión quita tareas o acuerdos, then solo
+  se reponen los que faltan y solo donde la tabla o la lista bajan de número (sin contar la fila «Sin tareas» ni la
+  viñeta «Sin acuerdos explícitos»): una revisión que conserva las 2 filas de tareas y reescribe la primera celda de una
+  no lleva ninguna marca ni nota de lo repuesto; una que reescribe «Enviar el informe» como «Enviar el informe final» y
+  quita «Revisar el contrato» (de 3 filas a 2) solo vuelve «| Revisar el contrato [comprobar] | Ana | Sin fecha |», y su
+  nota lista solo «Revisar el contrato (Ana)».
+- Given la revisión de fidelidad activada y una minuta de una parte, when la revisión quita una tarea o un acuerdo y
+  no conserva el título de su sección («## Tareas y pendientes» o «## Acuerdos»), then no hay dónde reponerlo: se
+  descarta, se conserva la minuta anterior a la revisión sin ninguna marca y la nota dice «… se descartó porque quitaba
+  secciones obligatorias; este documento no está revisado.».
+- Given la revisión de fidelidad activada y un resumen, when se revisa, then esta regla no aplica: la revisión se acepta
+  mientras conserve las secciones, también si quita una viñeta de «### Puntos clave», sin marca ni nota.
 
-Origen: carril S, 2026-11-22: una revisión de minuta que deja menos tareas o acuerdos se descarta y se conserva la anterior (decisión del usuario, punto #24)
-Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
+Origen: docs/historias/hechas/2026-11-22-29-reponer-lo-quitado.md
 
 ### Revisión que pierde secciones
 - Given la revisión de fidelidad activada, una transcripción de una sola parte y una revisión de resumen que devuelve el documento sin «### Puntos clave» ni «### Conclusiones», when genero el resumen, then el resumen empieza por el redactado, con todas sus secciones y sin ninguna corrección de la revisión, y contiene, tras «\n---\n\n», «> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está revisado.». La nota no se envía a Copilot.

@@ -236,7 +236,7 @@ def test_contar_vinetas_de_acuerdos():
     assert contar_vinetas_acuerdos(_minuta(acuerdos=())) == 0
 
 
-def test_revision_de_minuta_que_borra_una_tarea_se_descarta(monkeypatch):
+def test_revision_de_minuta_que_borra_una_tarea_se_repone_marcada(monkeypatch):
     redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor", "Revisar el contrato"))
     revision = _minuta(tareas=("Enviar el informe", "Pagar el proveedor"))
     respuestas = iter([redaccion, revision])
@@ -246,9 +246,10 @@ def test_revision_de_minuta_que_borra_una_tarea_se_descarta(monkeypatch):
     minuta = asistente.generar_minuta("texto de prueba")
 
     assert "Revisar el contrato" in minuta  # la tarea que la revisión borró sigue en el documento final
+    assert "| Revisar el contrato [comprobar] | Ana | Sin fecha |" in minuta
 
 
-def test_revision_de_minuta_que_borra_un_acuerdo_se_descarta(monkeypatch):
+def test_revision_de_minuta_que_borra_un_acuerdo_se_repone_marcado(monkeypatch):
     redaccion = _minuta(acuerdos=("Se aprueba el presupuesto", "Se contrata a Ana"))
     revision = _minuta(acuerdos=("Se aprueba el presupuesto",))
     respuestas = iter([redaccion, revision])
@@ -257,7 +258,7 @@ def test_revision_de_minuta_que_borra_un_acuerdo_se_descarta(monkeypatch):
 
     minuta = asistente.generar_minuta("texto de prueba")
 
-    assert "- Se contrata a Ana" in minuta
+    assert "- Se contrata a Ana [comprobar]" in minuta
 
 
 def test_revision_de_minuta_que_conserva_tareas_y_acuerdos_se_acepta(monkeypatch):
@@ -330,21 +331,136 @@ def test_revision_que_pierde_secciones_y_tareas_da_el_motivo_de_secciones(monkey
     assert ("la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está "
             "revisado.") in minuta
     assert "quitaba tareas o acuerdos" not in minuta
+    assert "[comprobar]" not in minuta
 
 
-def test_revision_descartada_por_tareas_lo_dice(monkeypatch):
-    # Provisional: R4 sustituye este caso por la reposición marcada con «[comprobar]»
-    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor", "Revisar el contrato"))
-    revision = _minuta(tareas=("Enviar el informe", "Pagar el proveedor"))
+def test_lo_repuesto_no_se_envia_a_copilot(monkeypatch):
+    import json
+    _prohibir_red(monkeypatch)
+    texto = "\n".join(f"Segmento {i:03d} con algo de contenido." for i in range(40))
+    assert len(dividir_texto(texto, 900)) == 2
+    revision = MINUTA_MODELO.replace("| Enviar cifras de octubre | Ana | No asignado |\n", "")  # quita la tarea
+    cuerpos = _simular_chat(monkeypatch, lambda cuerpo: "- Nota de una parte" if _es_prompt_de_notas(cuerpo)
+                            else revision if "DOCUMENTO:" in cuerpo["messages"][-1]["content"] else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", max_caracteres_bloque=900, revision_fidelidad=True)
+
+    minuta = asistente.generar_minuta(texto)
+
+    assert "Enviar cifras de octubre [comprobar]" in minuta  # la app lo repone...
+    assert "quiso quitar" in minuta  # ...y lo dice
+    assert len(cuerpos) == 4  # dos notas, la minuta y la revisión
+    assert not any("[comprobar]" in json.dumps(c, ensure_ascii=False) or "quiso quitar" in json.dumps(c, ensure_ascii=False)
+                   for c in cuerpos)
+
+
+def test_nota_de_lo_repuesto_formato_y_tope():
+    from src.asistente_ia import notas_de_la_aplicacion
+    cabecera = ("\n---\n\n> Nota de la aplicación: la revisión de fidelidad quiso quitar de la minuta lo siguiente por no "
+                "encontrarlo en la transcripción; la app lo ha repuesto marcado con «[comprobar]»: ")
+    cola = ". Compruébalo con la transcripción y bórralo si no se dijo."
+    assert notas_de_la_aplicacion([], 1, True, repuestas=["A"]) == cabecera + "«A»" + cola
+    assert notas_de_la_aplicacion([], 1, True, repuestas=["A", "B"]) == cabecera + "«A» y «B»" + cola
+    assert notas_de_la_aplicacion([], 1, True, repuestas=list("ABCDEF")) == (
+        cabecera + "«A», «B», «C», «D», «E» y 1 más" + cola)
+    assert notas_de_la_aplicacion([], 1, True, repuestas=["x" * 200]) == cabecera + "«" + "x" * 120 + "…»" + cola
+    assert "«Se contrata a Ana.»" in notas_de_la_aplicacion([], 1, True, repuestas=["Se contrata a Ana."])
+    assert notas_de_la_aplicacion([], 1, True, repuestas=[]) == ""
+    bloque = notas_de_la_aplicacion(["## Próximos pasos"], 2, True, repuestas=["A"])
+    assert bloque.index("faltan secciones") < bloque.index("repuesto marcado") < bloque.index("se procesó en 2 partes")
+
+
+def test_reponer_lo_quitado_sin_bajar_no_cambia_nada():
+    from src.asistente_ia import reponer_lo_quitado
+    antes = _minuta(tareas=("Enviar el informe", "Revisar el contrato"))
+    despues = _minuta(tareas=("Enviar el informe final", "Revisar el contrato"))  # mismo número de filas
+    assert reponer_lo_quitado(antes, despues) == (despues, [])
+
+
+def test_tarea_reescrita_y_otra_quitada_solo_repone_la_quitada(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe", "Revisar el contrato", "Pagar el proveedor"))
+    revision = _minuta(tareas=("Enviar el informe final", "Pagar el proveedor"))
     respuestas = iter([redaccion, revision])
     asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
     monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
 
     minuta = asistente.generar_minuta("texto de prueba")
 
-    assert "Revisar el contrato" in minuta  # la fila sigue: la revisión se descarta entera
-    assert minuta.endswith("\n\n---\n\n> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba "
-                           "tareas o acuerdos; este documento no está revisado.")
+    assert "| Revisar el contrato [comprobar] | Ana | Sin fecha |" in minuta
+    assert "| Enviar el informe final | Ana | Sin fecha |" in minuta  # reescrita: sin marca
+    assert "Enviar el informe [comprobar]" not in minuta  # y no se repone la que sigue
+    # sin contar la nota (que cita la marca): una sola fila marcada
+    assert sum("[comprobar]" in linea for linea in minuta.splitlines() if not linea.startswith("> ")) == 1
+
+
+def test_tarea_cambiada_por_sin_tareas_se_repone(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar el informe",)).replace("| Enviar el informe | Ana |", "| Enviar el informe | No asignado |")
+    revision = _minuta(tareas=("Sin tareas",))  # la única tarea se ha vuelto la fila de relleno
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "| Enviar el informe [comprobar] | No asignado | Sin fecha |" in minuta
+    assert "| Sin tareas" not in minuta  # la fila de relleno sale porque ya hay tareas
+    assert "«Enviar el informe»" in minuta  # sin responsable conocido, sin paréntesis
+
+
+def test_acuerdo_quitado_se_repone_marcado(monkeypatch):
+    redaccion = _minuta(acuerdos=("Se aprueba el presupuesto", "Se contrata a Ana"))
+    revision = _minuta(acuerdos=()).replace("## Acuerdos\n\n", "## Acuerdos\n* Se aprueba el presupuesto.\n\n")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "* Se aprueba el presupuesto." in minuta
+    assert "- Se contrata a Ana [comprobar]" in minuta
+    # la nota también cita «[comprobar]»: se cuentan las líneas marcadas, no las apariciones
+    assert sum(linea.endswith("[comprobar]") for linea in minuta.splitlines()) == 1
+
+
+def test_prompt_de_revision_permite_quitar_solo_lo_no_respaldado():
+    from src.asistente_ia import PROMPT_REVISION
+    assert "no elimines secciones." in PROMPT_REVISION
+    assert "un acuerdo con responsable también es una tarea" in PROMPT_REVISION
+    assert "ni tareas" not in PROMPT_REVISION
+
+
+def test_sin_la_seccion_donde_reponer_se_descarta(monkeypatch):
+    # El borrador no tiene «## Acuerdos» (no hay nada que reponer ahí) y la revisión quita tareas sin su título
+    redaccion = _minuta(tareas=("Enviar el informe", "Pagar el proveedor")).replace(
+        "## Acuerdos\n- Se aprueba el presupuesto\n\n", "")
+    revision = _minuta(tareas=("Enviar el informe",)).split("## Tareas y pendientes")[0] + "## Próximos pasos\n- Nada más.\n"
+    respuestas = iter([redaccion, redaccion, revision])  # el reintento de secciones no devuelve Acuerdos
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert ("la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está "
+            "revisado.") in minuta
+    assert "[comprobar]" not in minuta
+    assert "| Enviar el informe | Ana | Sin fecha |" in minuta  # el borrador conserva sus tareas
+    assert "| Pagar el proveedor | Ana | Sin fecha |" in minuta
+
+
+def test_revision_que_quita_una_tarea_se_aplica_y_la_repone_marcada(monkeypatch):
+    redaccion = _minuta(tareas=("Enviar las cifras de octubre", "Revisar el plan"),
+                        frase="la entrega está sujeta a validación")
+    revision = _minuta(tareas=("Revisar el plan",), frase="la entrega llega si me llegan los datos")
+    respuestas = iter([redaccion, revision])
+    asistente = AsistenteIA(api_key="x", revision_fidelidad=True)
+    monkeypatch.setattr(asistente, "_completar", lambda prompt, cancelar=None: next(respuestas))
+
+    minuta = asistente.generar_minuta("texto de prueba")
+
+    assert "la entrega llega si me llegan los datos" in minuta
+    assert "| Revisar el plan | Ana | Sin fecha |\n| Enviar las cifras de octubre [comprobar] | Ana | Sin fecha |" in minuta
+    assert ("la app lo ha repuesto marcado con «[comprobar]»: «Enviar las cifras de octubre (Ana)». Compruébalo con "
+            "la transcripción y bórralo si no se dijo.") in minuta
+    assert "se descartó" not in minuta
 
 
 class _RespuestaFalsa:
