@@ -91,6 +91,9 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
   ni barras, como empresa.ghe.com, o estar vacío (vale «https://empresa.ghe.com/»); se usa el valor de
   config/settings.yaml.». `config/settings.yaml` y la CLI no tienen esos topes: un `beam_size: 50` en el YAML se carga
   como antes.
+- Given un `preferencias.json` con un carácter nulo dentro de `historial.ruta` (`a` + carácter nulo + `b`), when se
+  abre la ventana, then el historial toma la ruta de config/settings.yaml, la ventana abre igual y Registro muestra
+  «En <ruta>, `historial.ruta` no es una ruta válida (vale «a\0b»); se usa el valor de config/settings.yaml.».
 - Given un `preferencias.json` que no es JSON (por ejemplo `{`) o cuyo JSON no es un objeto (por ejemplo una lista), when
   se abre la ventana, then se abre con los valores del YAML y Registro muestra un único aviso: «Las preferencias <ruta>
   no son un JSON válido; se usan los valores de config/settings.yaml. Al guardar se reemplazará el archivo.»
@@ -102,6 +105,7 @@ Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
 
 Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
 Origen: docs/historias/hechas/2026-11-22-18-validar-formulario.md
+Origen: carril S, 2026-11-22: code review del panel, un carácter nulo en `historial.ruta` ya no impide abrir la ventana
 
 ### Modelo de IA elegido en la ventana
 - Given que se elige un modelo en el selector de la ventana, when se elige, then el modelo se recuerda en
@@ -114,10 +118,14 @@ Origen: docs/historias/hechas/2026-11-22-18-validar-formulario.md
 - Given que `preferencias.json` existe pero no se puede leer en ese momento, when se elige otro modelo en el selector, then
   el archivo no se reescribe (no se pierden las demás preferencias) y Registro dice que el modelo vale solo para esta
   sesión. Escribir el archivo es atómico: si la escritura falla a mitad, el archivo queda como estaba.
+- Given que se elige en el selector del lateral un modelo de una familia no autorizada (por ejemplo
+  `Mistral-Large-3`), when se elige, then `preferencias.json` no se crea ni se modifica, Registro anota «Modelo de IA:
+  Mistral-Large-3 (solo para esta sesión; no se pudo guardar en preferencias.json)» y no se envía nada con ese modelo.
 
 Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
 Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
+Origen: carril S, 2026-11-22: code review del panel, un modelo de familia no autorizada no se guarda como preferencia (regla 7)
 
 ### Vista Configuración
 La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con la sesión de GitHub Copilot primero, luego «Modelo de IA» y su «Avanzado» plegado) e Historial. El panel lateral sigue siendo «para esta transcripción»: guardar desde la vista solo cambia los controles del lateral de las claves guardadas.
@@ -149,7 +157,7 @@ La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), S
   diálogo de inicio de sesión abierto también.)
 - Given el YAML del proyecto (`transcripcion.beam_size: 5`, `transcripcion.no_speech_threshold: 0.6`) y sin
   `preferencias.json`, when se abre «⚙ Configuración», then el grupo «Transcripción» muestra sus cuatro campos y un
-  «▸ Avanzado» plegado que oculta los siete de decodificación (Haz de búsqueda, Candidatos, Temperatura de Whisper,
+  «▶ Avanzado» plegado que oculta los siete de decodificación (Haz de búsqueda, Candidatos, Temperatura de Whisper,
   Usar el texto anterior como contexto, Umbral de compresión, Umbral de probabilidad, Umbral de silencio); y si se
   despliega, se escribe `cinco` en «Haz de búsqueda» y `0,5` en «Umbral de silencio» y se pulsa «Guardar», bajo «Haz de
   búsqueda» aparece «`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «cinco»).», bajo «Umbral de
@@ -173,11 +181,27 @@ La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), S
   modelo). Si se responde «No», nada cambia; y si la escritura falla (carpeta de preferencias sin permiso de escritura),
   aparece el diálogo «Configuración» con «No se pudo restablecer la configuración: <motivo>.», el archivo no cambia y no
   cambia nada en la vista, el lateral ni el selector de modelo de IA.
+- Given `config/settings.yaml` con `transcripcion.beam_size: 50` (fuera de los topes del panel) y sin
+  `preferencias.json`, when se abre «⚙ Configuración», se elige `srt` en «Formato de salida» y se pulsa «Guardar», then
+  el pie dice «Configuración guardada», `preferencias.json` queda exactamente `{"configuracion": {"salida": {"formato":
+  "srt"}}}` y bajo «Haz de búsqueda» no aparece ningún error. «Guardar» solo envía los campos que el usuario cambió
+  desde que se pintó la vista (antes: enviaba todos, y el `50` del YAML impedía guardar cualquier otro campo).
+- Given «Haz de búsqueda» con miles de dígitos pegados, when se pulsa «Guardar», then bajo «Haz de búsqueda» aparece
+  «`transcripcion.beam_size` debe ser un número entero entre 1 y 20 (vale «9999…»).», con el valor recortado a 40
+  caracteres seguidos de «…», el pie dice «No se guardó nada: corrige 1 valor.» y no sale ninguna excepción de Python
+  (antes: la excepción no se traducía a un error del campo).
+- Given «Archivo del historial» con un carácter nulo entre `a` y `b`, when se pulsa «Guardar», then bajo el campo aparece
+  «`historial.ruta` no es una ruta válida (vale «a\0b»).», el pie dice «No se guardó nada: corrige 1 valor.» y
+  `preferencias.json` no se crea.
+- Given la ventana baja y un campo con error dentro de «Avanzado» (por ejemplo «Haz de búsqueda» con `cinco`), when se
+  pulsa «Guardar», then «Avanzado» se despliega y la vista se desplaza hasta el primer campo con error, en el orden de la
+  vista, de modo que ese campo queda visible (antes: podía quedar fuera de la pantalla).
 
 Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md
 Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md
 Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
 Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
+Origen: carril S, 2026-11-22: code review del panel, «Guardar» solo envía lo cambiado y la vista se desplaza al primer error
 
 ### Modelo de IA en la vista Configuración
 - Given el YAML del proyecto (`ia.modelo: "claude-haiku-5.5"`, `salida.formato: "txt"`), sin `preferencias.json`, con
@@ -216,7 +240,7 @@ Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
 - Given el YAML del proyecto (`ia.copilot_enterprise_url: ""`, `revision_fidelidad: false`, `temperatura: 0.2`,
   `max_caracteres_bloque: 60000`, `peticiones_paralelas: 3`) y sin `preferencias.json`, when se abre «⚙ Configuración»,
   then entre «Salida» e «Historial» hay un grupo «IA» con «Dominio de GitHub Enterprise (vacío = github.com)» vacío,
-  «Revisión de fidelidad» apagado y un «▸ Avanzado» plegado con «Temperatura de la IA» `0.2`, «Caracteres por parte»
+  «Revisión de fidelidad» apagado y un «▶ Avanzado» plegado con «Temperatura de la IA» `0.2`, «Caracteres por parte»
   `60000` y «Partes a la vez» `3`, cada campo con su clave del YAML en gris (el campo «Modelo de IA», primero del grupo, es el de «Modelo de IA en la vista Configuración»).
 - Given esa vista con `https://empresa.ghe.com/` en el dominio y `9` en «Partes a la vez», when se pulsa «Guardar», then
   bajo el dominio aparece «`ia.copilot_enterprise_url` debe ser un nombre de dominio sin https:// ni barras, como

@@ -54,7 +54,7 @@ Dependencias entre módulos (quién importa a quién):
   una ruta relativa se interpreta desde la carpeta de trabajo. Devuelve todas las secciones y las 21 claves que usa la
   app, con sus valores por defecto, y valida cada una (por ejemplo, `modelo.nombre` contra `MODELOS_WHISPER`).
 - `configuracion.py:leer_modelo_preferido() -> Optional[str]`, `guardar_modelo_preferido(modelo)` (lanza `OSError` si
-  no puede escribir) y `modelo_ia_efectivo(configuracion, preferido) -> str`: el modelo de IA elegido en el selector
+  no puede escribir, y `ValueError`, sin escribir, si el modelo es de una familia excluida) y `modelo_ia_efectivo(configuracion, preferido) -> str`: el modelo de IA elegido en el selector
   gana a `ia.modelo`.
 - `configuracion.py:guardar_ajustes(proyecto, valores, modelo_ia=None) -> list[str]` y `restablecer_ajustes()`: escriben
   `preferencias.json` en una sola escritura, conservando las claves ajenas; `guardar_ajustes` devuelve los avisos de lo

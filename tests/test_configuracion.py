@@ -1122,3 +1122,43 @@ def test_restablecer_formulario_con_fallo_no_devuelve_efectiva(tmp_path, monkeyp
     assert resultado.cambiadas == set()
     assert resultado.mensaje == "No se pudo restablecer la configuración: Permission denied."
     assert ruta.read_bytes() == antes
+
+
+def test_ruta_del_historial_con_caracter_nulo_se_ignora_sin_impedir_abrir(tmp_path, monkeypatch):
+    """Code review del panel: un carácter nulo en `historial.ruta` de las preferencias no hace fallar al abrir la
+    ventana (se ignora con aviso) ni al validar el formulario (error para el usuario, no una excepción de Python)."""
+    import json
+
+    from src import configuracion
+
+    _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"configuracion": {"historial": {"ruta": "a\u0000b"}}}))
+    proyecto = _proyecto_19(tmp_path)
+
+    efectiva, avisos = configuracion.combinar(proyecto, configuracion.leer_ajustes())
+
+    assert efectiva["historial"]["ruta"] == proyecto["historial"]["ruta"]
+    assert len(avisos) == 1 and "`historial.ruta` no es una ruta válida (vale «a\\0b»)" in avisos[0]
+    with pytest.raises(configuracion.ErrorConfiguracion):
+        configuracion.valor_desde_formulario("historial", "ruta", "a\u0000b")
+
+
+def test_entero_enorme_en_el_formulario_es_un_error_de_usuario():
+    """Code review del panel: pegar miles de dígitos da el mensaje del tope, no un ValueError de `int()`."""
+    from src.configuracion import ErrorConfiguracion, valor_desde_formulario
+
+    with pytest.raises(ErrorConfiguracion, match="entre 1 y 20"):
+        valor_desde_formulario("transcripcion", "beam_size", "9" * 5000)
+
+
+def test_guardar_modelo_preferido_rechaza_familia_excluida_sin_escribir(tmp_path, monkeypatch):
+    """Regla 7 también en el selector lateral: un modelo de familia excluida no se guarda como preferencia."""
+    import json
+
+    from src import configuracion
+
+    ruta = _ruta_preferencias_19(monkeypatch, tmp_path, json.dumps({"x": 1}))
+
+    with pytest.raises(ValueError):
+        configuracion.guardar_modelo_preferido("Mistral-Large-3")
+
+    assert json.loads(ruta.read_text(encoding="utf-8")) == {"x": 1}

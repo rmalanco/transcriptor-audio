@@ -817,7 +817,8 @@ def test_guardar_del_panel_pasa_el_modelo_aparte():
         llamadas.append((valores, modelo_ia)) or ResultadoGuardado({}, None, None, [], set(), "Corrige 1 valor.")))
     variables = {(c.seccion, c.clave): Valor("gpt-4.1" if c.control == "modelo_ia" else "") for c in CAMPOS}
     panel = SimpleNamespace(app=app, _variables=variables, _errores={(c.seccion, c.clave): Doble() for c in CAMPOS},
-                            _avanzados={}, label_pie=Doble(), refrescar=lambda: None)
+                            _avanzados={}, label_pie=Doble(), refrescar=lambda: None,
+                            _pintados={clave: "antes" for clave in variables})  # todos cambiados por el usuario
     panel._valores_formulario = lambda: PanelConfiguracion._valores_formulario(panel)
     panel._pintar = lambda resultado: PanelConfiguracion._pintar(panel, resultado)
 
@@ -1213,3 +1214,67 @@ def test_campo_de_dominio_avisa_tambien_al_pegar(monkeypatch):
     panel._variables[("ia", "copilot_enterprise_url")].set("empresa.ghe.com")
 
     assert avisos == ["dominio"]
+
+
+def test_guardar_envia_solo_los_campos_que_cambio_el_usuario():
+    """Code review del panel: «Guardar» solo envía los campos que el usuario cambió desde que se pintó el formulario,
+    para que un valor del YAML fuera de los topes del panel (por ejemplo `beam_size: 50`) no bloquee guardar otro."""
+    from types import SimpleNamespace
+
+    from src.ui_configuracion import CAMPOS, PanelConfiguracion
+
+    class Valor:
+        def __init__(self, valor):
+            self.valor = valor
+
+        def get(self):
+            return self.valor
+
+    pintados = {(c.seccion, c.clave): "50" if c.clave == "beam_size" else "pintado" for c in CAMPOS}
+    variables = {clave: Valor(valor) for clave, valor in pintados.items()}
+    variables[("salida", "formato")] = Valor("srt")
+    variables[("transcripcion", "idioma")] = Valor("Inglés")
+    panel = SimpleNamespace(_variables=variables, _pintados=pintados)
+
+    assert PanelConfiguracion._valores_formulario(panel) == {("salida", "formato"): "srt",
+                                                              ("transcripcion", "idioma"): "en"}
+
+
+def test_error_vacio_no_ocupa_sitio_entre_campos():
+    """Repaso visual del panel: una etiqueta de error sin texto se quita de la rejilla (no deja hueco); con texto, se
+    vuelve a mostrar. La última llamada sigue siendo `configure`, como esperan los demás tests."""
+    from types import SimpleNamespace
+
+    from src.configuracion import ResultadoGuardado
+    from src.ui_configuracion import CAMPOS, PanelConfiguracion
+
+    class Valor:
+        def get(self):
+            return "gpt-4.1"
+
+    errores = {(c.seccion, c.clave): Doble() for c in CAMPOS}
+    panel = SimpleNamespace(_variables={("ia", "modelo"): Valor()}, _errores=errores, _avanzados={},
+                            label_pie=Doble())
+
+    PanelConfiguracion._pintar(panel, ResultadoGuardado({("salida", "formato"): "Mal."}, None, None, [], set(), "x"))
+
+    nombres = lambda clave: [n for n, _, _ in errores[clave].llamadas]
+    assert nombres(("salida", "formato")) == ["grid", "configure"]
+    assert nombres(("transcripcion", "idioma")) == ["grid_remove", "configure"]
+
+
+def test_avisos_de_preferencias_se_registran_una_vez_como_warning(caplog, monkeypatch):
+    """Repaso visual del panel: cada aviso de las preferencias sale una sola vez en la consola, con nivel WARNING
+    (antes salía como WARNING desde main() y otra vez como INFO al pasarlo al Registro)."""
+    import logging
+    import threading
+    from types import SimpleNamespace
+
+    from src import ui
+
+    texto = Doble()
+    app = SimpleNamespace(text_log=texto)
+    with caplog.at_level(logging.INFO, logger=ui.log.name):
+        AppTranscriptor._log(app, "En prefs, `x.y` no es una clave", logging.WARNING)
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [(logging.WARNING,
+                                                                       "En prefs, `x.y` no es una clave")]

@@ -97,6 +97,15 @@ def seccion_de_sesion(descripcion: copilot.DescripcionSesion, dominio_escrito: s
                          descripcion.texto_iniciar)
 
 
+def _poner_error(etiqueta, texto: str):
+    """Pone el error bajo un campo. Sin texto, la etiqueta sale de la rejilla para no dejar hueco entre campos."""
+    if texto:
+        etiqueta.grid()
+    else:
+        etiqueta.grid_remove()
+    etiqueta.configure(text=texto)
+
+
 class PanelConfiguracion(ctk.CTkFrame):
     """Formulario con los campos de `CAMPOS`, un botón «Guardar» y una línea de estado (el pie)."""
 
@@ -108,6 +117,7 @@ class PanelConfiguracion(ctk.CTkFrame):
         self._errores: dict = {}     # (sección, clave) → etiqueta del error bajo el campo
         self._avanzados: dict = {}   # grupo → su «Avanzado»: botón, marco, filas y si está desplegado
         self._descripcion_sesion = None  # lo último que pintó la sección de sesión (None hasta el primer refresco)
+        self._pintados: dict = {}  # (sección, clave) → lo que mostraba el campo al pintarlo; lo rellena refrescar
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -127,6 +137,7 @@ class PanelConfiguracion(ctk.CTkFrame):
         self.marco_avisos.grid_remove()
 
         formulario = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._formulario = formulario
         formulario.grid(row=1, column=0, padx=20, pady=(8, 0), sticky="nsew")
         formulario.grid_columnconfigure(0, weight=1)
 
@@ -209,6 +220,7 @@ class PanelConfiguracion(ctk.CTkFrame):
         error = ctk.CTkLabel(bloque, text="", font=ctk.CTkFont(size=12), text_color=COLOR_ERROR, anchor="w",
                              wraplength=520, justify="left")
         error.grid(row=fila_error, column=0, sticky="w")
+        error.grid_remove()  # vacía no ocupa sitio; `_poner_error` la muestra cuando hay algo que decir
 
         if clave == ("ia", "copilot_enterprise_url"):
             # trace y no <KeyRelease>: también avisa si el dominio se pega con el ratón o desde el menú contextual
@@ -257,8 +269,10 @@ class PanelConfiguracion(ctk.CTkFrame):
                 self._variables[clave].set(nombre_de_idioma(valor))
             else:
                 self._variables[clave].set(valor)
+        # Lo que muestra cada campo recién pintado: «Guardar» solo envía los que el usuario cambie después
+        self._pintados = {clave: variable.get() for clave, variable in self._variables.items()}
         for etiqueta in self._errores.values():
-            etiqueta.configure(text="")
+            _poner_error(etiqueta, "")
         self.label_pie.configure(text="")
         self._refrescar_modelo()
         self._pintar_avisos()
@@ -291,7 +305,7 @@ class PanelConfiguracion(ctk.CTkFrame):
         modelo = self.app._modelo_ia_configurado()
         self._variables[clave].set(modelo)
         self._widgets[clave].configure(values=self.app.combo_modelo_ia.cget("values"))
-        self._errores[clave].configure(text=aviso_modelo(modelo) or "")
+        _poner_error(self._errores[clave], aviso_modelo(modelo) or "")
         self.btn_cargar_modelos_ia.configure(state="disabled" if self.app._consultando_modelos else "normal")
 
     def mostrar_modelos_ia(self, opciones: list[str]):
@@ -307,7 +321,7 @@ class PanelConfiguracion(ctk.CTkFrame):
             self.marco_avisos.grid_remove()
 
     def _crear_avanzado(self, formulario, grupo: str, fila: int):
-        boton = ctk.CTkButton(formulario, text="▸ Avanzado", width=140, fg_color="transparent", border_width=1,
+        boton = ctk.CTkButton(formulario, text="▶ Avanzado", width=140, fg_color="transparent", border_width=1,
                               text_color=COLOR_TEXTO_SECUNDARIO, command=lambda: self._alternar_avanzado(grupo))
         boton.grid(row=fila, column=0, padx=8, pady=(6, 0), sticky="w")
         marco = ctk.CTkFrame(formulario, fg_color="transparent")
@@ -324,18 +338,22 @@ class PanelConfiguracion(ctk.CTkFrame):
         bloque["abierto"] = abierto
         if abierto:
             bloque["marco"].grid()
-            bloque["boton"].configure(text="▾ Avanzado")
+            bloque["boton"].configure(text="▼ Avanzado")
         else:
             bloque["marco"].grid_remove()
-            bloque["boton"].configure(text="▸ Avanzado")
+            bloque["boton"].configure(text="▶ Avanzado")
 
     def _valores_formulario(self) -> dict:
+        """Los campos que el usuario cambió desde el último refresco. Los demás no se envían: así un valor de
+        config/settings.yaml fuera de los topes del panel no impide guardar otro campo."""
         valores = {}
         for campo in CAMPOS:
             if campo.control == "modelo_ia":
                 continue  # el modelo va aparte: `guardar_configuracion(valores, modelo_ia)`
             clave = (campo.seccion, campo.clave)
             valor = self._variables[clave].get()
+            if valor == self._pintados.get(clave):
+                continue
             valores[clave] = codigo_de_idioma(valor) if campo.control == "lista_editable" else valor
         return valores
 
@@ -345,6 +363,22 @@ class PanelConfiguracion(ctk.CTkFrame):
         if resultado.efectiva is not None:
             self.refrescar()  # la configuración nueva ya está en la ventana; el pie se rellena abajo
         self._pintar(resultado)
+        if resultado.errores:
+            self._ir_al_primer_error(resultado.errores)
+
+    def _ir_al_primer_error(self, errores: dict):
+        """Desplaza el formulario hasta el primer campo con error (en el orden de la vista): con la ventana baja, el
+        pie dice «corrige N valores» y el campo puede quedar fuera de la vista."""
+        clave = next(((c.seccion, c.clave) for c in CAMPOS if (c.seccion, c.clave) in errores), None)
+        if clave is None:
+            return
+        self.update_idletasks()  # el «Avanzado» recién desplegado ya tiene su altura
+        bloque = self._errores[clave].master
+        alto = self._formulario.winfo_height()
+        if alto <= 1:
+            return
+        arriba = bloque.winfo_rooty() - self._formulario.winfo_rooty()
+        self._formulario._parent_canvas.yview_moveto(max(0.0, arriba - 12) / alto)
 
     def _restablecer(self):
         resultado = self.app.restablecer_configuracion()
@@ -359,7 +393,7 @@ class PanelConfiguracion(ctk.CTkFrame):
             texto = resultado.errores.get(clave, "")
             if not texto and clave == ("ia", "modelo"):  # sin error, el aviso del modelo no autorizado sigue
                 texto = aviso_modelo(self._variables[clave].get()) or ""
-            etiqueta.configure(text=texto)
+            _poner_error(etiqueta, texto)
         for grupo in self._avanzados:  # un error dentro de un «Avanzado» se ve sin desplegarlo a mano
             if any((c.seccion, c.clave) in resultado.errores for c in CAMPOS if c.avanzado and c.grupo == grupo):
                 self._desplegar_avanzado(grupo, True)

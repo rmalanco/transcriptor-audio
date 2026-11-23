@@ -46,7 +46,7 @@ _ESPERADO_PANEL = {
         "un nombre de dominio sin https:// ni barras, como empresa.ghe.com, o estar vacío",
 }
 # Formas que el formulario acepta antes de convertir (sin «nan», «inf» ni «3.0» para enteros).
-_ENTERO_FORMULARIO = re.compile(r"-?[0-9]+")
+_ENTERO_FORMULARIO = re.compile(r"-?[0-9]{1,18}")  # con más dígitos, int() lanzaría y ningún tope los admite
 _NOMBRE_DE_HOST = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 _NUMERO_FORMULARIO = re.compile(r"[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?")
 
@@ -188,7 +188,12 @@ def leer_modelo_preferido() -> Optional[str]:
 
 
 def guardar_modelo_preferido(modelo: str) -> None:
-    """Guarda el modelo de IA elegido conservando las demás preferencias. Lanza OSError si no puede escribir."""
+    """Guarda el modelo de IA elegido conservando las demás preferencias. Lanza OSError si no puede escribir y
+    ValueError, sin escribir nada, si el modelo es de una familia no autorizada (regla 7)."""
+    from src import copilot  # import aquí: copilot importa httpx y cargar la configuración no debe pagarlo
+    familia = copilot.familia_excluida(modelo)
+    if familia is not None:
+        raise ValueError(f"El modelo «{modelo}» es de la familia «{familia}», no autorizada por la empresa")
     datos = _leer_para_escribir()
     datos["modelo_ia"] = modelo
     _escribir_preferencias_atomico(datos)
@@ -368,6 +373,11 @@ def valores_laterales(cambiadas: set, configuracion: dict) -> dict:
     return valores
 
 
+def _recortar(texto: str, maximo: int = 40) -> str:
+    """Texto que va en «vale» del mensaje: los valores larguísimos (miles de dígitos pegados) se recortan."""
+    return texto if len(texto) <= maximo else texto[:maximo] + "…"
+
+
 def valor_desde_formulario(seccion: str, clave: str, valor_widget):
     """Convierte el valor de un campo del formulario al tipo del valor por defecto de su clave y lo comprueba.
 
@@ -388,7 +398,7 @@ def valor_desde_formulario(seccion: str, clave: str, valor_widget):
         numero = texto.replace(",", ".")
         convertido = float(numero) if _NUMERO_FORMULARIO.fullmatch(numero) else None
     if convertido is None:
-        raise ErrorConfiguracion(_mensaje_invalido(seccion, clave, texto, panel=True) + ".")
+        raise ErrorConfiguracion(_mensaje_invalido(seccion, clave, _recortar(texto), panel=True) + ".")
     motivo = _motivo_de_rechazo(seccion, clave, convertido, mostrado=texto)
     if motivo is not None:
         raise ErrorConfiguracion(motivo + ".")
@@ -420,7 +430,10 @@ def _motivo_de_ruta(ruta_texto: str, mostrado: str, con_disco: bool) -> Optional
     existir y ser escribible o poder crearse. No crea ninguna carpeta."""
     raiz = Path(RAIZ_PROYECTO).resolve()
     ruta = Path(ruta_texto)
-    ruta = (ruta if ruta.is_absolute() else raiz / ruta).resolve()
+    try:
+        ruta = (ruta if ruta.is_absolute() else raiz / ruta).resolve()
+    except (ValueError, OSError):  # carácter nulo o bucle de enlaces: no es una ruta utilizable
+        return f"`historial.ruta` no es una ruta válida (vale «{mostrado.replace(chr(0), chr(92) + '0')}»)"
     if ruta.is_relative_to(raiz) and not ruta.is_relative_to((raiz / "data").resolve()):
         return f"`historial.ruta` no puede estar dentro de la carpeta del proyecto salvo en data/ (vale «{mostrado}»)"
     if con_disco and not _carpeta_escribible(ruta.parent):

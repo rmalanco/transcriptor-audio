@@ -185,7 +185,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         self._construir_ui()
         for aviso in self.avisos_preferencias:
-            self._log(aviso)
+            self._log(aviso, logging.WARNING)  # una sola vez en la consola, como WARNING, y en el Registro
         self._configurar_drag_drop()
         self._configurar_atajos()
         self.protocol("WM_DELETE_WINDOW", self._al_cerrar)
@@ -314,7 +314,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
         # Avanzado (plegable)
         self.btn_avanzado = ctk.CTkButton(
-            opciones, text="▸ Opciones avanzadas", fg_color="transparent", anchor="w",
+            opciones, text="▶ Opciones avanzadas", fg_color="transparent", anchor="w",
             text_color=COLOR_TEXTO_SECUNDARIO, hover_color=COLOR_BORDE, height=24,
             command=self._alternar_avanzado
         )
@@ -466,10 +466,10 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
     def _alternar_avanzado(self):
         if self.frame_avanzado.winfo_ismapped():
             self.frame_avanzado.grid_remove()
-            self.btn_avanzado.configure(text="▸ Opciones avanzadas")
+            self.btn_avanzado.configure(text="▶ Opciones avanzadas")
         else:
             self.frame_avanzado.grid()
-            self.btn_avanzado.configure(text="▾ Opciones avanzadas")
+            self.btn_avanzado.configure(text="▼ Opciones avanzadas")
 
     def _mostrar_marcador(self):
         self.text_resultado.configure(state="normal")
@@ -1041,7 +1041,7 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         try:
             guardar_modelo_preferido(modelo)
             guardado = True
-        except OSError as e:
+        except (OSError, ValueError) as e:  # ValueError: familia no autorizada (regla 7); no se envía igualmente
             log.warning("No se pudo guardar la preferencia de modelo: %s", e)
             guardado = False
         self._log(f"Modelo de IA: {modelo}" + ("" if guardado else " (solo para esta sesión; no se pudo guardar en preferencias.json)"))
@@ -1415,12 +1415,12 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         """Errores en callbacks de Tkinter: a la consola en vez de perderse."""
         log.error("Error en la interfaz", exc_info=(tipo, valor, traza))
 
-    def _log(self, mensaje: str):
+    def _log(self, mensaje: str, nivel: int = logging.INFO):
         if threading.current_thread() is threading.main_thread():
-            log.info(mensaje)  # desde otros hilos se registra al volver a entrar aquí
+            log.log(nivel, mensaje)  # desde otros hilos se registra al volver a entrar aquí
         # Tkinter no es thread-safe: desde el hilo de transcripción se delega al hilo principal
         if threading.current_thread() is not threading.main_thread():
-            self._en_ui(self._log, mensaje)
+            self._en_ui(self._log, mensaje, nivel)
             return
         marca = time.strftime("%H:%M:%S")
         self.text_log.configure(state="normal")
@@ -1450,8 +1450,6 @@ def main():
         raiz.destroy()
         sys.exit(1)
     efectiva, avisos = combinar(proyecto, leer_ajustes())
-    for aviso in avisos:
-        log.warning("%s", aviso)
     app = AppTranscriptor(efectiva, proyecto=proyecto, avisos=avisos)
     app.mainloop()
 
