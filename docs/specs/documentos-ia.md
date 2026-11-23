@@ -185,10 +185,12 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
   válido, when se pide el documento, then el error es el mismo que con una sola parte (los de «Modelos de familias no
   autorizadas» y «Modelo sin configurar»), sin mencionar partes ni notas, y no se envía nada.
 - Las notas conservadas viven en memoria y se pierden al cancelar la generación, al cambiar de modelo, al restablecer la configuración si cambia el modelo, tras tener que
-  iniciar sesión de nuevo, al cerrar la app o al guardar en la vista Configuración una clave de IA.
+  iniciar sesión de nuevo, al iniciar o cerrar sesión de Copilot desde la vista Configuración, al cerrar la app o al
+  guardar en la vista Configuración una clave de IA.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
 
 ### Notas que no caben en el modelo
 - Given una transcripción en varias partes cuyas notas estimadas superan el límite de entrada del modelo (del catálogo

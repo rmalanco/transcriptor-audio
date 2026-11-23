@@ -1048,17 +1048,65 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
 
     def _iniciar_sesion_copilot(self, al_conectar):
         """Abre el diálogo de inicio de sesión; si termina bien, ejecuta `al_conectar`. Mientras el diálogo existe,
-        `_login_abierto` es True: Guardar y Restablecer lo comprueban."""
+        `_login_abierto` es True: Guardar y Restablecer lo comprueban. Si ya hay un diálogo abierto, no abre otro."""
+        if self._login_abierto:
+            return
+
         def al_terminar(ok: bool):
             self._login_abierto = False  # antes de `al_conectar`: lo que relanza no lo ve como abierto
             if ok:
                 self._log("Sesión de GitHub Copilot iniciada")
+                panel = _panel_de_modelos(self)
+                if panel is not None:  # la sección de la sesión de la vista muestra la sesión nueva
+                    panel.refrescar_sesion()
                 al_conectar()
             else:
                 self.label_estado.configure(text="Inicio de sesión en GitHub Copilot cancelado")
         enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
         DialogoLoginCopilot(self, enterprise_url, al_terminar)
         self._login_abierto = True  # después de construirlo: si el constructor falla, la marca no queda puesta
+
+    def iniciar_sesion_desde_la_vista(self):
+        """Pulsación de «Iniciar sesión» en la vista Configuración: durante un proceso avisa y no abre nada."""
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        if motivo is not None:
+            messagebox.showwarning("Sesión de GitHub Copilot", motivo)
+            return
+
+        def al_conectar():
+            self._epoca_ia += 1  # las listas de «↻» pedidas antes de iniciar sesión ya no se pintan
+            self._documentos.olvidar_asistente()  # la próxima generación crea el suyo con la sesión nueva
+
+        self._iniciar_sesion_copilot(al_conectar)
+
+    def _cerrar_sesion_copilot(self) -> Optional[copilot.EstadoSesion]:
+        """Cierra la sesión guardada por la app, previa confirmación. Si va bien, avanza la época, olvida el asistente y
+        repone el selector del lateral y el campo de la vista a `auto` y el modelo configurado. Devuelve el estado
+        resultante, o None si no se cerró nada."""
+        motivo = motivo_para_no_guardar(self._transcribiendo(), self._generando_ia())
+        if motivo is not None:
+            messagebox.showwarning("Sesión de GitHub Copilot", motivo)
+            return None
+        if not messagebox.askyesno("Cerrar sesión", "¿Cerrar la sesión de GitHub Copilot guardada por la app? La de "
+                                   "opencode y la variable de entorno no se tocan."):
+            return None
+        enterprise_url = self.configuracion["ia"]["copilot_enterprise_url"] or None
+        try:
+            estado = copilot.cerrar_sesion_propia(enterprise_url)
+        except OSError as e:
+            messagebox.showerror("Sesión de GitHub Copilot", f"No se pudo cerrar la sesión: {e.strerror or e}.")
+            return None
+        self._epoca_ia += 1
+        self._documentos.olvidar_asistente()
+        actual = self._modelo_ia_configurado()
+        opciones = copilot.opciones_de_modelo([copilot.MODELO_AUTO], actual)
+        self.combo_modelo_ia.configure(values=opciones)
+        self.var_modelo_ia.set(actual)
+        panel = _panel_de_modelos(self)
+        if panel is not None:
+            panel.mostrar_modelos_ia(opciones)
+        self._log("Sesión de GitHub Copilot cerrada")
+        return estado
 
     def _copiar_documento_ia(self, clave: str):
         contenido = self.tabs_ia[clave]["contenido"]

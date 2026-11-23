@@ -852,3 +852,364 @@ def test_rechazo_sin_error_del_modelo_conserva_el_aviso_de_familia_excluida():
     PanelConfiguracion._pintar(panel, ResultadoGuardado({("ia", "modelo"): "Elige otro modelo."}, None, None, [], set(),
                                                         "No se guardó nada: corrige 1 valor."))
     assert errores[("ia", "modelo")].llamadas[-1] == ("configure", (), {"text": "Elige otro modelo."})
+
+
+class PanelSesionDoble(PanelDoble):
+    """Doble de la vista Configuración para las acciones de sesión: además de los modelos, anota los repintados de la
+    sección de sesión."""
+
+    def __init__(self):
+        super().__init__()
+        self.refrescos = 0
+
+    def refrescar_sesion(self):
+        self.refrescos += 1
+
+
+def test_cerrar_sesion_copilot_olvida_el_asistente_y_avanza_la_epoca(monkeypatch):
+    """Sesión, criterio 3 (CUJ 4): «Sí» cierra solo la sesión propia (con el dominio guardado, `None` si está vacío),
+    avanza la época, olvida el asistente, repone el selector del lateral y el campo de la vista a `auto` y el
+    configurado, anota en Registro y devuelve el estado. Pregunta con el texto exacto."""
+    from types import SimpleNamespace
+
+    from src import copilot, ui
+    from src.configuracion import cargar_configuracion
+
+    preguntas, dominios = [], []
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        askyesno=lambda titulo, texto: preguntas.append((titulo, texto)) or True,
+        showwarning=lambda titulo, texto: None, showerror=lambda titulo, texto: None))
+
+    def cerrar(enterprise_url=None):
+        dominios.append(enterprise_url)
+        return copilot.EstadoSesion(copilot.ORIGEN_OPENCODE, False)
+
+    monkeypatch.setattr(copilot, "cerrar_sesion_propia", cerrar)
+    panel = PanelSesionDoble()
+    registro = []
+    app = SimpleNamespace(
+        configuracion=cargar_configuracion(), _epoca_ia=3, _transcribiendo=lambda: False,
+        _generando_ia=lambda: False, _modelo_ia_configurado=lambda: "claude-haiku-5.5",
+        _documentos=Doble(), combo_modelo_ia=Doble(), var_modelo_ia=Doble(), panel_configuracion=panel,
+        _log=registro.append,
+    )
+
+    estado = AppTranscriptor._cerrar_sesion_copilot(app)
+
+    assert preguntas == [("Cerrar sesión", "¿Cerrar la sesión de GitHub Copilot guardada por la app? La de opencode y "
+                                           "la variable de entorno no se tocan.")]
+    assert dominios == [None]
+    assert estado == copilot.EstadoSesion(copilot.ORIGEN_OPENCODE, False)
+    assert app._documentos.llamadas == [("olvidar_asistente", (), {})]
+    assert app._epoca_ia == 4
+    opciones = ["auto", "claude-haiku-5.5"]
+    assert app.combo_modelo_ia.llamadas == [("configure", (), {"values": opciones})]
+    assert panel.opciones == [opciones]
+    assert app.var_modelo_ia.llamadas == [("set", ("claude-haiku-5.5",), {})]
+    assert registro == ["Sesión de GitHub Copilot cerrada"]
+
+
+def test_cerrar_sesion_copilot_con_oserror_no_aplica_nada(monkeypatch):
+    """Sesión, criterio 3: si el archivo propio no se puede borrar, aparece el diálogo «Sesión de GitHub Copilot» con el
+    motivo; el archivo, la época, el asistente, los selectores y Registro no cambian y se devuelve None."""
+    from types import SimpleNamespace
+
+    from src import copilot, ui
+    from src.configuracion import cargar_configuracion
+
+    errores = []
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        askyesno=lambda titulo, texto: True, showwarning=lambda titulo, texto: None,
+        showerror=lambda titulo, texto: errores.append((titulo, texto))))
+
+    def cerrar(enterprise_url=None):
+        raise PermissionError(13, "Permission denied", "/ruta/privada/copilot.json")
+
+    monkeypatch.setattr(copilot, "cerrar_sesion_propia", cerrar)
+    panel = PanelSesionDoble()
+    registro = []
+    app = SimpleNamespace(
+        configuracion=cargar_configuracion(), _epoca_ia=3, _transcribiendo=lambda: False,
+        _generando_ia=lambda: False, _modelo_ia_configurado=lambda: "claude-haiku-5.5",
+        _documentos=Doble(), combo_modelo_ia=Doble(), var_modelo_ia=Doble(), panel_configuracion=panel,
+        _log=registro.append,
+    )
+
+    assert AppTranscriptor._cerrar_sesion_copilot(app) is None
+
+    # Solo el motivo, como el resto de errores del panel: sin «[Errno 13]» ni la ruta del archivo
+    assert errores == [("Sesión de GitHub Copilot", "No se pudo cerrar la sesión: Permission denied.")]
+    assert app._documentos.llamadas == []
+    assert app._epoca_ia == 3
+    assert app.combo_modelo_ia.llamadas == []
+    assert app.var_modelo_ia.llamadas == []
+    assert panel.opciones == []
+    assert registro == []
+
+
+@pytest.mark.parametrize("proceso", ["transcripcion", "generacion"])
+def test_acciones_de_sesion_rechazadas_o_canceladas_no_cambian_nada(monkeypatch, proceso):
+    """Sesión, criterio 3: durante una transcripción o una generación, «Cerrar sesión» e «Iniciar sesión» muestran
+    «Sesión de GitHub Copilot» con «Espera a que termine el proceso en curso.», sin preguntar, sin cerrar nada y sin
+    abrir el diálogo. Con «No» en la pregunta, `cerrar_sesion_propia` no se llama y se devuelve None."""
+    from types import SimpleNamespace
+
+    from src import copilot, ui
+    from src.configuracion import cargar_configuracion
+
+    def no_debe_llamarse(*args, **kwargs):
+        raise AssertionError("no se debe preguntar, cerrar ni abrir el diálogo durante un proceso")
+
+    avisos = []
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        askyesno=no_debe_llamarse, showwarning=lambda titulo, texto: avisos.append((titulo, texto)),
+        showerror=lambda titulo, texto: None))
+    monkeypatch.setattr(copilot, "cerrar_sesion_propia", no_debe_llamarse)
+    monkeypatch.setattr(ui, "DialogoLoginCopilot", no_debe_llamarse)
+    app = SimpleNamespace(configuracion=cargar_configuracion(), _epoca_ia=0, _login_abierto=False,
+                          _transcribiendo=lambda: proceso == "transcripcion",
+                          _generando_ia=lambda: proceso == "generacion", _log=lambda texto: None)
+
+    assert AppTranscriptor._cerrar_sesion_copilot(app) is None
+    assert AppTranscriptor.iniciar_sesion_desde_la_vista(app) is None
+    assert avisos == [("Sesión de GitHub Copilot", "Espera a que termine el proceso en curso.")] * 2
+    assert app._epoca_ia == 0
+
+    monkeypatch.setattr(ui, "messagebox", SimpleNamespace(
+        askyesno=lambda titulo, texto: False, showwarning=no_debe_llamarse, showerror=no_debe_llamarse))
+    app = SimpleNamespace(configuracion=cargar_configuracion(), _epoca_ia=0, _login_abierto=False,
+                          _transcribiendo=lambda: False, _generando_ia=lambda: False, _log=lambda texto: None)
+
+    assert AppTranscriptor._cerrar_sesion_copilot(app) is None
+    assert app._epoca_ia == 0
+
+
+def test_iniciar_sesion_desde_la_vista_avanza_la_epoca_y_olvida_el_asistente(monkeypatch):
+    """Sesión, criterio 2 (CUJ 3): al terminar bien el diálogo abierto desde la vista, avanza la época y olvida el
+    asistente; el selector del lateral no cambia. Si se cancela, no cambia nada."""
+    from types import SimpleNamespace
+
+    from src import ui
+    from src.configuracion import cargar_configuracion
+
+    instancias = []
+
+    class DialogoDoble:
+        def __init__(self, master, enterprise_url, al_terminar):
+            self.al_terminar = al_terminar
+            instancias.append(self)
+
+    monkeypatch.setattr(ui, "DialogoLoginCopilot", DialogoDoble)
+    app = SimpleNamespace(configuracion=cargar_configuracion(), _epoca_ia=0, _login_abierto=False,
+                          _transcribiendo=lambda: False, _generando_ia=lambda: False, _log=lambda texto: None,
+                          label_estado=Doble(), _documentos=Doble(), combo_modelo_ia=Doble())
+    app._iniciar_sesion_copilot = lambda al_conectar: AppTranscriptor._iniciar_sesion_copilot(app, al_conectar)
+
+    AppTranscriptor.iniciar_sesion_desde_la_vista(app)
+    instancias[-1].al_terminar(False)
+    assert app._epoca_ia == 0
+    assert app._documentos.llamadas == []
+
+    AppTranscriptor.iniciar_sesion_desde_la_vista(app)
+    instancias[-1].al_terminar(True)
+    assert app._epoca_ia == 1
+    assert app._documentos.llamadas == [("olvidar_asistente", (), {})]
+    assert app.combo_modelo_ia.llamadas == []
+
+
+@pytest.mark.parametrize("entrada", ["vista", "sin_sesion"])
+def test_inicio_de_sesion_bien_terminado_repinta_la_seccion_de_la_vista(monkeypatch, entrada):
+    """Sesión, ampliación: tras cualquier inicio de sesión que termine bien (el de la vista y el que abre «↻» sin
+    sesión), la sección de la vista se repinta si la vista existe; si se cancela, no se repinta."""
+    from src import ui
+    from src.configuracion import cargar_configuracion
+
+    instancias = []
+
+    class DialogoDoble:
+        def __init__(self, master, enterprise_url, al_terminar):
+            self.al_terminar = al_terminar
+            instancias.append(self)
+
+    monkeypatch.setattr(ui, "DialogoLoginCopilot", DialogoDoble)
+    app = _ventana_para_modelos(epoca_actual=0)
+    app.configuracion = cargar_configuracion()
+    app._login_abierto = False
+    app._documentos = Doble()
+    app._iniciar_sesion_copilot = lambda al_conectar: AppTranscriptor._iniciar_sesion_copilot(app, al_conectar)
+    panel = PanelSesionDoble()
+    app.panel_configuracion = panel
+    if entrada == "vista":
+        lanzar = AppTranscriptor.iniciar_sesion_desde_la_vista
+    else:
+        lanzar = lambda ventana: AppTranscriptor._sin_sesion_para_modelos(ventana, 0)
+
+    lanzar(app)
+    instancias[-1].al_terminar(False)
+    assert panel.refrescos == 0
+
+    lanzar(app)
+    instancias[-1].al_terminar(True)
+    assert panel.refrescos == 1
+
+
+def test_iniciar_sesion_con_login_abierto_no_abre_otro_dialogo(monkeypatch):
+    """Sesión, ampliación: si el diálogo de inicio de sesión ya está abierto (un doble clic rápido),
+    `_iniciar_sesion_copilot` no abre otro; la marca `_login_abierto` sigue siendo la del primero."""
+    from types import SimpleNamespace
+
+    from src import ui
+    from src.configuracion import cargar_configuracion
+
+    dialogos = []
+
+    class DialogoDoble:
+        def __init__(self, master, enterprise_url, al_terminar):
+            dialogos.append(al_terminar)
+
+    monkeypatch.setattr(ui, "DialogoLoginCopilot", DialogoDoble)
+    app = SimpleNamespace(configuracion=cargar_configuracion(), _login_abierto=True, label_estado=Doble(),
+                          _log=lambda texto: None)
+
+    AppTranscriptor._iniciar_sesion_copilot(app, lambda: None)
+
+    assert dialogos == []
+    assert app._login_abierto is True
+
+
+def test_seccion_de_sesion_segun_el_estado_y_el_dominio_escrito():
+    """Sesión, criterio 1: las tres filas de la tabla dan su texto y sus botones. Con el dominio escrito distinto del
+    guardado (sin contar espacios), los dos botones se deshabilitan y el texto termina en «Guarda primero el dominio.»;
+    un campo con solo espacios, o con el mismo dominio y espacios alrededor, se trata igual que sin escribir."""
+    from src import copilot
+    from src.ui_configuracion import SeccionSesion, seccion_de_sesion
+
+    ninguna = copilot.describir_sesion(copilot.EstadoSesion(None, False))
+    opencode = copilot.describir_sesion(copilot.EstadoSesion(copilot.ORIGEN_OPENCODE, False))
+    variable = copilot.describir_sesion(copilot.EstadoSesion(copilot.ORIGEN_VARIABLE, True))
+
+    assert seccion_de_sesion(ninguna, "", "") == SeccionSesion(
+        "No has iniciado sesión en GitHub Copilot.", True, False, "Iniciar sesión")
+    assert seccion_de_sesion(opencode, "", "") == SeccionSesion(
+        "Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode. La sesión se comprueba al usarla.",
+        True, False, "Iniciar sesión con la app")
+    assert seccion_de_sesion(variable, "", "") == SeccionSesion(
+        "Se usa el token de la variable de entorno COPILOT_GITHUB_TOKEN. La app no puede cerrarlo: quita la variable "
+        "para usar otra sesión. Hay además una sesión guardada por la app que ahora no se usa. La sesión se comprueba "
+        "al usarla.", False, True, "Iniciar sesión")
+
+    assert seccion_de_sesion(ninguna, "empresa.ghe.com", "") == SeccionSesion(
+        "No has iniciado sesión en GitHub Copilot. Guarda primero el dominio.", False, False, "Iniciar sesión")
+    assert seccion_de_sesion(ninguna, "  ", "") == seccion_de_sesion(ninguna, "", "")
+    assert seccion_de_sesion(ninguna, " empresa.ghe.com", "empresa.ghe.com") == seccion_de_sesion(ninguna, "", "")
+
+
+def test_refrescar_sesion_lee_el_disco_sin_red(monkeypatch, tmp_path):
+    """Sesión, criterio 1: `PanelConfiguracion.refrescar_sesion` lee la sesión una vez, con el dominio guardado (`None`
+    si está vacío), y pinta el texto y los botones de su fila (aquí, «solo opencode»). No hace ninguna petición de red
+    ni escribe nada en disco."""
+    import json
+    from types import SimpleNamespace
+
+    from src import copilot
+    from src.configuracion import cargar_configuracion
+    from src.ui_configuracion import PanelConfiguracion
+
+    monkeypatch.setattr(copilot, "RUTA_TOKEN", tmp_path / "app" / "copilot.json")
+    monkeypatch.setattr(copilot, "RUTA_AUTH_OPENCODE", tmp_path / "oc" / "auth.json")
+    monkeypatch.delenv(copilot.VARIABLE_ENTORNO, raising=False)
+    (tmp_path / "oc").mkdir()
+    (tmp_path / "oc" / "auth.json").write_text(
+        json.dumps({"github-copilot": {"refresh": "tok-oc", "enterpriseUrl": None}}), encoding="utf-8")
+    antes = sorted(str(p) for p in tmp_path.rglob("*"))
+
+    def sin_red(*args, **kwargs):
+        raise AssertionError("no debe haber ninguna petición de red")
+
+    monkeypatch.setattr(copilot.httpx, "get", sin_red)
+    monkeypatch.setattr(copilot.httpx, "post", sin_red)
+    lecturas = []
+    leer_original = copilot.leer_token
+
+    def leer_token(enterprise_url=None):
+        lecturas.append(enterprise_url)
+        return leer_original(enterprise_url)
+
+    monkeypatch.setattr(copilot, "leer_token", leer_token)
+
+    class Valor:
+        def __init__(self, valor):
+            self.valor = valor
+
+        def get(self):
+            return self.valor
+
+    cfg = cargar_configuracion()
+    etiqueta, iniciar, cerrar = Doble(), Doble(), Doble()
+    panel = SimpleNamespace(app=SimpleNamespace(configuracion=cfg),
+                            _variables={("ia", "copilot_enterprise_url"): Valor("")},
+                            label_sesion=etiqueta, btn_iniciar_sesion=iniciar, btn_cerrar_sesion=cerrar)
+    panel._pintar_sesion = lambda descripcion: PanelConfiguracion._pintar_sesion(panel, descripcion)
+
+    PanelConfiguracion.refrescar_sesion(panel)
+
+    assert lecturas == [None]
+    assert etiqueta.llamadas[-1] == ("configure", (), {"text": "Se usa la sesión de opencode. La app no la cierra: "
+                                                              "ciérrala desde opencode. La sesión se comprueba al "
+                                                              "usarla."})
+    assert iniciar.llamadas[-1] == ("configure", (), {"text": "Iniciar sesión con la app", "state": "normal"})
+    assert cerrar.llamadas[-1] == ("configure", (), {"state": "disabled"})
+
+    cfg["ia"]["copilot_enterprise_url"] = "empresa.ghe.com"
+    panel._variables[("ia", "copilot_enterprise_url")] = Valor("empresa.ghe.com")  # el campo muestra lo guardado
+    PanelConfiguracion.refrescar_sesion(panel)
+
+    assert lecturas == [None, "empresa.ghe.com"]
+    assert etiqueta.llamadas[-1] == ("configure", (), {"text": "No has iniciado sesión en GitHub Copilot."})
+    assert sorted(str(p) for p in tmp_path.rglob("*")) == antes
+
+
+def test_campo_de_dominio_avisa_tambien_al_pegar(monkeypatch):
+    """Sesión, ampliación: el campo `ia.copilot_enterprise_url` vigila su variable con `trace_add("write")`, así que un
+    cambio que no pasa por el teclado (pegar con el ratón o el menú) también avisa a la sección. Se simulan los widgets
+    y la variable: no hace falta ventana."""
+    from types import SimpleNamespace
+
+    from src import ui_configuracion
+    from src.ui_configuracion import CAMPOS, PanelConfiguracion
+
+    class VariableFalsa:
+        def __init__(self, value=""):
+            self.valor = value
+            self.trazas = []
+
+        def trace_add(self, modo, funcion):
+            self.trazas.append((modo, funcion))
+
+        def set(self, valor):
+            self.valor = valor
+            for _modo, funcion in self.trazas:
+                funcion("nombre", "", "write")
+
+        def get(self):
+            return self.valor
+
+    class WidgetFalso:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __getattr__(self, nombre):
+            return lambda *args, **kwargs: None
+
+    monkeypatch.setattr(ui_configuracion.tk, "StringVar", VariableFalsa)
+    monkeypatch.setattr(ui_configuracion, "ctk", SimpleNamespace(
+        CTkFrame=WidgetFalso, CTkLabel=WidgetFalso, CTkEntry=WidgetFalso, CTkFont=lambda **kwargs: None))
+    avisos = []
+    panel = SimpleNamespace(_variables={}, _widgets={}, _errores={}, _crear_control=PanelConfiguracion._crear_control,
+                            _al_escribir_dominio=lambda *_: avisos.append("dominio"))
+    campo = next(c for c in CAMPOS if (c.seccion, c.clave) == ("ia", "copilot_enterprise_url"))
+
+    PanelConfiguracion._construir_campo(panel, WidgetFalso(), campo, 0)
+    panel._variables[("ia", "copilot_enterprise_url")].set("empresa.ghe.com")
+
+    assert avisos == ["dominio"]

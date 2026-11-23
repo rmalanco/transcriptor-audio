@@ -76,6 +76,27 @@ def aviso_modelo(modelo: str) -> Optional[str]:
             "no se enviará. Elige otro.")
 
 
+@dataclass(frozen=True)
+class SeccionSesion:
+    texto: str
+    iniciar_habilitado: bool
+    cerrar_habilitado: bool
+    texto_iniciar: str
+
+
+def seccion_de_sesion(descripcion: copilot.DescripcionSesion, dominio_escrito: str,
+                      dominio_guardado: str) -> SeccionSesion:
+    """Texto y botones de la sección «Sesión de GitHub Copilot». Si el dominio escrito no es el guardado (sin contar
+    espacios), los dos botones se deshabilitan y el texto pide guardar el dominio antes."""
+    def sin_espacios(texto: str) -> str:
+        return "".join((texto or "").split())
+
+    if sin_espacios(dominio_escrito) != sin_espacios(dominio_guardado):
+        return SeccionSesion(f"{descripcion.texto} Guarda primero el dominio.", False, False, descripcion.texto_iniciar)
+    return SeccionSesion(descripcion.texto, descripcion.puede_iniciar, descripcion.puede_cerrar,
+                         descripcion.texto_iniciar)
+
+
 class PanelConfiguracion(ctk.CTkFrame):
     """Formulario con los campos de `CAMPOS`, un botón «Guardar» y una línea de estado (el pie)."""
 
@@ -86,6 +107,7 @@ class PanelConfiguracion(ctk.CTkFrame):
         self._widgets: dict = {}     # (sección, clave) → control
         self._errores: dict = {}     # (sección, clave) → etiqueta del error bajo el campo
         self._avanzados: dict = {}   # grupo → su «Avanzado»: botón, marco, filas y si está desplegado
+        self._descripcion_sesion = None  # lo último que pintó la sección de sesión (None hasta el primer refresco)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -116,6 +138,9 @@ class PanelConfiguracion(ctk.CTkFrame):
                 ctk.CTkLabel(formulario, text=grupo_actual, font=ctk.CTkFont(size=15, weight="bold")).grid(
                     row=fila, column=0, padx=8, pady=(12, 0), sticky="w")
                 fila += 1
+                if grupo_actual == "IA":  # la sesión de GitHub Copilot va antes de «Modelo de IA»
+                    self._construir_seccion_sesion(formulario, fila)
+                    fila += 1
             if campo.avanzado:
                 if campo.grupo not in self._avanzados:  # cada grupo tiene su «Avanzado», plegado, tras sus campos
                     self._crear_avanzado(formulario, campo.grupo, fila)
@@ -137,6 +162,24 @@ class PanelConfiguracion(ctk.CTkFrame):
         self.btn_restablecer.grid(row=0, column=1, padx=(8, 0), sticky="w")
         self.label_pie = ctk.CTkLabel(pie, text="", anchor="w", text_color=COLOR_TEXTO_SECUNDARIO)
         self.label_pie.grid(row=0, column=2, padx=(12, 0), sticky="ew")
+
+    def _construir_seccion_sesion(self, padre, fila: int):
+        """«Sesión de GitHub Copilot»: el texto de la sesión y los botones «Iniciar…» y «Cerrar sesión»."""
+        bloque = ctk.CTkFrame(padre, fg_color="transparent")
+        bloque.grid(row=fila, column=0, padx=8, pady=6, sticky="ew")
+        bloque.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(bloque, text="Sesión de GitHub Copilot", font=ctk.CTkFont(size=13, weight="bold")).grid(
+            row=0, column=0, sticky="w")
+        self.label_sesion = ctk.CTkLabel(bloque, text="", anchor="w", justify="left", wraplength=520)
+        self.label_sesion.grid(row=1, column=0, sticky="w")
+        botones = ctk.CTkFrame(bloque, fg_color="transparent")
+        botones.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.btn_iniciar_sesion = ctk.CTkButton(botones, text="Iniciar sesión", width=200,
+                                                command=self.app.iniciar_sesion_desde_la_vista)
+        self.btn_iniciar_sesion.grid(row=0, column=0, sticky="w")
+        self.btn_cerrar_sesion = ctk.CTkButton(botones, text="Cerrar sesión", width=140, fg_color="transparent",
+                                               border_width=1, command=self._cerrar_sesion)
+        self.btn_cerrar_sesion.grid(row=0, column=1, padx=(8, 0), sticky="w")
 
     def _construir_campo(self, padre, campo: Campo, fila: int):
         clave = (campo.seccion, campo.clave)
@@ -167,9 +210,18 @@ class PanelConfiguracion(ctk.CTkFrame):
                              wraplength=520, justify="left")
         error.grid(row=fila_error, column=0, sticky="w")
 
+        if clave == ("ia", "copilot_enterprise_url"):
+            # trace y no <KeyRelease>: también avisa si el dominio se pega con el ratón o desde el menú contextual
+            variable.trace_add("write", self._al_escribir_dominio)
+
         self._variables[clave] = variable
         self._widgets[clave] = control
         self._errores[clave] = error
+
+    def _al_escribir_dominio(self, *_):
+        """Cada cambio del dominio repinta la sección con lo guardado: solo compara, no lee el disco."""
+        if self._descripcion_sesion is not None:  # antes del primer refresco no hay nada que pintar
+            self._pintar_sesion(self._descripcion_sesion)
 
     def _crear_fila_modelo(self, padre, variable: tk.StringVar):
         """«Modelo de IA»: el selector (sin texto libre) y su «↻», que lanza la misma consulta que el del lateral."""
@@ -210,6 +262,27 @@ class PanelConfiguracion(ctk.CTkFrame):
         self.label_pie.configure(text="")
         self._refrescar_modelo()
         self._pintar_avisos()
+        self.refrescar_sesion()
+
+    def refrescar_sesion(self):
+        """Lee de disco la sesión de GitHub Copilot con el dominio guardado y la pinta. Sin red."""
+        dominio = self.app.configuracion["ia"]["copilot_enterprise_url"] or None
+        self._pintar_sesion(copilot.describir_sesion(copilot.estado_sesion(dominio)))
+
+    def _pintar_sesion(self, descripcion: copilot.DescripcionSesion):
+        """Pone el texto y los botones de la sección según la descripción y el dominio escrito frente al guardado."""
+        self._descripcion_sesion = descripcion
+        seccion = seccion_de_sesion(descripcion, self._variables[("ia", "copilot_enterprise_url")].get(),
+                                    self.app.configuracion["ia"]["copilot_enterprise_url"])
+        self.label_sesion.configure(text=seccion.texto)
+        self.btn_iniciar_sesion.configure(text=seccion.texto_iniciar,
+                                          state="normal" if seccion.iniciar_habilitado else "disabled")
+        self.btn_cerrar_sesion.configure(state="normal" if seccion.cerrar_habilitado else "disabled")
+
+    def _cerrar_sesion(self):
+        estado = self.app._cerrar_sesion_copilot()
+        if estado is not None:
+            self._pintar_sesion(copilot.describir_sesion(estado))
 
     def _refrescar_modelo(self):
         """«Modelo de IA» vuelve a mostrar el modelo efectivo de la ventana, con las opciones del selector del lateral y

@@ -120,7 +120,7 @@ Origen: docs/historias/hechas/2026-11-22-19-guardar-y-restablecer.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)
 
 ### Vista Configuración
-La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con «Modelo de IA» primero y su «Avanzado» plegado) e Historial; el resto (la sesión de GitHub Copilot) llega con otras historias. El panel lateral sigue siendo «para esta transcripción»: guardar desde la vista solo cambia los controles del lateral de las claves guardadas.
+La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), Salida, IA (con la sesión de GitHub Copilot primero, luego «Modelo de IA» y su «Avanzado» plegado) e Historial. El panel lateral sigue siendo «para esta transcripción»: guardar desde la vista solo cambia los controles del lateral de las claves guardadas.
 
 - Given el YAML del proyecto (`salida.formato: "txt"`, `modelo.nombre: "large-v3-turbo"`), sin `preferencias.json` y con
   el modelo de Whisper del panel lateral cambiado a mano a `tiny`, when se abre «⚙ Configuración» con `Ctrl+3` (o con el
@@ -129,8 +129,9 @@ La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), S
   `config/settings.yaml` no cambia (mismos bytes y misma fecha de modificación), y al volver con `Ctrl+1` el selector de
   formato del lateral muestra `srt` y el de modelo sigue en `tiny`. La vista muestra los grupos «Transcripción» (Modelo
   de Whisper, Idioma, Dispositivo, Precisión) y «Salida» (Formato de salida, Incluir marcas de tiempo, Marcas por
-  palabra); desde la historia 22, también «Historial» y «Avanzado»; desde la historia 23, el grupo «IA» (ver «Grupo IA de la vista Configuración»); cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrirla no hace
-  ninguna petición de red ni lee el token.
+  palabra); desde la historia 22, también «Historial» y «Avanzado»; desde la historia 23, el grupo «IA» (ver «Grupo IA de la vista Configuración»); cada campo con su clave del YAML debajo; mientras se ve, no se ven las pestañas de resultado. Abrir la ventana no lee el token ni hace
+  ninguna petición de red; mostrar la vista lee la sesión de GitHub Copilot del disco una vez, sin red (antes: abrirla no
+  leía el token ni hacía ninguna petición de red, y la vista no tenía sesión).
 - Given «Idioma» con `nl` escrito a mano, when se pulsa «Guardar», then `preferencias.json` guarda `transcripcion.idioma`
   = `nl` y el selector de idioma del lateral muestra `nl` y lo ofrece al final de su lista; y si después se cambia
   «Formato de salida» a `vtt` sin guardar, se va a Transcribir (`Ctrl+1`) y se vuelve (`Ctrl+3`), el campo vuelve a
@@ -176,6 +177,7 @@ La vista tiene los grupos Transcripción (con el bloque plegado «Avanzado»), S
 Origen: docs/historias/hechas/2026-11-22-21-vista-configuracion.md
 Origen: docs/historias/hechas/2026-11-22-22-avanzado-historial-restablecer.md
 Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
 
 ### Modelo de IA en la vista Configuración
 - Given el YAML del proyecto (`ia.modelo: "claude-haiku-5.5"`, `salida.formato: "txt"`), sin `preferencias.json`, con
@@ -228,14 +230,78 @@ Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
 
 Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
 
+### Sesión de GitHub Copilot en la vista Configuración
+- Given la ventana recién abierta, sin sesión (ni opencode, ni variable `COPILOT_GITHUB_TOKEN`, ni archivo propio), when
+  se muestra «⚙ Configuración», then al principio del grupo «IA», antes de «Modelo de IA», hay una sección «Sesión de
+  GitHub Copilot» con el texto «No has iniciado sesión en GitHub Copilot.», «Iniciar sesión» habilitado y «Cerrar sesión»
+  deshabilitado; mostrar la vista lee la sesión del disco una vez y no hace ninguna petición de red.
+- Given la ventana recién abierta y solo una sesión de opencode, when se muestra «⚙ Configuración», then la sección dice
+  «Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode. La sesión se comprueba al usarla.», con
+  «Iniciar sesión con la app» habilitado y «Cerrar sesión» deshabilitado, y no hace ninguna petición de red.
+- Given la ventana recién abierta, la variable `COPILOT_GITHUB_TOKEN` definida y un archivo propio de sesión, when se
+  muestra «⚙ Configuración», then la sección dice «Se usa el token de la variable de entorno COPILOT_GITHUB_TOKEN. La app
+  no puede cerrarlo: quita la variable para usar otra sesión. Hay además una sesión guardada por la app que ahora no se
+  usa. La sesión se comprueba al usarla.», con el botón de iniciar deshabilitado y «Cerrar sesión» habilitado; ningún
+  texto de la sección contiene el token.
+- Given cualquiera de esas sesiones y el campo «Dominio de GitHub Enterprise» con `empresa.ghe.com` escrito sin guardar,
+  when se escribe el dominio, then los dos botones se deshabilitan y el texto de la sección termina en «Guarda primero el
+  dominio.»; when se borra lo escrito (el campo vuelve al dominio guardado) o se va a Transcribir y se vuelve a
+  «⚙ Configuración», then la sección vuelve a ser la de la sesión.
+- Given el mismo campo con `empresa.ghe.com` escrito sin guardar, when se pega el dominio con el ratón o el menú
+  contextual en lugar de escribirlo, then la sección avisa igual que al escribirlo.
+
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
+
+### Iniciar sesión desde la vista Configuración
+- Given la sección «No has iniciado sesión en GitHub Copilot.» y una generación anterior que dejó creado el asistente,
+  when se pulsa «Iniciar sesión» y se autoriza en el diálogo «Iniciar sesión en GitHub Copilot», then la sección dice
+  «Sesión iniciada con la app. La sesión se comprueba al usarla.», «Iniciar sesión» queda deshabilitado y «Cerrar sesión»
+  habilitado, Registro anota «Sesión de GitHub Copilot iniciada», la siguiente generación crea un asistente nuevo (las
+  notas conservadas se pierden), una lista de «↻» pedida antes de iniciar sesión y que llega después se descarta
+  (Registro anota «Se descarta una lista de modelos de una sesión o un dominio anteriores») y el selector de modelo no se
+  recarga solo.
+- Given la misma sección y una generación anterior que dejó creado el asistente, when se pulsa «Iniciar sesión» y se
+  cancela el diálogo, then la sección no cambia, la barra de estado dice «Inicio de sesión en GitHub Copilot cancelado»,
+  el asistente sigue siendo el mismo y no se crea el archivo de sesión.
+- Given un inicio de sesión que termina bien desde cualquier acción que lo abre, también «↻» sin sesión en la lista de
+  modelos, when termina, then la sección de la vista se repinta con la sesión nueva.
+- Given el diálogo «Iniciar sesión en GitHub Copilot» ya abierto, when se pulsa «Iniciar sesión» otra vez, then no se
+  abre otro diálogo.
+
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
+
+### Cerrar sesión desde la vista Configuración
+- Given un archivo propio de sesión de Copilot y una sesión de opencode, when se pulsa «Cerrar sesión» y se responde «Sí»
+  al diálogo «Cerrar sesión» («¿Cerrar la sesión de GitHub Copilot guardada por la app? La de opencode y la variable de
+  entorno no se tocan.»), then el archivo propio deja de existir, el de opencode queda igual (mismos bytes y misma fecha
+  de modificación), la sección dice «Se usa la sesión de opencode. La app no la cierra: ciérrala desde opencode. La sesión
+  se comprueba al usarla.» con «Cerrar sesión» deshabilitado e «Iniciar sesión con la app» habilitado, el selector de
+  modelo del lateral y el campo «Modelo de IA» ofrecen solo `auto` y el modelo configurado, la siguiente generación crea
+  un asistente nuevo, una lista de «↻» en vuelo se descarta al llegar y Registro anota «Sesión de GitHub Copilot
+  cerrada».
+- Given lo mismo, when se responde «No» al diálogo, then nada cambia.
+- Given un archivo propio de sesión que no se puede borrar (carpeta sin permiso de escritura), when se responde «Sí», then
+  aparece el diálogo «Sesión de GitHub Copilot» con «No se pudo cerrar la sesión:» y el motivo, y el archivo, la sección,
+  el selector de modelo y el asistente no cambian.
+
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
+
+### Sesión de GitHub Copilot durante un proceso
+- Given una transcripción o una generación en curso, when se pulsa «Iniciar sesión» o «Cerrar sesión» en la vista, then
+  aparece el diálogo «Sesión de GitHub Copilot» con «Espera a que termine el proceso en curso.», sin preguntar, sin
+  borrar nada y sin abrir el inicio de sesión.
+
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
+
 ### Cambio del dominio de GitHub Enterprise en la vista
 - Given «↻» pulsado con el dominio vacío (github.com) y todavía sin respuesta, when se pulsa «Guardar» con
   `empresa.ghe.com` en el dominio, then no se guarda nada y el pie dice «Espera a que termine la consulta de modelos de
   IA.» (ver «Vista Configuración»): desde la vista, el dominio no cambia con una consulta en curso.
 - Given una lista de modelos pedida con una época de la IA anterior a la actual, when llega (o falla, o no hay sesión),
   then no se pinta, no se abre el inicio de sesión, «↻» vuelve a estar habilitado y Registro anota «Se descarta una
-  lista de modelos de una sesión o un dominio anteriores». Ninguna acción de la vista cambia la época mientras consulta:
-  esta protección queda para el inicio y el cierre de sesión de Copilot desde la vista (pendiente, E2 de la historia 24). (antes: con «↻» en curso,
+  lista de modelos de una sesión o un dominio anteriores». «Guardar» no cambia la época mientras consulta; iniciar o
+  cerrar sesión desde la vista sí la cambia, y entonces la lista que llega después se descarta (ver «Sesión de GitHub
+  Copilot en la vista Configuración»). (antes: con «↻» en curso,
   guardar `empresa.ghe.com` cambiaba la época y el selector del lateral se reiniciaba a `auto` y el configurado; la lista
   de github.com que llegaba después se descartaba.)
 - Given el dominio guardado como `empresa.ghe.com`, when se pulsa «↻», se genera un resumen o una minuta o se abre el
@@ -245,3 +311,4 @@ Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
 
 Origen: docs/historias/hechas/2026-11-22-23-grupo-ia.md
 Origen: docs/historias/hechas/2026-11-22-24-modelo-ia-en-la-vista.md
+Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
