@@ -368,6 +368,12 @@ class _Documento:
     repuestas: list[str] = field(default_factory=list)  # tareas que la revisión quitó y que la app repuso marcadas
 
 
+@dataclass
+class _ConsultaDeLimite:
+    """Estado de la consulta al catálogo en una generación: si falló, no se repite en esa generación."""
+    error: Optional[str] = None  # motivo del fallo; None si no se consultó o salió bien
+
+
 def _fallo_recuperable(error: ErrorAsistenteIA) -> bool:
     """Si una pasada posterior a la redacción falla con esto, se entrega lo ya redactado con una nota. No lo es la falta
     de sesión (hay que iniciar sesión) ni un modelo no autorizado o vacío (no se envía nada a ningún modelo)."""
@@ -910,6 +916,7 @@ class AsistenteIA:
         with self._cerrojo_iniciador:
             self._pendiente_iniciador_usuario = True
 
+        consulta = _ConsultaDeLimite()  # del catálogo de límites, de esta generación
         bloques = dividir_texto(texto, self.max_caracteres_bloque)
         log.info("Generando documento: %d caracteres de transcripción en %d bloque(s) de %s caracteres",
                  len(texto), len(bloques), ", ".join(str(len(b)) for b in bloques))
@@ -922,7 +929,7 @@ class AsistenteIA:
             on_progreso("Redactando documento…")
         prompt = plantilla.format(texto=texto)
         if len(bloques) > 1:
-            self._comprobar_limite_de_entrada(prompt, len(bloques), cancelar)
+            self._comprobar_limite_de_entrada(prompt, len(bloques), cancelar, consulta)
         documento = self._completar(prompt, cancelar)
 
         corte = _corte(documento)
@@ -990,27 +997,39 @@ class AsistenteIA:
                           error_secciones if faltan_al_final else None, error_revision, corte, cortes_partes,
                           revision_descartada=revision_descartada, repuestas=repuestas)
 
-    def _comprobar_limite_de_entrada(self, prompt: str, partes: int, cancelar: Optional[threading.Event]) -> None:
+    def _limite_del_modelo(self, consulta: _ConsultaDeLimite,
+                           cancelar: Optional[threading.Event]) -> tuple[str, Optional[int]]:
+        """Modelo de la próxima petición (`_modelo_para_peticion`: regla 7 y sesión auto) y su límite de entrada, o None
+        si el catálogo falló en esta generación o no lo trae. El límite se guarda en el asistente; el fallo, solo en
+        `consulta`, así que la siguiente generación vuelve a consultar el catálogo."""
+        if cancelar and cancelar.is_set():
+            raise InterruptedError
+        modelo, _ = self._modelo_para_peticion()
+        with self._cerrojo_limites:
+            if self._limites is None and consulta.error is None:
+                try:
+                    self._limites = copilot.limites_de_entrada(copilot.Sesion(self.api_key, self.enterprise_url))
+                except copilot.ErrorCopilot as e:
+                    consulta.error = str(e)
+        if self._limites is None:
+            return modelo, None
+        return modelo, self._limites.get(modelo)
+
+    def _comprobar_limite_de_entrada(self, prompt: str, partes: int, cancelar: Optional[threading.Event],
+                                     consulta: Optional[_ConsultaDeLimite] = None) -> None:
         """Antes de redactar a partir de notas: si la petición entera supera el límite de entrada del modelo que se
         usará, no se envía (Copilot la rechazaría con un error poco claro). Solo se consulta el catálogo si la
         estimación supera el umbral."""
         estimado = estimar_tokens(PROMPT_SISTEMA + prompt)
         if estimado <= UMBRAL_COMPROBAR_LIMITE:
             return
-        if cancelar and cancelar.is_set():
-            raise InterruptedError
-        modelo, _ = self._modelo_para_peticion()
-        with self._cerrojo_limites:
-            if self._limites is None:
-                try:
-                    self._limites = copilot.limites_de_entrada(copilot.Sesion(self.api_key, self.enterprise_url))
-                except copilot.ErrorCopilot as e:
-                    # El fallo no se recuerda: la siguiente generación vuelve a consultar el catálogo
-                    log.warning("No se pudo comprobar el límite de entrada de «%s» (%s); se envía la redacción "
-                                "como hoy.", modelo, e)
-                    return
-        limite = self._limites.get(modelo)
-        if limite is None:
+        if consulta is None:
+            consulta = _ConsultaDeLimite()
+        modelo, limite = self._limite_del_modelo(consulta, cancelar)
+        if limite is None and consulta.error is not None:
+            log.warning("No se pudo comprobar el límite de entrada de «%s» (%s); se envía la redacción como hoy.",
+                        modelo, consulta.error)
+        elif limite is None:
             log.warning("No se pudo comprobar el límite de entrada de «%s»: el catálogo no lo informa; se envía la "
                         "redacción como hoy.", modelo)
         elif estimado > limite:

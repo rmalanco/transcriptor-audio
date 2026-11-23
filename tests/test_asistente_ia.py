@@ -1998,6 +1998,48 @@ def test_sin_limite_conocido_se_redacta_como_hoy(monkeypatch, caplog, respuesta)
     assert "no se pudo comprobar el límite de entrada" in caplog.text.lower()
 
 
+@pytest.mark.parametrize("respuesta, registro", [
+    pytest.param(asistente_ia.httpx.ConnectError("sin conexión"),
+                 "No se pudo comprobar el límite de entrada de «gpt-4.1» (No se pudo conectar con GitHub Copilot: "
+                 "sin conexión); se envía la redacción como hoy.",
+                 id="conexion-caida"),
+    pytest.param(_catalogo_con_limite("otro-modelo", 64000),
+                 "No se pudo comprobar el límite de entrada de «gpt-4.1»: el catálogo no lo informa; se envía la "
+                 "redacción como hoy.",
+                 id="modelo-ausente"),
+])
+def test_registro_de_la_redaccion_sin_limite_no_cambia(monkeypatch, caplog, respuesta, registro):
+    _simular_catalogo(monkeypatch, respuesta)
+    _simular_chat(monkeypatch, lambda cuerpo: _relleno(100_000) if _es_prompt_de_notas(cuerpo) else MINUTA_MODELO)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    with caplog.at_level("WARNING", logger="transcriptor.ia"):
+        asistente.generar_minuta(TEXTO_TRES_PARTES_LARGO)
+    assert registro in caplog.text  # el texto literal, con mayúscula y tildes: lo que ve quien lee el registro
+
+
+def test_limite_del_modelo_no_repite_un_catalogo_caido_en_la_misma_generacion(monkeypatch):
+    consultas = _simular_catalogo(monkeypatch, asistente_ia.httpx.ConnectError("sin conexión"))
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    consulta = asistente_ia._ConsultaDeLimite()
+    assert asistente._limite_del_modelo(consulta, None) == ("gpt-4.1", None)
+    assert asistente._limite_del_modelo(consulta, None) == ("gpt-4.1", None)  # misma generación: no se repite
+    assert len(consultas) == 1
+    assert "No se pudo conectar con GitHub Copilot: sin conexión" in consulta.error
+    # Otra generación (otra consulta) sí vuelve a preguntar: el fallo no se guardó en el asistente
+    assert asistente._limite_del_modelo(asistente_ia._ConsultaDeLimite(), None) == ("gpt-4.1", None)
+    assert len(consultas) == 2
+
+
+def test_limite_del_modelo_guarda_el_catalogo_entre_generaciones(monkeypatch):
+    consultas = _simular_catalogo(monkeypatch, _catalogo_con_limite("gpt-4.1", 64000))
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=1200, revision_fidelidad=False)
+    primera, segunda = asistente_ia._ConsultaDeLimite(), asistente_ia._ConsultaDeLimite()
+    assert asistente._limite_del_modelo(primera, None) == ("gpt-4.1", 64000)
+    assert asistente._limite_del_modelo(segunda, None) == ("gpt-4.1", 64000)  # otra generación: no vuelve a consultar
+    assert len(consultas) == 1
+    assert primera.error is None and segunda.error is None
+
+
 def test_si_el_catalogo_falla_se_vuelve_a_consultar_en_la_siguiente_generacion(monkeypatch):
     respuestas = iter([asistente_ia.httpx.ConnectError("sin conexión"), _catalogo_con_limite("gpt-4.1", 64000)])
     llamadas = []
