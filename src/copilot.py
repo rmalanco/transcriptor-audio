@@ -328,7 +328,7 @@ def _catalogo(sesion: Sesion) -> list[dict]:
     except httpx.HTTPError as e:
         raise ErrorCopilot(f"No se pudo conectar con GitHub Copilot: {e}") from e
     if respuesta.status_code == 401:
-        raise ErrorCopilot("La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión.")
+        raise ErrorSesionCopilot("La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión.")
     if respuesta.status_code >= 400:
         raise ErrorCopilot(f"GitHub Copilot respondió {respuesta.status_code}: {respuesta.text[:200]}")
     return _lista_de_objetos(respuesta, "pedir la lista de modelos", "data")

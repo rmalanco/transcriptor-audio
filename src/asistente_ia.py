@@ -1029,6 +1029,8 @@ class AsistenteIA:
             if self._limites is None and consulta.error is None:
                 try:
                     self._limites = copilot.limites_de_entrada(copilot.Sesion(self.api_key, self.enterprise_url))
+                except copilot.ErrorSesionCopilot as e:  # el token rechazado: no es un fallo más del catálogo
+                    raise self._error_de_token_rechazado() from e
                 except copilot.ErrorCopilot as e:
                     consulta.error = str(e)
         if self._limites is None:

@@ -169,8 +169,7 @@ Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
   nombra sin paréntesis; con la lista vacía no hay nota, y el bloque es `""` si no hay nada más que avisar. La nota dice:
   «> Nota de la aplicación: la revisión de fidelidad quiso quitar de la minuta lo siguiente por no encontrarlo en la
   transcripción; la app lo ha repuesto marcado con «[comprobar]»: {lista}. Compruébalo con la transcripción y bórralo si
-  no se dijo.». Lo repuesto cuenta como revisado: la nota de las partes sigue diciendo «La revisión de fidelidad se hizo
-  contra esas notas, no contra la transcripción.». Ni la marca ni la nota se envían a Copilot.
+  no se dijo.». Lo repuesto cuenta como revisado: la nota de las partes dice la frase de la fuente con la que se revisó (ver «Revisión de fidelidad con varias partes»). Ni la marca ni la nota se envían a Copilot.
 
 Origen: docs/historias/hechas/2026-11-22-07-documento-incompleto.md
 Origen: docs/historias/hechas/2026-11-22-15-respuesta-cortada.md
@@ -217,28 +216,24 @@ Origen: docs/historias/hechas/2026-11-22-27-sesion-en-la-vista.md
 - Given notas que caben, o una sola parte, o notas por debajo del umbral de 32 000 tokens estimados (unos 73 600
   caracteres de petición), when se genera el documento, then se redacta como hoy; por debajo del umbral no se consulta
   el catálogo.
-- Given que el catálogo no se puede consultar o no trae el límite del modelo, when se genera el documento, then se
+- Given que el catálogo no se puede consultar por un fallo distinto de un 401 (el 401 es falta de sesión: ver «Sesión rechazada por Copilot») o no trae el límite del modelo, when se genera el documento, then se
   redacta como hoy y la pestaña Registro anota que no se pudo comprobar el límite de entrada; la siguiente generación
   vuelve a consultar el catálogo.
 
 Origen: docs/historias/hechas/2026-11-22-16-limite-de-entrada.md
 Origen: docs/historias/hechas/2026-11-22-30-estimar-tokens.md
+Origen: docs/historias/hechas/2026-11-22-32-revisar-contra-el-original.md
 
-### Revisión de fidelidad contra las notas
-- Given la revisión de fidelidad activada y una transcripción procesada en N partes, when se genera el documento, then
-  durante la revisión la línea de estado dice «Revisando fidelidad con las notas de las N partes…» y, si la revisión se
-  aceptó, la nota añade «La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.»; si la
-  revisión se descartó, la nota no lo dice.
-- Given la revisión de fidelidad activada y una transcripción que cabe en una sola parte, when se genera el documento,
-  then la línea de estado dice «Revisando fidelidad con la transcripción…».
-- Given la revisión de fidelidad activada, una transcripción de 2 partes y una revisión de minuta que pierde «## Próximos
-  pasos», when se genera la minuta, then la minuta lleva la nota «> Nota de la aplicación: la revisión de fidelidad se
-  descartó porque quitaba secciones obligatorias; este documento no está revisado.» antes que la de las partes, bajo una
-  sola línea horizontal; la de las partes termina en «…antes de darlo por bueno.» y la minuta no contiene «La revisión
-  de fidelidad se hizo». La línea de estado sigue diciendo «Revisando fidelidad con las notas de las 2 partes…».
+### Revisión de fidelidad con varias partes
+- Given la revisión de fidelidad activada, una transcripción procesada en N partes (N de 2 o más) y una transcripción completa que cabe en el límite de entrada del modelo, o cuyo límite no se pudo comprobar, when se genera el documento, then la línea de estado dice «Revisando fidelidad con la transcripción completa…», la revisión recibe la transcripción completa y, si la revisión se aceptó, la nota añade «La revisión de fidelidad lo contrastó después con la transcripción completa, pero es automática: no sustituye a esa comprobación.».
+- Given la revisión de fidelidad activada, una transcripción procesada en N partes y una transcripción completa que no cabe en el límite de entrada del modelo, when se genera el documento, then la línea de estado dice «Revisando fidelidad con las notas de las N partes…», la revisión recibe las notas y, si la revisión se aceptó, la nota añade «La revisión de fidelidad se hizo contra esas notas, no contra la transcripción.»; si la revisión se descartó, la nota no lo dice.
+- Given la revisión de fidelidad activada, con varias partes, y una revisión que falla, se corta o se descarta, when se genera el documento, then la nota de las partes termina en «…antes de darlo por bueno.» y no contiene ninguna de las dos frases sobre la revisión.
+- Given la revisión de fidelidad activada y una transcripción que cabe en una sola parte, when se genera el documento, then la línea de estado dice «Revisando fidelidad con la transcripción…» y el documento no lleva la nota.
+- Given la revisión de fidelidad activada, una transcripción de 2 partes que cabe en el límite de entrada y una revisión de minuta que pierde «## Próximos pasos», when se genera la minuta, then la minuta lleva la nota «> Nota de la aplicación: la revisión de fidelidad se descartó porque quitaba secciones obligatorias; este documento no está revisado.» antes que la de las partes, bajo una sola línea horizontal; la de las partes termina en «…antes de darlo por bueno.», la minuta no contiene «La revisión de fidelidad se hizo» ni «La revisión de fidelidad lo contrastó», y la línea de estado dice «Revisando fidelidad con la transcripción completa…».
 
 Origen: docs/historias/hechas/2026-11-22-06-revision-de-fidelidad.md
 Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
+Origen: docs/historias/hechas/2026-11-22-32-revisar-contra-el-original.md
 
 ### Revisión de fidelidad que borra tareas o acuerdos
 - Given la revisión de fidelidad activada y una minuta de una parte, when la revisión pierde una sección y una fila de la tabla de tareas, then se descarta, se conserva la minuta anterior a la revisión y la nota dice «… se descartó porque quitaba secciones obligatorias; este documento no está revisado.» (gana el motivo de secciones).
@@ -276,8 +271,9 @@ Origen: docs/historias/hechas/2026-11-22-28-revision-descartada.md
 ### Sesión rechazada por Copilot
 - Given que Copilot rechaza el token (401) al generar o al abrir la sesión del modo `auto`, when el token es el de la sesión guardada por la app o el de opencode, then se abre el inicio de sesión, sin borrar el token de opencode ni un token propio distinto del rechazado.
 - Given que el token rechazado viene de la variable de entorno `COPILOT_GITHUB_TOKEN`, when Copilot lo rechaza (401) al generar o al abrir la sesión del modo `auto`, then no se abre el inicio de sesión y aparece el error «GitHub Copilot rechazó el token de la variable de entorno COPILOT_GITHUB_TOKEN. Corrígela o quítala para usar la sesión guardada con el inicio de sesión de la app.».
-
+- Given que el catálogo de límites de Copilot responde 401 al decidir si la redacción o la revisión caben en el modelo, when el token es el de la sesión guardada por la app o el de opencode, then no se envía la petición pendiente ni se entrega documento, sale el error «La sesión de GitHub Copilot caducó o fue revocada (401). Vuelve a iniciar sesión.» y se pide iniciar sesión, como con un 401 de la generación. Un fallo del catálogo que no sea 401 no cuenta aquí.
 Origen: carril S, 2026-11-22: un 401 de la sesión `auto` se trata como falta de sesión, y el token de la variable de entorno avisa en vez de abrir el login en bucle (A-06, A-07)
+Origen: docs/historias/hechas/2026-11-22-32-revisar-contra-el-original.md
 
 ### Copilot pide esperar
 - Given que Copilot responde 429 o 5xx con `Retry-After` de N segundos (de 0 a 60), when se reintenta la petición, then la generación espera N segundos antes de reintentar; si se cancela durante esa espera, se corta en el acto.

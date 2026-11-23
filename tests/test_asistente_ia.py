@@ -2081,7 +2081,6 @@ def test_catalogo_sin_el_modelo_revisa_con_la_transcripcion(monkeypatch, caplog)
 
 @pytest.mark.parametrize("respuesta", [
     pytest.param(asistente_ia.httpx.ConnectError("sin conexión"), id="conexion-caida"),
-    pytest.param(_Respuesta({}, 401), id="401"),
     pytest.param(_Respuesta({}, 500), id="500"),
     pytest.param(_Respuesta({"data": "no es una lista"}), id="data-inesperado"),
     pytest.param(_catalogo_con_limite("otro-modelo", 64000), id="modelo-ausente"),
@@ -2163,3 +2162,28 @@ def test_si_el_catalogo_falla_se_vuelve_a_consultar_en_la_siguiente_generacion(m
     with pytest.raises(ErrorAsistenteIA, match="no se envió la redacción"):
         asistente.generar_resumen(TEXTO_TRES_PARTES_LARGO)  # el catálogo ya responde: se comprueba
     assert len(llamadas) == 2
+
+
+def test_401_del_catalogo_en_la_revision_es_falta_de_sesion_y_no_envia_la_revision(monkeypatch):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 1200)  # redacción (1 021) no consulta; revisión (1 676) sí
+    consultas = _simular_catalogo(monkeypatch, _Respuesta({}, 401))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=True)
+    with pytest.raises(asistente_ia.ErrorSinSesionCopilot) as error:
+        asistente.generar_minuta(TEXTO2)
+    assert str(error.value) == "La sesión de GitHub Copilot caducó o fue revocada (401). Vuelve a iniciar sesión."
+    assert len(consultas) == 1
+    assert len(cuerpos) == 3  # 2 notas y la redacción: la revisión no se envía
+    assert not any("DOCUMENTO:" in cuerpo["messages"][-1]["content"] for cuerpo in cuerpos)
+
+
+def test_401_del_catalogo_en_la_redaccion_es_falta_de_sesion(monkeypatch):
+    monkeypatch.setattr(asistente_ia, "UMBRAL_COMPROBAR_LIMITE", 500)  # la redacción (1 021) ya consulta
+    consultas = _simular_catalogo(monkeypatch, _Respuesta({}, 401))
+    cuerpos = _simular_chat(monkeypatch, _responder_minuta_o_notas)
+    asistente = AsistenteIA(api_key="x", modelo="gpt-4.1", max_caracteres_bloque=900, revision_fidelidad=False)
+    with pytest.raises(asistente_ia.ErrorSinSesionCopilot) as error:
+        asistente.generar_minuta(TEXTO2)
+    assert str(error.value) == "La sesión de GitHub Copilot caducó o fue revocada (401). Vuelve a iniciar sesión."
+    assert len(consultas) == 1
+    assert len(cuerpos) == 2 and all(_es_prompt_de_notas(cuerpo) for cuerpo in cuerpos)  # solo las notas

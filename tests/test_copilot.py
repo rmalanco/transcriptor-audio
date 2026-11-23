@@ -310,6 +310,14 @@ def test_limites_de_entrada_del_catalogo(monkeypatch):
     assert copilot.limites_de_entrada(copilot.Sesion("gho_x")) == {"gpt-4.1": 64000, "claude-haiku-5.5": 936000}
 
 
+def test_catalogo_con_401_es_error_de_sesion(monkeypatch):
+    monkeypatch.setattr(copilot.httpx, "get", lambda url, headers, timeout: _Respuesta({}, 401))
+    with pytest.raises(copilot.ErrorSesionCopilot) as error:
+        copilot.limites_de_entrada(copilot.Sesion("gho_x"))
+    assert isinstance(error.value, copilot.ErrorCopilot)
+    assert str(error.value) == "La sesión de GitHub Copilot no es válida (401). Vuelve a iniciar sesión."
+
+
 def test_sin_sesion_lanza_error_especifico():
     with pytest.raises(ErrorSinSesionCopilot):
         AsistenteIA()

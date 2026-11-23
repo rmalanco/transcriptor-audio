@@ -113,6 +113,7 @@ Dependencias entre módulos (quién importa a quién):
   - `.modelo_usado` — `"auto → <modelo>"` en modo auto con sesión abierta; si no, el modelo configurado.
 - `asistente_ia.py:ErrorAsistenteIA` y sus subclases `ErrorSinSesionCopilot` (hay que iniciar sesión) y `ErrorModeloIA`
   (modelo vacío, de una familia no autorizada o sin ninguno válido en `auto`: no se envía nada).
+- `asistente_ia.py:FuenteRevision(tipo, texto, motivo=None)`: lo que recibe la revisión de fidelidad, `"transcripcion"` (la transcripción completa) o `"notas"`; `motivo` es `(estimado, límite, modelo)` si la transcripción no cupo (lo usará R3). `AsistenteIA._fuente_de_revision(original, notas, documento, partes, consulta, cancelar)` decide: una parte, o un documento que cabe o cuyo límite no se pudo comprobar, → transcripción; si no cabe → notas. `_Documento.fuente_revision` guarda el tipo (por defecto `"notas"`); `_cita_de_partes(partes, revisado, *, fuente_revision="notas")` y `nota_de_notas(partes, revisado, *, fuente_revision="notas")` eligen la frase de la nota.
 - Funciones de apoyo: `dividir_texto`, `limpiar_respuesta`, `normalizar_tabla_tareas`, `secciones_faltantes`,
   `notas_de_la_aplicacion`, `nota_de_notas`, `reponer_lo_quitado`, `estimar_tokens(texto) -> int` (caracteres entre
   `CARACTERES_POR_TOKEN`, redondeado hacia arriba).
@@ -253,7 +254,7 @@ Dependencias entre módulos (quién importa a quién):
   (`asistente_ia.py:AsistenteIA._cabeceras`, `asistente_ia.py:AsistenteIA._generar`).
 - `copilot.py:listar_modelos` acepta un modelo si `policy.state == "enabled"` o `model_picker_enabled`, si es de tipo
   `chat` y, cuando declara `supported_endpoints`, si incluyen `/chat/completions`. Lee el catálogo con `copilot.py:_catalogo`,
-  igual que `copilot.py:limites_de_entrada` (`capabilities.limits.max_prompt_tokens` por id, sin filtrar por habilitados).
+  igual que `copilot.py:limites_de_entrada` (`capabilities.limits.max_prompt_tokens` por id, sin filtrar por habilitados). Un 401 de `_catalogo` lanza `ErrorSesionCopilot`.
 - `copilot.py:modelos_economicos` descarta los modelos sin precio, con precio de entrada mayor que
   `PRECIO_MAX_ECONOMICO` o de `FAMILIAS_EXCLUIDAS`; deja un solo modelo por `name` (el primero) y los ordena por precio
   de entrada.
@@ -286,6 +287,7 @@ Dependencias entre módulos (quién importa a quién):
   `ErrorSinSesionCopilot`. En modo `auto`, un 401 de `/chat/completions` primero descarta la sesión `auto` y abre otra
   (en los tres primeros intentos); un 401 en el último intento, o al abrir la sesión (`ErrorSesionCopilot`), sigue ese
   mismo camino.
+- El 401 del catálogo de límites (`copilot.py:_catalogo` lanza `ErrorSesionCopilot`), en la redacción o en la revisión, pasa por `AsistenteIA._limite_del_modelo`, que lo convierte con `_error_de_token_rechazado` antes de tratar los demás fallos del catálogo: es falta de sesión y no un catálogo caído. Con `COPILOT_GITHUB_TOKEN`, en la revisión el error es recuperable (el documento se entrega sin revisar, con su nota).
 - Las respuestas de GitHub con formato o tipos inesperados (`copilot.py:_datos_de`, `copilot.py:_lista_de_objetos`)
   lanzan `ErrorCopilot` con «GitHub devolvió una respuesta inesperada al <acción>.», para que el diálogo de login y la
   CLI no se queden colgados ni muestren un trazo.
@@ -295,11 +297,10 @@ Dependencias entre módulos (quién importa a quién):
 ### Documentos generados
 
 - Una transcripción vacía lanza `ErrorAsistenteIA` (`asistente_ia.py:AsistenteIA._generar`).
-- Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad compara
-  contra esas notas, no contra la transcripción (`asistente_ia.py:AsistenteIA._generar`). Si la estimación de la petición
+- Con más de un bloque, el documento se redacta a partir de notas por bloque, y la revisión de fidelidad recibe la transcripción completa si cabe en el límite del modelo (o si su límite no se puede comprobar) y las notas si no cabe (`asistente_ia.py:AsistenteIA._fuente_de_revision`, `asistente_ia.py:AsistenteIA._generar`). Si la estimación de la petición
   de redacción (caracteres / 2,3, `asistente_ia.py:estimar_tokens`) supera 32 000 tokens, antes de redactar se consulta una vez por asistente
   `copilot.py:limites_de_entrada`; si la estimación supera el límite del modelo, se lanza `ErrorAsistenteIA` y la redacción
-  no se envía. Un fallo del catálogo, o un modelo sin límite, no bloquea: se redacta como hoy
+  no se envía. Un fallo del catálogo que no sea 401 (un 401 es falta de sesión), o un modelo sin límite, no bloquea: se redacta como hoy
   (`asistente_ia.py:AsistenteIA._comprobar_limite_de_entrada`). La consulta al catálogo la hace
   `asistente_ia.py:AsistenteIA._limite_del_modelo` con un `asistente_ia.py:_ConsultaDeLimite` por generación: como mucho
   una por generación; si falla, esa generación no la repite y el fallo no se guarda entre generaciones, mientras que los
