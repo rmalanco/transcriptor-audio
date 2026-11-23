@@ -10,7 +10,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Optional
+from typing import Optional, Sequence
 
 import customtkinter as ctk
 
@@ -25,8 +25,8 @@ from src.asistente_ia import (NOMBRE_PROVEEDOR, AsistenteIA, ErrorAsistenteIA,
 from src import copilot
 from src.historial import Historial
 from src.registro import configurar_logging
-from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, guardar_modelo_preferido,
-                               leer_modelo_preferido, modelo_ia_efectivo)
+from src.configuracion import (MODELOS_WHISPER, ErrorConfiguracion, cargar_configuracion, combinar,
+                               guardar_modelo_preferido, leer_ajustes, leer_modelo_preferido, modelo_ia_efectivo)
 from src.transcriber import TranscriptorAudio
 from src.flujo_transcripcion import (FASE_CARGANDO_MODELO, FASE_TRANSCRIBIENDO, OpcionesTranscripcion,
                                      TranscripcionPersistida, ruta_transcripcion, transcribir_y_persistir,
@@ -112,7 +112,7 @@ else:
 
 
 class AppTranscriptor(ctk.CTk, _BaseDnD):
-    def __init__(self, configuracion: dict):
+    def __init__(self, configuracion: dict, proyecto: Optional[dict] = None, avisos: Sequence[str] = ()):
         super().__init__()
 
         # Carga tkdnd sobre el mismo intérprete Tcl de CTk (no crear un segundo Tk)
@@ -124,7 +124,9 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
             except RuntimeError:
                 pass
 
-        self.configuracion = configuracion
+        self.configuracion = configuracion              # la efectiva: el YAML con las preferencias encima
+        self.configuracion_proyecto = configuracion if proyecto is None else proyecto
+        self.avisos_preferencias = list(avisos)
         self.title("Transcriptor de Audio/Video")
         self.geometry("1100x720")
         self.minsize(900, 640)
@@ -167,6 +169,8 @@ class AppTranscriptor(ctk.CTk, _BaseDnD):
         self.var_modelo_ia = tk.StringVar(value=self._modelo_ia_configurado())
 
         self._construir_ui()
+        for aviso in self.avisos_preferencias:
+            self._log(aviso)
         self._configurar_drag_drop()
         self._configurar_atajos()
         self.protocol("WM_DELETE_WINDOW", self._al_cerrar)
@@ -1288,7 +1292,7 @@ def main():
     log.info("Iniciando interfaz (nivel de log %s; cámbialo con TRANSCRIPTOR_LOG=DEBUG)",
              logging.getLevelName(logging.getLogger("transcriptor").level))
     try:
-        configuracion = cargar_configuracion()
+        proyecto = cargar_configuracion()
     except ErrorConfiguracion as e:
         log.error("%s", e)
         raiz = tk.Tk()  # ventana oculta solo para poder mostrar el diálogo antes de construir la app
@@ -1296,7 +1300,10 @@ def main():
         messagebox.showerror("Configuración", str(e), parent=raiz)
         raiz.destroy()
         sys.exit(1)
-    app = AppTranscriptor(configuracion)
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+    for aviso in avisos:
+        log.warning("%s", aviso)
+    app = AppTranscriptor(efectiva, proyecto=proyecto, avisos=avisos)
     app.mainloop()
 
 

@@ -14,9 +14,11 @@ YAML y las opciones de la CLI.
 - Given la misma carpeta de trabajo, when se ejecuta la CLI con `--config otro.yaml`, then `otro.yaml` se busca en la
   carpeta de trabajo.
 - Given que `run_ui.py` se lanza desde una carpeta que no es la del proyecto, when se abre la ventana, then usa la
-  configuración y el historial (`data/historial.db`) del proyecto.
+  configuración del proyecto (con las preferencias guardadas encima, si las hay) y el historial (`data/historial.db`)
+  del proyecto.
 
 Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
+Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
 
 ### Configuración con errores
 - Given un `--config` con una sangría rota en la línea 3, when se ejecuta la CLI, then termina con código 1 sin cargar
@@ -60,12 +62,42 @@ Origen: carril S, 2026-11-22: valores por defecto de la IA, temperatura 0.2 y re
 
 Origen: docs/historias/hechas/2026-11-22-05-modulo-de-configuracion.md
 
+### Preferencias del usuario al abrir la ventana
+- Given un `preferencias.json` con ajustes bajo `configuracion` (por ejemplo `{"configuracion": {"salida": {"formato":
+  "srt"}}}`), when se abre la ventana, then esos valores ganan a los de `config/settings.yaml`, el YAML no cambia (mismo
+  contenido y misma fecha de modificación) y la CLI sigue usando solo el YAML.
+- Given que no existe `preferencias.json`, when se abre la ventana, then usa exactamente los valores del YAML y Registro
+  no muestra avisos de preferencias.
+- Given ajustes inválidos, no finitos, de claves que la configuración no tiene, `ia.modelo` dentro de `configuracion` o
+  secciones que no son objetos, when se abre la ventana, then cada ajuste toma el valor del YAML, la ventana abre igual
+  y Registro muestra un aviso por cada uno, con el texto de su caso (`<ruta>` es la de `preferencias.json`):
+  - valor inválido: «En <ruta>, `transcripcion.beam_size` debe ser un número entero mayor que 0 (vale «cinco»); se usa
+    el valor de config/settings.yaml.» (el texto cambia con la clave, igual que en el YAML)
+  - valor no finito en una clave que admite cualquier número: «En <ruta>, `transcripcion.compression_ratio_threshold`
+    debe ser un número (vale «inf»); se usa el valor de config/settings.yaml.»
+  - clave desconocida: «En <ruta>, `audio.sample_rate` no es una clave de la configuración; se ignora.»
+  - `ia.modelo` dentro de `configuracion`: «En <ruta>, `ia.modelo` no se guarda en «configuracion» (el modelo elegido va
+    en «modelo_ia»); se ignora.»
+  - sección que no es un objeto: «En <ruta>, la sección `salida` no es un objeto; se ignora.»
+- Given un `preferencias.json` que no es JSON (por ejemplo `{`) o cuyo JSON no es un objeto (por ejemplo una lista), when
+  se abre la ventana, then se abre con los valores del YAML y Registro muestra un único aviso: «Las preferencias <ruta>
+  no son un JSON válido; se usan los valores de config/settings.yaml. Al guardar se reemplazará el archivo.»
+- Given un `preferencias.json` cuyo `configuracion` no es un objeto (por ejemplo `3`), when se abre la ventana, then se
+  abre con los valores del YAML y Registro muestra «En <ruta>, «configuracion» no es un objeto; se ignora.»
+- Given un `preferencias.json` que no se puede leer (por ejemplo, es una carpeta), when se abre la ventana, then se abre
+  con los valores del YAML y Registro muestra «Las preferencias <ruta> no se pudieron leer (<motivo>); se usan los
+  valores de config/settings.yaml.»
+
+Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
+
 ### Modelo de IA elegido en la ventana
 - Given que se elige un modelo en el selector de la ventana, when se elige, then el modelo se recuerda en
   `~/.local/share/transcriptor-audio/preferencias.json` con la clave `modelo_ia` y `config/settings.yaml` no cambia.
 - Given una preferencia guardada en `preferencias.json`, when se abre la ventana, then el selector usa ese modelo en vez
   de `ia.modelo`.
 - Given que `preferencias.json` no existe o no se puede leer, when se abre la ventana, then se usa `ia.modelo`, sin
-  error.
+  error. Si el archivo existe pero no es JSON válido o no se puede leer, Registro muestra un aviso (ver «Preferencias del
+  usuario al abrir la ventana»).
 
+Origen: docs/historias/hechas/2026-11-22-17-preferencias-ganan-al-yaml.md
 Origen: carril S, 2026-11-22: el modelo de IA elegido en el selector se guarda fuera del repo y gana a `ia.modelo`; la app ya no reescribe `config/settings.yaml` (A-19)

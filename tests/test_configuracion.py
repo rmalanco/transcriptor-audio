@@ -299,3 +299,126 @@ def test_los_valores_por_defecto_de_la_ia_coinciden_con_el_yaml_del_proyecto(tmp
 
     assert por_defecto["temperatura"] == del_proyecto["temperatura"]
     assert por_defecto["revision_fidelidad"] == del_proyecto["revision_fidelidad"]
+
+
+def test_sin_preferencias_la_efectiva_es_la_del_yaml_sin_avisos(tmp_path):
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text('salida:\n  formato: "vtt"\n', encoding="utf-8")
+    proyecto = cargar_configuracion(str(ruta))
+
+    ajustes = leer_ajustes()
+    efectiva, avisos = combinar(proyecto, ajustes)
+
+    assert efectiva == cargar_configuracion(str(ruta))
+    assert avisos == []
+    assert ajustes.ilegible is False
+
+
+def test_un_ajuste_guardado_gana_al_yaml_sin_tocarlo(tmp_path):
+    import json
+
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text('salida:\n  formato: "txt"\ntranscripcion:\n  beam_size: 5\n', encoding="utf-8")
+    contenido = ruta.read_text(encoding="utf-8")
+    mtime = ruta.stat().st_mtime_ns
+    configuracion.RUTA_PREFERENCIAS.write_text(
+        json.dumps({"configuracion": {"salida": {"formato": "srt"}}}), encoding="utf-8")
+
+    efectiva, avisos = combinar(cargar_configuracion(str(ruta)), leer_ajustes())
+
+    assert efectiva["salida"]["formato"] == "srt"
+    assert efectiva["transcripcion"]["beam_size"] == 5
+    assert avisos == []
+    assert ruta.read_text(encoding="utf-8") == contenido
+    assert ruta.stat().st_mtime_ns == mtime
+
+
+def test_ajustes_invalidos_desconocidos_no_finitos_e_ia_modelo_se_ignoran_con_aviso(tmp_path):
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text('transcripcion:\n  beam_size: 7\n  temperature: 0.5\nsalida:\n  formato: "vtt"\n',
+                    encoding="utf-8")
+    configuracion.RUTA_PREFERENCIAS.write_text(
+        '{"configuracion": {"transcripcion": {"beam_size": "cinco", "temperature": NaN},'
+        ' "audio": {"sample_rate": 16000}, "ia": {"modelo": "x"}, "salida": 3}}', encoding="utf-8")
+    proyecto = cargar_configuracion(str(ruta))
+    ruta_pref = configuracion.RUTA_PREFERENCIAS
+
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+
+    assert efectiva == proyecto
+    assert len(avisos) == 5
+    assert (f"En {ruta_pref}, `transcripcion.beam_size` debe ser un número entero mayor que 0 (vale «cinco»); "
+            "se usa el valor de config/settings.yaml.") in avisos
+    assert f"En {ruta_pref}, `audio.sample_rate` no es una clave de la configuración; se ignora." in avisos
+    assert (f"En {ruta_pref}, `ia.modelo` no se guarda en «configuracion» (el modelo elegido va en «modelo_ia»); "
+            "se ignora.") in avisos
+    assert f"En {ruta_pref}, la sección `salida` no es un objeto; se ignora." in avisos
+    assert any("`transcripcion.temperature`" in aviso and "(vale «nan»)" in aviso for aviso in avisos)
+
+
+def test_ajuste_infinito_en_clave_sin_tope_se_ignora(tmp_path):
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    ruta = tmp_path / "settings.yaml"
+    ruta.write_text("transcripcion:\n  compression_ratio_threshold: 2.0\n", encoding="utf-8")
+    configuracion.RUTA_PREFERENCIAS.write_text(
+        '{"configuracion": {"transcripcion": {"compression_ratio_threshold": Infinity}}}', encoding="utf-8")
+    proyecto = cargar_configuracion(str(ruta))
+
+    efectiva, avisos = combinar(proyecto, leer_ajustes())
+
+    assert efectiva["transcripcion"]["compression_ratio_threshold"] == 2.0
+    assert avisos == [
+        f"En {configuracion.RUTA_PREFERENCIAS}, `transcripcion.compression_ratio_threshold` debe ser un número "
+        "(vale «inf»); se usa el valor de config/settings.yaml.",
+    ]
+
+
+@pytest.mark.parametrize("contenido", ["{", "[]", '{"configuracion": 3}', "carpeta"])
+def test_preferencias_ilegibles_dan_aviso_y_valores_del_yaml(tmp_path, contenido):
+    from src import configuracion
+    from src.configuracion import cargar_configuracion, combinar, leer_ajustes
+
+    ruta_yaml = tmp_path / "settings.yaml"
+    ruta_yaml.write_text("transcripcion:\n  beam_size: 7\n", encoding="utf-8")
+    proyecto = cargar_configuracion(str(ruta_yaml))
+    ruta = configuracion.RUTA_PREFERENCIAS
+    if contenido == "carpeta":
+        ruta.mkdir()  # leer un directorio da OSError
+    else:
+        ruta.write_text(contenido, encoding="utf-8")
+
+    ajustes = leer_ajustes()
+    efectiva, avisos = combinar(proyecto, ajustes)
+
+    assert efectiva == proyecto
+    assert len(avisos) == 1
+    if contenido == "carpeta":
+        assert avisos[0].startswith(f"Las preferencias {ruta} no se pudieron leer (")
+        assert avisos[0].endswith("); se usan los valores de config/settings.yaml.")
+        assert ajustes.ilegible is False
+    elif contenido == '{"configuracion": 3}':
+        assert avisos[0] == f"En {ruta}, «configuracion» no es un objeto; se ignora."
+        assert ajustes.ilegible is False
+    else:
+        assert avisos[0] == (f"Las preferencias {ruta} no son un JSON válido; se usan los valores de "
+                             "config/settings.yaml. Al guardar se reemplazará el archivo.")
+        assert ajustes.ilegible is True
+
+
+def test_preferencias_con_anidamiento_extremo_no_impiden_abrir(tmp_path, monkeypatch):
+    from src import configuracion
+    ruta = tmp_path / "preferencias.json"
+    ruta.write_text("[" * 200_000, encoding="utf-8")
+    monkeypatch.setattr(configuracion, "RUTA_PREFERENCIAS", ruta)
+    ajustes = configuracion.leer_ajustes()
+    assert ajustes.valores == {} and ajustes.ilegible

@@ -6,6 +6,7 @@ No importa faster_whisper ni customtkinter, para que la CLI pueda validarla sin 
 import copy
 import json
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -132,8 +133,7 @@ def cargar_configuracion(ruta=None) -> dict:
         if valor is None:
             resultado[seccion][clave] = entrada.defecto
         elif not entrada.valida(valor):
-            raise ErrorConfiguracion(f"En la configuración {ruta}, `{seccion}.{clave}` debe ser "
-                                     f"{entrada.esperado} (vale «{valor}»).")
+            raise ErrorConfiguracion(f"En la configuración {ruta}, {_mensaje_invalido(seccion, clave, valor)}.")
     return resultado
 
 
@@ -175,3 +175,67 @@ def guardar_modelo_preferido(modelo: str) -> None:
 def modelo_ia_efectivo(configuracion: dict, preferido: Optional[str]) -> str:
     """El modelo que usa la ventana: el preferido por el usuario si lo hay; si no, `ia.modelo` del YAML."""
     return preferido or configuracion["ia"]["modelo"]
+
+
+@dataclass(frozen=True)
+class AjustesLeidos:
+    valores: dict   # (sección, clave) → valor tal como vino del JSON
+    avisos: list    # textos para Registro
+    ilegible: bool  # True solo si el archivo existe y no es JSON o no es un objeto
+
+
+CLAVE_AJUSTES = "configuracion"
+
+
+def _mensaje_invalido(seccion: str, clave: str, valor) -> str:
+    return f"`{seccion}.{clave}` debe ser {_tabla()[(seccion, clave)].esperado} (vale «{valor}»)"
+
+
+def leer_ajustes() -> AjustesLeidos:
+    try:
+        datos = json.loads(RUTA_PREFERENCIAS.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return AjustesLeidos({}, [], False)
+    except OSError as e:
+        motivo = e.strerror or str(e)
+        return AjustesLeidos({}, [f"Las preferencias {RUTA_PREFERENCIAS} no se pudieron leer ({motivo}); "
+                                  "se usan los valores de config/settings.yaml."], False)
+    except (ValueError, RecursionError):  # JSON inválido, texto que no es UTF-8 o anidamiento extremo
+        return AjustesLeidos({}, [f"Las preferencias {RUTA_PREFERENCIAS} no son un JSON válido; se usan los "
+                                  "valores de config/settings.yaml. Al guardar se reemplazará el archivo."], True)
+    if not isinstance(datos, dict):
+        return AjustesLeidos({}, [f"Las preferencias {RUTA_PREFERENCIAS} no son un JSON válido; se usan los "
+                                  "valores de config/settings.yaml. Al guardar se reemplazará el archivo."], True)
+    grupos = datos.get(CLAVE_AJUSTES, {})
+    if not isinstance(grupos, dict):
+        return AjustesLeidos({}, [f"En {RUTA_PREFERENCIAS}, «configuracion» no es un objeto; se ignora."], False)
+    valores = {}
+    avisos = []
+    for seccion, claves in grupos.items():
+        if not isinstance(claves, dict):
+            avisos.append(f"En {RUTA_PREFERENCIAS}, la sección `{seccion}` no es un objeto; se ignora.")
+            continue
+        for clave, valor in claves.items():
+            valores[(seccion, clave)] = valor
+    return AjustesLeidos(valores, avisos, False)
+
+
+def combinar(proyecto: dict, ajustes: AjustesLeidos) -> tuple[dict, list]:
+    efectiva = copy.deepcopy(proyecto)
+    avisos = list(ajustes.avisos)
+    for (seccion, clave), valor in ajustes.valores.items():
+        if (seccion, clave) == ("ia", "modelo"):
+            avisos.append(f"En {RUTA_PREFERENCIAS}, `ia.modelo` no se guarda en «configuracion» "
+                          "(el modelo elegido va en «modelo_ia»); se ignora.")
+            continue
+        entrada = _tabla().get((seccion, clave))
+        if entrada is None:
+            avisos.append(f"En {RUTA_PREFERENCIAS}, `{seccion}.{clave}` no es una clave de la configuración; "
+                          "se ignora.")
+            continue
+        if (isinstance(valor, float) and not math.isfinite(valor)) or not entrada.valida(valor):
+            avisos.append(f"En {RUTA_PREFERENCIAS}, {_mensaje_invalido(seccion, clave, valor)}; "
+                          "se usa el valor de config/settings.yaml.")
+            continue
+        efectiva[seccion][clave] = valor
+    return efectiva, avisos

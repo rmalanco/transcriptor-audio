@@ -53,6 +53,10 @@ Dependencias entre módulos (quién importa a quién):
 - `configuracion.py:leer_modelo_preferido() -> Optional[str]`, `guardar_modelo_preferido(modelo)` (lanza `OSError` si
   no puede escribir) y `modelo_ia_efectivo(configuracion, preferido) -> str`: el modelo de IA elegido en el selector
   gana a `ia.modelo`.
+- `configuracion.py:leer_ajustes() -> AjustesLeidos`: lee el bloque `configuracion` de `preferencias.json` sin lanzar.
+  `AjustesLeidos(valores, avisos, ilegible)`: `valores` es `(sección, clave) → valor`, `avisos` son los textos para Registro,
+  e `ilegible` es verdadero solo si el archivo existe y no es JSON o no es un objeto. `configuracion.py:combinar(proyecto,
+  ajustes) -> tuple[dict, list]` devuelve una copia del YAML con los valores válidos encima, más los avisos; no toca el YAML.
 - `utils.py:validar_archivo(ruta)`, `utils.py:obtener_info_archivo(ruta) -> InfoArchivo` (sin `ffprobe` o si falla, devuelve el tamaño sin duración ni códec),
   `utils.py:serializar_transcripcion(resultado, formato="txt", incluir_timestamps=True) -> str` (único serializador, lo usan el archivo y la salida estándar) y `utils.py:guardar_transcripcion(resultado, ruta_salida, formato="txt", incluir_timestamps=True)`, que lo escribe en el archivo.
 - `utils.py:formatear_duracion` (marcas de la interfaz), `formatear_tiempo`, `formatear_tiempo_srt`,
@@ -122,7 +126,9 @@ Dependencias entre módulos (quién importa a quién):
 
 ### Interfaz gráfica — `ui.py`, `ui_copilot.py`, `ui_historial.py`
 
-- `ui.py:AppTranscriptor` — ventana principal. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
+- `ui.py:AppTranscriptor` — ventana principal. Usa como `configuracion` la efectiva (YAML + preferencias,
+  `configuracion.py:combinar`) y guarda la del proyecto en `configuracion_proyecto`; los avisos de las preferencias van a
+  Registro. Lo que usa `PanelHistorial`: `cargar_desde_historial(id_historial) -> bool`,
   `historial_eliminado(id_historial)`, el atributo `id_historial` y los métodos privados `_configurar_estilos_markdown`,
   `_insertar_markdown` y `_mostrar_titulo`. `mostrar_vista(vista)` alterna entre las vistas de la barra de navegación.
 - `ui.py:_VistaPreviaIA` — lo que tenían los controles de IA antes de una generación; `_restaurar_controles_ia` lo devuelve al recibir el resultado o al cancelar.
@@ -319,7 +325,8 @@ Dependencias entre módulos (quién importa a quién):
 - `config/settings.yaml`: solo lectura con `yaml.safe_load` (`configuracion.py:cargar_configuracion`); la app no lo
   reescribe. La ruta se resuelve contra `RAIZ_PROYECTO`, no contra el directorio de trabajo.
 - `~/.local/share/transcriptor-audio/preferencias.json`: modelo de IA elegido en el selector
-  (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`.
+  (`configuracion.py:guardar_modelo_preferido` y `leer_modelo_preferido`); gana a `ia.modelo`. Al abrir la ventana se lee
+  también su bloque `configuracion` (`configuracion.py:leer_ajustes`), sin escribirlo; sus valores válidos ganan al YAML.
 - Junto al audio: `<archivo>.<ext>_transcripcion.<formato>` (la ruta sale de `flujo_transcripcion.py:ruta_transcripcion` y la
   escribe `persistencia.py:persistir_transcripcion`), y `<archivo>.<ext>_resumen.md` y `<archivo>.<ext>_minuta.md` (la ruta sale de
   `flujo_documentos.py:ruta_documento` y la escribe `persistencia.py:persistir_documento`). Regenerar la misma grabación los sobrescribe
